@@ -1,0 +1,11 @@
+.env
+.admin-access.txt
+__pycache__/
+*.py[cod]
+.pytest_cache/
+work/
+frontend/node_modules/
+frontend/.next/
+frontend/*.tsbuildinfo
+outputs/
+.DS_Store

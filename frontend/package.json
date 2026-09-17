@@ -1,0 +1,22 @@
+{
+  "name": "telegram-outreach-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --hostname 0.0.0.0",
+    "build": "next build",
+    "start": "next start --hostname 0.0.0.0",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "next": "15.3.8",
+    "react": "19.1.5",
+    "react-dom": "19.1.5"
+  },
+  "devDependencies": {
+    "@types/node": "22.15.18",
+    "@types/react": "19.1.4",
+    "@types/react-dom": "19.1.5",
+    "typescript": "5.8.3"
+  }
+}
