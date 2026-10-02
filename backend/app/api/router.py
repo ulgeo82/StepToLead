@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends
 from app.core.access import require_admin
 from app.api.routes import access, growth
 
-from app.api.routes import campaigns, leads, proxies, telegram_accounts, telegram_parser, marketing, portal, result, analytics, ads, team, settings, crm, website, tilda
+from app.api.routes import campaigns, leads, proxies, telegram_accounts, telegram_parser, marketing, portal, result, analytics, ads, team, settings, crm, website, tilda, telegram_bot
 from app.api.routes import automation
 
 internal_router = APIRouter(dependencies=[Depends(require_admin)])
@@ -17,6 +17,7 @@ api_router = APIRouter()
 api_router.include_router(access.router)
 api_router.include_router(growth.public_router)
 api_router.include_router(growth.admin_router)
+api_router.include_router(telegram_bot.router)
 api_router.include_router(portal.auth_router)
 api_router.include_router(portal.inbound_router)
 api_router.include_router(portal.admin_router)

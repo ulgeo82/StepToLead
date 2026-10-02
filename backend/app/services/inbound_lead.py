@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.crm import CrmActivity, CrmInbound
 from app.models.marketing import LeadInboundReceipt, LeadInboundSource, ProjectSource
 from app.models.website import WebsiteSession
+from app.services.notifications import flush_telegram, notify
 from app.services.project_scope import default_project
 
 
@@ -66,6 +67,17 @@ async def create_inbound(db: AsyncSession, source: LeadInboundSource, payload,
     await db.flush()
     db.add(CrmActivity(workspace_id=source.workspace_id, project_id=project_id, inbound_id=inbound.id,
                        actor_name="Система", event_type="INBOUND_CREATED", payload={"source": source.name}))
+    extra = getattr(payload, "model_extra", None) or {}
+    method, raw_contact = extra.get("contact_method"), extra.get("contact")
+    await notify(db, project_id, "new_lead", "Новая заявка", f"{payload.full_name} · {source.name}", details=[
+        f"Способ связи: {method}" if method else None,
+        f"Контакт: {raw_contact}" if raw_contact else None,
+        f"Телефон: {phone}" if phone and not raw_contact else None,
+        f"Email: {email}" if email and not raw_contact else None,
+        f"Сайт: {extra.get('website')}" if extra.get("website") else None,
+        f"Комментарий: {payload.notes[:500]}" if payload.notes else None,
+    ])
     if commit:
         await db.commit()
+        flush_telegram(db)
     return {"ok": True, "inbound_id": inbound.id, "duplicate": False, "status": "NEW"}

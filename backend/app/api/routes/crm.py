@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.access import check_origin, require_portal_user
 from app.core.permissions import effective_permissions, require_permission
 from app.db import get_db
+from app.services.notifications import flush_telegram, notify
 from app.models.crm import (CrmActivity, CrmContact, CrmCustomFieldDefinition, CrmDeal, CrmInbound,
                             CrmPipeline, CrmStage, CrmStageHistory, CrmTask, CrmTaskType)
 from app.models.marketing import (AdCampaignMetricDaily, AdConnection, AdHypothesisCampaign, ClientLead, ClientLeadAttribution, ClientLeadEvent, ClientSale,
@@ -614,7 +615,11 @@ async def create_deal(payload: DealCreate, request: Request, db: AsyncSession = 
                                    created_at=payload.created_at)
     if payload.comment:
         activity(db, deal, user, "COMMENT_ADDED", {"text": payload.comment})
+    await notify(db, project.id, "new_lead", "Новый лид", f"{contact.name} · создан вручную ({user.display_name})",
+                 assignee_id=deal.responsible_user_id, actor_id=user.id,
+                 details=[*(contact.phones or [])[:1], *(contact.emails or [])[:1]])
     await db.commit(); await db.refresh(deal)
+    flush_telegram(db)
     return {"id": deal.id, "lead_id": deal.lead_id, "potential_duplicates": duplicates}
 
 
@@ -789,7 +794,10 @@ async def create_deal_sale(deal_id: int, payload: SaleCreate, request: Request, 
     activity(db, deal, user, "SALE_CREATED", {"amount": payload.amount})
     db.add(ClientLeadEvent(workspace_id=lead.workspace_id, lead_id=lead.id, actor_id=user.id,
                            event_type="SALE_CREATED", description=f"Продажа {payload.amount} ₽"))
+    await notify(db, deal.project_id, "new_sale", "Новая продажа", f"{deal.name} · {payload.amount:,.2f} ₽",
+                 assignee_id=deal.responsible_user_id, actor_id=user.id)
     await db.commit(); await db.refresh(sale)
+    flush_telegram(db)
     return {"id": sale.id, "deal_id": deal.id}
 
 

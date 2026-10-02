@@ -22,6 +22,7 @@ from app.api.routes.settings import in_app_rule_enabled, reasons as project_reas
 from app.models.crm import CrmInbound, CrmActivity, CrmContact, CrmDeal, CrmStage, CrmStageHistory
 from app.models.website import WebsiteSession
 from app.services.inbound_lead import create_inbound
+from app.services.notifications import flush_telegram, notify
 
 auth_router = APIRouter(prefix="/portal/auth", tags=["portal-access"])
 admin_router = APIRouter(prefix="/portal/admin", tags=["portal-admin"], dependencies=[Depends(require_admin)])
@@ -515,18 +516,11 @@ async def create_crm_lead(payload: LeadCreate, request: Request, db: AsyncSessio
     if payload.notes:
         db.add(ClientLeadEvent(workspace_id=user.workspace_id, lead_id=lead.id, actor_id=user.id,
                                event_type="COMMENT_ADDED", description=payload.notes))
-    recipients: list[PortalUser] = []
-    if assignee:
-        recipients = [assignee]
-    else:
-        recipients = list((await db.scalars(select(PortalUser).where(PortalUser.workspace_id == user.workspace_id,
-                                                                      PortalUser.active.is_(True),
-                                                                      PortalUser.role.in_(["client_owner", "sales_head"])))).all())
-    if await in_app_rule_enabled(db, project.id, "new_lead"):
-        for recipient in recipients:
-            db.add(PortalNotification(workspace_id=user.workspace_id, user_id=recipient.id, level="success",
-                                      title="Новый лид", body=f"{payload.full_name} · {payload.source}"))
+    await notify(db, project.id, "new_lead", "Новый лид", f"{payload.full_name} · {payload.source}",
+                 assignee_id=assignee.id if assignee else None, actor_id=user.id,
+                 details=[payload.phone, payload.email, payload.telegram])
     await db.commit(); await db.refresh(lead)
+    flush_telegram(db)
     return lead_payload(lead, assignee.display_name if assignee else None)
 
 
@@ -660,13 +654,10 @@ async def add_crm_sale(lead_id: int, payload: SaleCreate, request: Request,
     db.add(ClientLeadEvent(workspace_id=user.workspace_id, lead_id=lead.id, actor_id=user.id,
                            event_type="SALE_CREATED", description=f"Подтверждена продажа на {payload.amount:,.2f} ₽."
                            + (f" {payload.comment.strip()}" if payload.comment and payload.comment.strip() else "")))
-    if await in_app_rule_enabled(db, lead.project_id, "new_sale"):
-        recipients = (await db.scalars(select(PortalUser).where(PortalUser.workspace_id == user.workspace_id,
-            PortalUser.active.is_(True), PortalUser.role.in_(["client_owner", "sales_head"])))).all()
-        for recipient in recipients:
-            db.add(PortalNotification(workspace_id=user.workspace_id, user_id=recipient.id, level="success",
-                                      title="Новая продажа", body=f"{lead.full_name} · {payload.amount:,.2f} ₽"))
+    await notify(db, lead.project_id, "new_sale", "Новая продажа", f"{lead.full_name} · {payload.amount:,.2f} ₽",
+                 assignee_id=lead.assigned_to_id, actor_id=user.id)
     await db.commit(); await db.refresh(sale)
+    flush_telegram(db)
     return {"id": sale.id, "lead_id": lead.id, "amount": float(sale.amount) if sale.amount is not None else None,
             "occurred_at": sale.occurred_at, "comment": sale.comment}
 

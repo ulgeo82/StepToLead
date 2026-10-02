@@ -16,10 +16,19 @@ type Reason = { id: number; label: string; is_system: boolean; status: string; p
 type Source = { id: string; name: string; category: string | null; kind: string; method: string;
   data_mode: string; status: string; connection_id: number | null };
 type Rule = { key: string; label: string; active: boolean; enabled: boolean; threshold: number | null;
-  unit?: string; in_app: boolean; email: boolean; telegram: boolean };
+  unit?: string; in_app: boolean; email: boolean; telegram: boolean; recipients?: boolean;
+  recipient_user_ids: number[] | null; notify_assignee: boolean };
+type Member = { id: number; display_name: string; role: string; telegram_linked: boolean };
+type RuleValue = { enabled: boolean; threshold: number | null; in_app: boolean; telegram: boolean;
+  recipient_user_ids: number[] | null; notify_assignee: boolean };
+type TelegramStatus = { configured: boolean; linked: boolean; telegram_username: string | null; bot_username: string | null };
+const roleNames: Record<string, string> = { client_owner: "Собственник", sales_head: "Руководитель продаж",
+  sales_manager: "Менеджер продаж", client_marketer: "Маркетолог", viewer: "Наблюдатель" };
+const defaultRoles = ["client_owner", "sales_head"];
 type Settings = { company: Company; project: Project; economics: { name: string; updated_at: string;
   average_check: number | null; margin: number | null; allowable_cac: number | null } | null;
-  reasons: Reason[]; sources: Source[]; notifications: Rule[]; permissions: string[] };
+  reasons: Reason[]; sources: Source[]; notifications: Rule[]; permissions: string[];
+  members: Member[]; telegram_bot_configured: boolean };
 type Tab = "company" | "project" | "funnel" | "sources" | "notifications";
 const tabs: { key: Tab; label: string; icon: string }[] = [
   { key: "company", label: "Компания", icon: "▣" }, { key: "project", label: "Проект", icon: "◇" },
@@ -121,7 +130,7 @@ export default function SettingsPage() {
         {tab === "project" && <div className="settingsTwoColumns"><ProjectCard project={project} setProject={setProject} dirty={dirtyProject} saving={saving} canSettings={canSettings} onSave={() => save("/project", project, "Проект сохранён.")}/><EconomicsCard data={data.economics} projectId={projectId}/></div>}
         {tab === "funnel" && <div className="settingsTwoColumns"><section className="resultPanel settingsCard"><h2>Воронка продаж</h2><p>Основные этапы влияют на аналитику и не удаляются.</p><div className="settingsStage"><strong>01</strong><span>Лид</span><small>Системный</small></div><div className="settingsStage"><strong>02</strong><span>Квалифицирован</span><small>Системный</small></div><label className="settingsStage"><strong>03</strong><span>Встреча</span><input type="checkbox" checked={project.meeting_enabled} disabled={!canSettings || !!saving} onChange={event => save("/funnel", { meeting_enabled: event.target.checked }, "Настройка встречи сохранена.")}/><small>Опционально</small></label><div className="settingsStage"><strong>04</strong><span>Продажа</span><small>Системный</small></div><p className="settingsHint">Встреча учитывается только когда менеджер отмечает её в карточке лида. Без событий в аналитике будет «—».</p></section><section className="resultPanel settingsCard"><div className="settingsCardHead"><div><h2>Причины потери</h2><p>Архивирование не удаляет историю лидов.</p></div>{canSettings && <button className="settingsOutline" onClick={() => setReasonModal(true)}>＋ Причина</button>}</div><div className="settingsReasonList">{data.reasons.map((reason,index) => <div key={reason.id} className={reason.status === "archived" ? "archived" : ""}><span>{reason.label}</span><small>{reason.status === "archived" ? "Архив" : reason.is_system ? "Системная" : "Пользовательская"}</small>{canSettings && <span className="settingsRowActions"><button onClick={() => moveReason(reason,-1)} disabled={index === 0 || !!saving} title="Выше">↑</button><button onClick={() => moveReason(reason,1)} disabled={index === data.reasons.length-1 || !!saving} title="Ниже">↓</button>{!reason.is_system && <button onClick={() => reasonAction(reason,"rename")} title="Переименовать">✎</button>}<button onClick={() => reasonAction(reason,reason.status === "archived" ? "restore" : "archive")} title={reason.status === "archived" ? "Восстановить" : "Архивировать"}>{reason.status === "archived" ? "↺" : "⊘"}</button></span>}</div>)}</div></section></div>}
         {tab === "sources" && <section className="resultPanel settingsCard"><div className="settingsCardHead"><div><h2>Источники</h2><p>Универсальные источники проекта. Рекламные кабинеты подключаются в разделе «Реклама».</p></div>{canSources && <button className="settingsPrimary" onClick={() => setSourceModal(true)}>＋ Источник</button>}</div><div className="settingsTableScroll"><table><thead><tr><th>Название</th><th>Категория</th><th>Тип</th><th>Способ данных</th><th>Статус</th><th>Действия</th></tr></thead><tbody>{sourceList.map(source => <tr key={source.id}><td><strong>{source.name}</strong></td><td>{source.category || "—"}</td><td>{sourceKind[source.kind] || source.kind}</td><td>{source.method}</td><td><span className={`settingsBadge ${source.status}`}>{source.status === "active" ? "Активен" : source.status === "archived" ? "Архив" : "Ошибка"}</span></td><td>{source.connection_id ? <Link href={`/ads?project_id=${projectId}`}>Управлять в рекламе →</Link> : canSources ? <button className="settingsTextButton" onClick={() => save(`/sources/${source.id.split(":")[1]}`, { status: source.status === "archived" ? "active" : "archived" }, source.status === "archived" ? "Источник восстановлен." : "Источник архивирован; история сохранена.")}>{source.status === "archived" ? "Восстановить" : "Архивировать"}</button> : "—"}</td></tr>)}</tbody></table>{!sourceList.length && <p className="resultTableEmpty">Источники проекта ещё не добавлены.</p>}</div></section>}
-        {tab === "notifications" && <section className="resultPanel settingsCard"><h2>Уведомления</h2><p>Событие → правило → канал доставки. Сейчас реально работает только доставка внутри кабинета для новых лидов и продаж.</p><div className="settingsRules">{data.notifications.map(rule => <RuleRow key={rule.key} rule={rule} canSettings={canSettings} saving={saving} onSave={value => save(`/notifications/${rule.key}`, value, "Правило сохранено.")}/>)}</div><div className="settingsChannels"><span><i className="on"/> Внутри StepToLead</span><span><i/> Email — не подключён</span><span><i/> Telegram — скоро</span></div></section>}
+        {tab === "notifications" && <><TelegramCard configured={data.telegram_bot_configured} onChanged={() => setRevision(value => value + 1)}/><section className="resultPanel settingsCard"><h2>Уведомления</h2><p>Событие → кому → канал доставки. Для новых лидов и продаж можно выбрать участников проекта; доставка — в кабинет StepToLead и в Telegram.</p><div className="settingsRules">{data.notifications.map(rule => <RuleRow key={rule.key} rule={rule} members={data.members} botConfigured={data.telegram_bot_configured} canSettings={canSettings} saving={saving} onSave={value => save(`/notifications/${rule.key}`, value, "Правило сохранено.")}/>)}</div><div className="settingsChannels"><span><i className="on"/> Внутри StepToLead</span><span><i className={data.telegram_bot_configured ? "on" : ""}/> Telegram — {data.telegram_bot_configured ? "бот подключён" : "бот не настроен на сервере"}</span><span><i/> Email — не подключён</span></div></section></>}
       </div>}
       {reasonModal && <div className="resultModalBackdrop" onMouseDown={event => { if (event.target === event.currentTarget) setReasonModal(false); }}><form className="resultModal" onSubmit={submitReason}><header><h2>Добавить причину потери</h2><button type="button" onClick={() => setReasonModal(false)}>×</button></header><label>Название<input name="label" minLength={2} maxLength={160} required/></label><button className="resultPrimary" disabled={!!saving}>Сохранить</button></form></div>}
       {sourceModal && <div className="resultModalBackdrop" onMouseDown={event => { if (event.target === event.currentTarget) setSourceModal(false); }}><form className="resultModal" onSubmit={submitSource}><header><h2>Добавить источник</h2><button type="button" onClick={() => setSourceModal(false)}>×</button></header><p>Только описание источника. Для API/BOT понадобится отдельный коннектор; настройки не создают работающую интеграцию.</p><label>Название<input name="name" minLength={2} maxLength={180} required/></label><label>Категория<input name="category" maxLength={80} placeholder="Например, органика или партнёры"/></label><label>Тип<select name="kind" defaultValue="MANUAL"><option value="MANUAL">Ручной</option><option value="CUSTOM">Кастомный</option><option value="INTERNAL">Внутренний</option></select></label><label>Способ данных<select name="method" defaultValue="MANUAL"><option value="MANUAL">Ручной ввод</option><option value="FILE">Файл</option><option value="WEBHOOK">Webhook (потребуется коннектор)</option><option value="API">API (потребуется коннектор)</option><option value="BOT">Bot (потребуется коннектор)</option><option value="INTERNAL">Внутренний</option></select></label><button className="resultPrimary" disabled={!!saving}>Добавить</button></form></div>}
@@ -137,12 +146,58 @@ function EconomicsCard({ data, projectId }: { data: Settings["economics"]; proje
   return <section className="resultPanel settingsCard"><h2>Экономика проекта</h2><p>Одна сохранённая модель для выбранного проекта.</p>{data ? <div className="settingsEconomics"><strong>{data.name}</strong><small>Обновлена {dateTime(data.updated_at)}</small><div><span>Средний чек<b>{money(data.average_check)}</b></span><span>Маржинальность<b>{data.margin == null ? "—" : `${data.margin}%`}</b></span><span>Допустимый CAC<b>{money(data.allowable_cac)}</b></span></div></div> : <p className="settingsEmpty">Активной экономической модели нет.</p>}<Link className="settingsOutline" href={projectId ? `/result?project_id=${projectId}` : "/result"}>Заполнить или изменить в «Результате» →</Link></section>;
 }
 
-function RuleRow({ rule, canSettings, saving, onSave }: { rule: Rule; canSettings: boolean; saving: string;
-  onSave: (value: { enabled: boolean; threshold: number | null; in_app: boolean }) => void }) {
-  const [enabled, setEnabled] = useState(rule.enabled);
+function RuleRow({ rule, members, botConfigured, canSettings, saving, onSave }: { rule: Rule; members: Member[];
+  botConfigured: boolean; canSettings: boolean; saving: string; onSave: (value: RuleValue) => void }) {
+  const initial = (): RuleValue => ({ enabled: rule.enabled, threshold: rule.threshold, in_app: rule.in_app, telegram: rule.telegram,
+    recipient_user_ids: rule.recipient_user_ids, notify_assignee: rule.notify_assignee });
+  const [value, setValue] = useState<RuleValue>(initial);
   const [threshold, setThreshold] = useState(rule.threshold == null ? "" : String(rule.threshold));
-  const [inApp, setInApp] = useState(rule.in_app);
-  useEffect(() => { setEnabled(rule.enabled); setThreshold(rule.threshold == null ? "" : String(rule.threshold)); setInApp(rule.in_app); }, [rule]);
-  const dirty = enabled !== rule.enabled || threshold !== (rule.threshold == null ? "" : String(rule.threshold)) || inApp !== rule.in_app;
-  return <div className="settingsRule"><div><strong>{rule.label}</strong><small>{rule.active ? "Доставка в кабинете работает" : "Обработчик события ещё не реализован; правило можно подготовить"}</small></div><label><input type="checkbox" checked={enabled} disabled={!canSettings} onChange={event => setEnabled(event.target.checked)}/> Включено</label>{rule.unit && <label>Порог <input type="number" min="0" step="0.1" value={threshold} disabled={!canSettings} onChange={event => setThreshold(event.target.value)}/>{rule.unit}</label>}<label><input type="checkbox" checked={inApp} disabled={!canSettings} onChange={event => setInApp(event.target.checked)}/> В кабинете</label>{canSettings && <button disabled={!dirty || !!saving} onClick={() => onSave({ enabled, threshold: threshold === "" ? null : Number(threshold), in_app: inApp })}>Сохранить</button>}</div>;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { setValue(initial()); setThreshold(rule.threshold == null ? "" : String(rule.threshold)); }, [rule]);
+  const current: RuleValue = { ...value, threshold: threshold === "" ? null : Number(threshold) };
+  const dirty = JSON.stringify(current) !== JSON.stringify(initial());
+  const custom = value.recipient_user_ids !== null;
+  const selected = new Set(value.recipient_user_ids ?? members.filter(m => defaultRoles.includes(m.role)).map(m => m.id));
+  const set = (patch: Partial<RuleValue>) => setValue(old => ({ ...old, ...patch }));
+  function toggleMember(id: number) { const next = new Set(selected); if (next.has(id)) next.delete(id); else next.add(id);
+    set({ recipient_user_ids: Array.from(next).sort((a, b) => a - b) }); }
+  const withoutTelegram = value.telegram ? members.filter(m => selected.has(m.id) && !m.telegram_linked) : [];
+  return <div className="settingsRuleBlock"><div className="settingsRule"><div><strong>{rule.label}</strong><small>{rule.active ? "Событие обрабатывается" : "Обработчик события ещё не реализован; правило можно подготовить"}</small></div>
+    <label><input type="checkbox" checked={value.enabled} disabled={!canSettings} onChange={e => set({ enabled: e.target.checked })}/> Включено</label>
+    {rule.unit && <label>Порог <input type="number" min="0" step="0.1" value={threshold} disabled={!canSettings} onChange={e => setThreshold(e.target.value)}/>{rule.unit}</label>}
+    <label><input type="checkbox" checked={value.in_app} disabled={!canSettings} onChange={e => set({ in_app: e.target.checked })}/> В кабинете</label>
+    {rule.recipients && <label title={botConfigured ? "" : "Задайте TELEGRAM_BOT_TOKEN на сервере"}><input type="checkbox" checked={value.telegram} disabled={!canSettings || (!botConfigured && !value.telegram)} onChange={e => set({ telegram: e.target.checked })}/> Telegram</label>}
+    {canSettings && <button disabled={!dirty || !!saving} onClick={() => onSave(current)}>Сохранить</button>}</div>
+    {rule.recipients && value.enabled && <div className="settingsRecipients">
+      <div className="settingsRecipientMode"><span>Кому:</span>
+        <label><input type="radio" checked={!custom} disabled={!canSettings} onChange={() => set({ recipient_user_ids: null })}/> По умолчанию — ответственному, иначе собственнику и руководителям продаж</label>
+        <label><input type="radio" checked={custom} disabled={!canSettings} onChange={() => set({ recipient_user_ids: Array.from(selected).sort((a, b) => a - b) })}/> Выбранным участникам проекта</label></div>
+      {custom && <><div className="settingsMemberList">{members.map(member => <label key={member.id} className={selected.has(member.id) ? "on" : ""}><input type="checkbox" checked={selected.has(member.id)} disabled={!canSettings} onChange={() => toggleMember(member.id)}/><span>{member.display_name}<small>{roleNames[member.role] || member.role}{member.telegram_linked ? " · Telegram ✓" : ""}</small></span></label>)}{!members.length && <small>В проекте пока нет участников.</small>}</div>
+        <label className="settingsAssignee"><input type="checkbox" checked={value.notify_assignee} disabled={!canSettings} onChange={e => set({ notify_assignee: e.target.checked })}/> Дополнительно уведомлять ответственного за лид</label></>}
+      {custom && !selected.size && !value.notify_assignee && <p className="settingsWarn">Никто не получит уведомление — выберите хотя бы одного участника.</p>}
+      {withoutTelegram.length > 0 && <p className="settingsWarn">Не подключили Telegram: {withoutTelegram.map(m => m.display_name).join(", ")}. Они получат уведомление только в кабинете — пусть нажмут «Подключить Telegram» у себя в настройках.</p>}
+    </div>}</div>;
+}
+
+function TelegramCard({ configured, onChanged }: { configured: boolean; onChanged: () => void }) {
+  const [status, setStatus] = useState<TelegramStatus | null>(null);
+  const [busy, setBusy] = useState("");
+  const [waiting, setWaiting] = useState(false);
+  const [message, setMessage] = useState("");
+  const call = async (path: string, method: string) => api<TelegramStatus>(`/portal/telegram${path}`, { method });
+  useEffect(() => { api<TelegramStatus>("/portal/telegram").then(setStatus).catch(() => setStatus(null)); }, [configured]);
+  async function run(name: string, action: () => Promise<void>) { setBusy(name); setMessage("");
+    try { await action(); } catch (e) { setMessage((e as Error).message); } finally { setBusy(""); } }
+  const link = () => run("link", async () => { const result = await api<{ url: string }>("/portal/telegram/link", { method: "POST" });
+    window.open(result.url, "_blank", "noopener,noreferrer"); setWaiting(true);
+    setMessage("В Telegram нажмите «Запустить» (Start), затем вернитесь сюда и нажмите «Проверить»."); });
+  const check = () => run("check", async () => { const next = await call("/check", "POST"); setStatus(next);
+    if (next.linked) { setWaiting(false); setMessage("Telegram подключён."); onChanged(); }
+    else setMessage("Бот пока не получил команду Start. Откройте ссылку ещё раз и нажмите «Запустить»."); });
+  const test = () => run("test", async () => { await api("/portal/telegram/test", { method: "POST" }); setMessage("Тестовое сообщение отправлено."); });
+  const unlink = () => run("unlink", async () => { setStatus(await call("", "DELETE")); setMessage("Telegram отключён."); onChanged(); });
+  return <section className="resultPanel settingsCard settingsTelegram"><div className="settingsCardHead"><div><h2>Мой Telegram</h2>
+    <p>{!configured ? "Бот для уведомлений ещё не настроен на сервере (переменная TELEGRAM_BOT_TOKEN)." : status?.linked ? `Подключён${status.telegram_username ? ` @${status.telegram_username}` : ""}. Сюда приходят уведомления, если они включены для вас в правилах ниже.` : `Подключите Telegram, чтобы получать уведомления через бота${status?.bot_username ? ` @${status.bot_username}` : ""}.`}</p></div>
+    {configured && <div className="settingsTelegramActions">{status?.linked ? <><button className="settingsOutline" disabled={!!busy} onClick={test}>{busy === "test" ? "Отправляем…" : "Отправить тест"}</button><button className="settingsOutline" disabled={!!busy} onClick={unlink}>Отключить</button></> : <><button className="settingsPrimary" disabled={!!busy} onClick={link}>{busy === "link" ? "Готовим ссылку…" : "Подключить Telegram"}</button>{waiting && <button className="settingsOutline" disabled={!!busy} onClick={check}>{busy === "check" ? "Проверяем…" : "Проверить"}</button>}</>}</div>}</div>
+    {message && <p className="settingsHint" role="status">{message}</p>}</section>;
 }

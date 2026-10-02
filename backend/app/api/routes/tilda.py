@@ -24,6 +24,7 @@ from app.models.crm import CrmInbound
 from app.models.tilda import TildaConnection, TildaReceipt
 from app.models.website import WebsiteSite
 from app.services.inbound_lead import create_inbound
+from app.services.notifications import discard_telegram, flush_telegram
 
 router = APIRouter(prefix="/integrations/tilda", tags=["tilda"])
 SECRET_HEADER = "X-StepToLead-Tilda-Secret"
@@ -266,8 +267,10 @@ async def _receive_tilda(public_id: str, request: Request, db: AsyncSession):
         db.add(TildaReceipt(tilda_connection_id=row.id, tranid=tranid, inbound_id=inbound_id))
         row.last_received_at = datetime.now(timezone.utc)
         await db.commit()
+        flush_telegram(db)
     except IntegrityError:
         await db.rollback()
+        discard_telegram(db)
         existing = await _receipt_inbound(db, connection_id, tranid, organization_id, project_id)
         if existing:
             return _response(existing, True)

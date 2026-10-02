@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     frontend_origin: str = "http://localhost:3000"
     telegram_api_id: int = 0
     telegram_api_hash: str = ""
+    telegram_bot_token: str = ""  # Bot from @BotFather for lead/sale notifications.
     encryption_secret: str = "change-this-before-production"
     account_status_interval: int = 20
     session_cookie_secure: bool = False  # В production HTTPS обязательно True.

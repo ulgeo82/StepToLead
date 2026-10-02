@@ -15,19 +15,12 @@ from app.db import get_db
 from app.models.access import GrowthCalculation
 from app.models.marketing import (AdConnection, ClientWorkspace, PortalProjectAccess, PortalUser, Project,
                                   ProjectEconomics, ProjectLostReason, ProjectNotificationRule, ProjectSource)
+from app.services.notifications import EVENTS, project_members, rule_state, telegram_configured
 
 router = APIRouter(prefix="/settings", tags=["client-settings"])
 DEFAULT_REASONS = ["Не отвечает", "Не подходит", "Не подходит по бюджету", "Передумал",
                    "Выбрал конкурента", "Нецелевой", "Другое"]
-EVENTS = {
-    "new_lead": {"label": "Новый лид", "active": True, "default": True},
-    "new_sale": {"label": "Новая продажа", "active": True, "default": True},
-    "lead_idle": {"label": "Лид без обработки", "active": False, "unit": "часов"},
-    "cac_limit": {"label": "CAC превысил допустимый", "active": False},
-    "cpl_growth": {"label": "CPL вырос", "active": False, "unit": "%"},
-    "ad_budget": {"label": "Рекламный бюджет заканчивается", "active": False, "unit": "%"},
-    "ad_sync_error": {"label": "Ошибка синхронизации рекламы", "active": False},
-}
+# Event catalogue lives with the delivery logic.
 
 
 async def scoped(db, actor, project_id):
@@ -157,6 +150,9 @@ class RulePatch(BaseModel):
     enabled: bool
     threshold: float | None = Field(default=None, ge=0, le=100000)
     in_app: bool = True
+    telegram: bool = False
+    recipient_user_ids: list[int] | None = Field(default=None, max_length=500)
+    notify_assignee: bool = True
 
 
 @router.get("")
@@ -184,10 +180,12 @@ async def get_settings(project_id: int, db: AsyncSession = Depends(get_db),
                                 "created_at": ad.created_at, "connection_id": ad.id})
     rule_rows = (await db.scalars(select(ProjectNotificationRule).where(ProjectNotificationRule.project_id == project.id))).all()
     rule_map = {row.event_key: row for row in rule_rows}
-    notifications = [{"key": key, **config, "enabled": row.enabled if row else config.get("default", False),
+    notifications = [{"key": key, **config, **rule_state(key, row),
                       "threshold": float(row.threshold) if row and row.threshold is not None else None,
-                      "in_app": row.in_app if row else True, "email": False, "telegram": False}
+                      "email": False}
                      for key, config in EVENTS.items() for row in [rule_map.get(key)]]
+    members = [{"id": member.id, "display_name": member.display_name, "role": member.role,
+                "telegram_linked": bool(member.telegram_chat_id)} for member in await project_members(db, project)]
     return {"company": {"id": company.id, "name": company.name, "legal_name": company.legal_name,
                          "contact_email": company.contact_email, "contact_phone": company.contact_phone,
                          "website": company.website, "timezone": company.timezone, "currency": company.currency,
@@ -201,7 +199,8 @@ async def get_settings(project_id: int, db: AsyncSession = Depends(get_db),
                            "allowable_cac": float(economy.allowable_cac) if economy.allowable_cac is not None else None}
                           if calculation else None),
             "reasons": [reason_payload(row) for row in reason_rows], "sources": source_list,
-            "notifications": notifications,
+            "notifications": notifications, "members": members,
+            "telegram_bot_configured": telegram_configured(),
             "permissions": sorted(effective_permissions(actor))}
 
 
@@ -372,9 +371,19 @@ async def patch_rule(project_id: int, event_key: str, payload: RulePatch, reques
     if row is None:
         row = ProjectNotificationRule(project_id=project.id, event_key=event_key)
         db.add(row)
+    recipients = None
+    if payload.recipient_user_ids is not None:
+        if not EVENTS[event_key].get("recipients"):
+            raise HTTPException(422, "Для этого события получатели не настраиваются")
+        member_ids = {member.id for member in await project_members(db, project)}
+        unknown = set(payload.recipient_user_ids) - member_ids
+        if unknown:
+            raise HTTPException(422, "Получатели должны быть участниками проекта")
+        recipients = sorted(set(payload.recipient_user_ids))
     row.enabled = payload.enabled; row.threshold = payload.threshold; row.in_app = payload.in_app
+    row.telegram = payload.telegram; row.recipient_user_ids = recipients; row.notify_assignee = payload.notify_assignee
     await db.commit()
-    return {"ok": True, "delivery_active": EVENTS[event_key]["active"] and payload.enabled and payload.in_app}
+    return {"ok": True, "delivery_active": EVENTS[event_key]["active"] and payload.enabled and (payload.in_app or payload.telegram)}
 
 
 async def in_app_rule_enabled(db, project_id, event_key):
