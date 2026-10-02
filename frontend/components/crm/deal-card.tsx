@@ -2,6 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { money } from "@/components/reporting";
+import { DealChats } from "./inbox";
 import { CompleteTaskModal, NewTaskModal } from "./task-modals";
 import { contactLinks, CustomField, Deal, day, days, describeActivity, Pipeline, priorityLabels, request,
   Source, stateLabels, Task, Team, typeLabels, when } from "./shared";
@@ -168,6 +169,8 @@ export function DealCard({ dealId, projectId, pipelines, team, sources, fields, 
             return <div key={t.id} className={`crmTaskItem ${overdue ? "overdue" : ""}`}><div><b>{typeLabels[t.type_code] || t.type_code}: {t.title}</b>
               <small>{when(t.due_at)}{t.priority === "HIGH" ? ` · ${priorityLabels.HIGH}` : ""}{t.description ? ` · ${t.description}` : ""}</small></div>
               {can("manage_tasks") && <button onClick={() => setCompleting(t)}>Завершить</button>}</div>; })}</div>
+
+        <DealChats dealId={deal.id} projectId={projectId} canWrite={can("edit_deal")} phone={deal.contact.phones[0] || null}/>
 
         <div className="crmBlock crmTimelineBlock"><h3>История</h3>
           {can("edit_deal") && <form className="crmComposer" onSubmit={submitComposer}><div className="crmComposerTabs">{(Object.keys(composerLabels) as Composer[]).map(k => <button type="button" key={k} className={composer === k ? "active" : ""} onClick={() => setComposer(k)}>{composerLabels[k]}</button>)}</div>

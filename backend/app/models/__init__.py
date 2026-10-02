@@ -11,3 +11,4 @@ from app.models.website import WebsiteSite, WebsiteSession, WebsiteEvent, Websit
 from app.models.tilda import TildaConnection, TildaReceipt
 
 __all__ = ["Campaign", "Lead", "LeadStatus", "Proxy", "TelegramAccount", "CampaignEvent", "ClientWorkspace", "AdConnection", "AdMetricDaily", "AdCampaignMetricDaily", "AdHypothesis", "AdHypothesisCampaign", "PortalUser", "PortalSession", "PortalNotification", "ClientLead", "ClientLeadEvent", "LeadInboundSource", "LeadInboundReceipt", "ClientLeadAttribution", "TelegramParseTask", "TelegramParsedContact", "TelegramParseLog"]
+from app.models.messaging import MessagingChannel, Conversation, Message, ReplyTemplate  # noqa: E402,F401

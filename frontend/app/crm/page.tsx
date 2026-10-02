@@ -7,6 +7,7 @@ import { money, ProjectSidebar } from "@/components/reporting";
 import { Automations } from "@/components/crm/automations";
 import { ContactCard } from "@/components/crm/contact-card";
 import { DealCard } from "@/components/crm/deal-card";
+import { Inbox } from "@/components/crm/inbox";
 import { SalesReport } from "@/components/crm/report";
 import { CompleteTaskModal, NewTaskModal } from "@/components/crm/task-modals";
 import { Board, Contact, CustomField, Deal, days, Inbound, Pipeline, Project, rejectReasons, request, Source,
@@ -15,7 +16,7 @@ import "../result/result.css";
 import "./crm.css";
 import "@/components/crm/crm-pro.css";
 
-type Tab = "deals" | "contacts" | "tasks" | "inbound" | "report" | "automation" | "pipeline";
+type Tab = "deals" | "chats" | "contacts" | "tasks" | "inbound" | "report" | "automation" | "pipeline";
 type Modal = "deal" | "stage" | "field" | "lost" | "pipeline" | "task" | null;
 
 export default function CrmPage() {
@@ -65,6 +66,7 @@ export default function CrmPage() {
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [revision, setRevision] = useState(0);
+  const [unreadChats, setUnreadChats] = useState(0);
   const can = useCallback((name: string) => permissions.includes(name), [permissions]);
   const project = projects.find(p => p.id === projectId);
   const refresh = useCallback(() => setRevision(v => v + 1), []);
@@ -91,6 +93,11 @@ export default function CrmPage() {
         setPipelineId(current => current && p.some(x => x.id === current) ? current : null); })
       .catch(e => setError(e.message));
   }, [projectId, revision]);
+  useEffect(() => { if (!projectId) return;
+    const load = () => api<{ channels: { unread: number }[] }>(`/crm/projects/${projectId}/channels`)
+      .then(v => setUnreadChats(v.channels.reduce((sum, c) => sum + (c.unread || 0), 0))).catch(() => undefined);
+    load(); const timer = setInterval(load, 30000); return () => clearInterval(timer);
+  }, [projectId, tab]);
   useEffect(() => { if (!projectId) return;
     api<{ id: number; label: string }[]>(`/settings/reasons?project_id=${projectId}`).then(setLostReasons).catch(() => setLostReasons([]));
   }, [projectId]);
@@ -248,9 +255,9 @@ export default function CrmPage() {
       {error && <div className="resultError" role="alert">{error} <button onClick={() => setError("")}>×</button></div>}
       {notice && <div className="crmOkBar" role="status">{notice} <button onClick={() => setNotice("")}>×</button></div>}
       {!projectId ? <div className="resultLoading">{error.includes("401") || error.includes("вход") ? <><p>Для работы с CRM войдите в клиентский кабинет.</p><Link href="/portal/login?next=%2Fcrm">Войти →</Link></> : "Нет доступного проекта"}</div> : <>
-      <div className="crmTabs">{([["deals", "▣ Сделки"], ["inbound", "Неразобранное"], ["tasks", "◷ Задачи"], ["contacts", "♙ Контакты"], ["report", "📊 Аналитика продаж"],
+      <div className="crmTabs">{([["deals", "▣ Сделки"], ["chats", "💬 Чаты"], ["inbound", "Неразобранное"], ["tasks", "◷ Задачи"], ["contacts", "♙ Контакты"], ["report", "📊 Аналитика продаж"],
         ...(can("manage_pipeline") ? [["automation", "⚡ Автоматизация"], ["pipeline", "⚙ Воронки и поля"]] : [])] as [Tab, string][]).map(([key, label]) =>
-        <button key={key} className={tab === key ? "active" : ""} onClick={() => setTab(key)}>{label}{key === "inbound" && board?.inbound_count ? <b>{board.inbound_count}</b> : null}</button>)}</div>
+        <button key={key} className={tab === key ? "active" : ""} onClick={() => setTab(key)}>{label}{key === "inbound" && board?.inbound_count ? <b>{board.inbound_count}</b> : null}{key === "chats" && unreadChats ? <b>{unreadChats}</b> : null}</button>)}</div>
 
       {tab === "deals" && <>
         <div className="crmFilters crmFiltersPro">
@@ -323,6 +330,7 @@ export default function CrmPage() {
               : <span className="crmMuted">{inboundStatus === "ACCEPTED" ? "Принято" : "Отклонено"}</span>}</article>; })}
         {!inbound.length && <p className="crmEmpty">{inboundStatus === "NEW" ? "Всё разобрано 👌" : "Обращений с таким статусом нет"}</p>}</section>}
 
+      {tab === "chats" && <Inbox projectId={projectId} team={team} can={can} onOpenDeal={id => setDealId(id)} onOpenInbound={() => setTab("inbound")}/>}
       {tab === "report" && <SalesReport projectId={projectId} pipelines={pipelines} pipelineId={currentPipelineId}/>}
       {tab === "automation" && <Automations projectId={projectId} pipelines={pipelines} pipelineId={currentPipelineId} team={team} sources={sources} canManage={can("manage_pipeline")}/>}
 

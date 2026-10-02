@@ -229,3 +229,70 @@
 .crmFiltersPro .crmView button,.crmHeadActions select,.crmReportFilters select,.crmReportFilters input{font-size:12px}
 .crmHeadActions .crmPrimary,.crmSectionHead .crmPrimary{min-height:36px;padding:0 14px;font-size:12px}
 .crmFiltersPro select,.crmFiltersPro input{font-size:12px}
+
+/* inbox */
+.chatInbox{display:grid;grid-template-columns:360px minmax(0,1fr);height:calc(100vh - 290px);min-height:520px;border:1px solid #e3e9f2;border-radius:14px;background:#fff;overflow:hidden}
+.chatList{display:flex;flex-direction:column;min-height:0;border-right:1px solid #e8eef6;background:#fbfcfe}
+.chatListHead{display:flex;gap:6px;padding:10px}
+.chatListHead input{flex:1;min-width:0;min-height:34px;padding:0 10px;border:1px solid #dce5f2;border-radius:8px;font-size:12px}
+.chatFilters{display:flex;flex-wrap:wrap;gap:4px;padding:0 10px 8px}
+.chatFilters button{padding:4px 9px;border:0;border-radius:12px;background:#eef3fa;color:#50647f;font-size:11px;cursor:pointer}
+.chatFilters button.active{background:#006bfd;color:#fff}
+.chatFilters b{margin-left:5px;padding:0 5px;border-radius:8px;background:#ffeff1;color:#cc3550;font-size:10px}
+.chatFilters button.active b{background:#fff;color:#006bfd}
+.chatItems{flex:1;overflow:auto}
+.chatItem{width:100%;display:grid;grid-template-columns:34px minmax(0,1fr) auto;gap:9px;align-items:start;padding:11px 12px;border:0;border-bottom:1px solid #eef2f8;background:transparent;text-align:left;cursor:pointer}
+.chatItem:hover{background:#f3f8ff}.chatItem.active{background:#e8f1ff}
+.chatItem.unread b{color:#0f2140}
+.chatBadge{width:34px;height:34px;display:grid;place-items:center;border-radius:50%;background:#7a8ca5;color:#fff;font-size:10px;font-weight:800}
+.chatBadge.avito{background:#00a9f4}.chatBadge.telegram{background:#2aabee}.chatBadge.whatsapp{background:#25d366}
+.chatItemBody{display:flex;flex-direction:column;gap:3px;min-width:0}
+.chatItemTop{display:flex;justify-content:space-between;gap:6px}
+.chatItemTop b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#2a3f5c;font-size:12px}
+.chatItemTop time{flex:none;color:#8b9cb3;font-size:10px}
+.chatPreview{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#6c7f99;font-size:11px}
+.chatItemMeta{display:flex;flex-wrap:wrap;gap:4px}
+.chatItemMeta i{padding:1px 6px;border-radius:8px;background:#eef3fa;color:#5d7190;font-size:9px;font-style:normal}
+.chatItemMeta i.new{background:#e8f1ff;color:#006bfd}.chatItemMeta i.wait{background:#fff6e5;color:#9a5d00}.chatItemMeta i.late{background:#ffecef;color:#c8344b;font-weight:700}
+.chatUnread{min-width:20px;height:20px;padding:0 6px;display:grid;place-items:center;border-radius:10px;background:#006bfd;color:#fff;font-size:10px}
+.chatEmptyList{padding:30px 18px;text-align:center;color:#7b8ea8;font-size:12px}
+.chatPane{display:flex;flex-direction:column;min-width:0;min-height:0}
+.chatPaneHead{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid #e8eef6}
+.chatPaneHead h3{margin:0;font-size:15px}.chatPaneHead small{color:#7b8ea8;font-size:11px}
+.chatPaneActions{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end}
+.chatPaneActions select{min-height:34px;padding:0 8px;border:1px solid #dce5f2;border-radius:7px;font-size:12px}
+.chatPlaceholder{margin:auto;max-width:360px;text-align:center;color:#6c7f99;font-size:12px}
+.chatPlaceholder b{color:#14253e;font-size:15px}
+.chatThread{flex:1;display:flex;flex-direction:column;min-height:0}
+.chatThread.compact{max-height:460px}
+.chatMessages{flex:1;overflow:auto;padding:14px 16px;background:#f5f8fc}
+.chatThread.compact .chatMessages{max-height:330px;border-radius:10px}
+.chatDay{margin:8px auto;width:max-content;padding:2px 10px;border-radius:10px;background:#e7edf6;color:#62758f;font-size:10px}
+.chatBubble{max-width:72%;margin:4px 0;padding:8px 11px;border-radius:12px 12px 12px 3px;background:#fff;box-shadow:0 1px 2px #0f2a4d14;color:#14253e}
+.chatBubble.out{margin-left:auto;border-radius:12px 12px 3px 12px;background:#dcebff}
+.chatBubble.failed{background:#ffecef}
+.chatBubble p{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;line-height:1.4}
+.chatBubble time{display:block;margin-top:3px;color:#8193ab;font-size:9px;text-align:right}
+.chatAuthor{display:block;margin-bottom:2px;color:#4f6fa3;font-size:10px;font-weight:600}
+.chatError{display:block;color:#c8344b;font-size:10px}
+.chatComposer{position:relative;padding:10px 12px;border-top:1px solid #e8eef6;background:#fff}
+.chatComposer textarea{width:100%;min-height:64px;max-height:200px;padding:9px 10px;border:1px solid #dce5f2;border-radius:9px;font:inherit;font-size:13px;resize:vertical}
+.chatComposerBar{display:flex;align-items:center;gap:10px;margin-top:6px}
+.chatComposerBar .crmPrimary{margin-left:auto;min-height:34px;padding:0 16px;font-size:12px}
+.chatTemplates{position:absolute;left:12px;right:12px;bottom:calc(100% - 4px);z-index:3;max-height:240px;overflow:auto;padding:6px;border:1px solid #d6e3f5;border-radius:10px;background:#fff;box-shadow:0 10px 30px #12305a26}
+.chatTemplates button{width:100%;display:flex;flex-direction:column;gap:2px;padding:7px 9px;border:0;border-radius:7px;background:none;text-align:left;cursor:pointer}
+.chatTemplates button:hover{background:#f2f7ff}
+.chatTemplates span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#6c7f99;font-size:11px}
+.chatChannels{width:min(620px,100%)}
+.chatChannelList{display:flex;flex-direction:column;gap:6px;margin-bottom:12px}
+.chatChannelList>div{display:flex;align-items:center;gap:10px;padding:10px;border:1px solid #e3eaf5;border-radius:10px}
+.chatChannelList>div.off{opacity:.55}
+.chatChannelList>div>div:nth-child(2){flex:1;display:flex;flex-direction:column;gap:2px;min-width:0}
+.chatChannelList small{color:#7b8ea8;font-size:11px}
+.chatChannelActions{display:flex;gap:4px}
+.chatChannelActions button{padding:5px 9px;border:1px solid #d6e3f5;border-radius:6px;background:#fff;color:#006bfd;font-size:11px;cursor:pointer}
+.chatAddChannel{padding-top:4px;border-top:1px solid #eef2f8}
+.dealChats .crmChips{margin-top:0}
+@media(max-width:900px){.chatInbox{grid-template-columns:1fr;height:auto}.chatList{max-height:360px;border-right:0;border-bottom:1px solid #e8eef6}.chatBubble{max-width:88%}}
+.chatTemplates b{color:#14253e;font-size:12px;font-weight:650}
+.chatBadge.avito{font-size:14px}

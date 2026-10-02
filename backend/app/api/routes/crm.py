@@ -200,6 +200,9 @@ async def duplicate_contacts(db: AsyncSession, project_id: int, phone: str | Non
 
 
 def inbound_telegram(payload: dict):
+    if payload.get("external_source") == "telegram_bot":
+        contact = str(payload.get("contact") or "").strip()
+        return contact[:120] if contact.startswith("@") else None
     if payload.get("external_source") != "tilda":
         return None
     contact = str(payload.get("contact") or "").strip()
@@ -375,7 +378,7 @@ async def create_deal_fact(db: AsyncSession, project: Project, contact: CrmConta
                            created_at: datetime | None = None):
     if not (contact.phones or contact.emails or contact.telegram or
             (inbound and (inbound.raw_payload.get("contact_consent") or (
-                inbound.raw_payload.get("external_source") in {"tilda", "avito"} and inbound.raw_payload.get("contact"))))):
+                inbound.raw_payload.get("external_source") in {"tilda", "avito", "telegram_bot", "whatsapp"} and inbound.raw_payload.get("contact"))))):
         raise HTTPException(422, "Для лида нужен контакт или подтверждённое согласие на связь")
     # A real contact is required before this point. Lead remains the shared analytics fact.
     source = await db.get(ProjectSource, source_id) if source_id else None
@@ -975,6 +978,8 @@ async def accept_inbound(inbound_id: int, payload: InboundAction, request: Reque
                                    inbound=inbound, actor=user)
     inbound.status = "ACCEPTED"; inbound.contact_id = contact.id; inbound.deal_id = deal.id; inbound.processed_at = now()
     activity(db, deal, user, "INBOUND_ACCEPTED", {"inbound_id": inbound.id}, inbound)
+    from app.services.messaging import link_inbound
+    await link_inbound(db, inbound, contact.id, deal)
     await db.commit()
     flush_telegram(db)
     return {"deal_id": deal.id, "contact_id": contact.id, "lead_id": deal.lead_id}
