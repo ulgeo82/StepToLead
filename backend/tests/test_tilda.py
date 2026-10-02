@@ -154,6 +154,19 @@ class TildaTests(unittest.TestCase):
         self.assertEqual(row.raw_payload["contact"], "@ivan_example")
         self.assertFalse(row.raw_payload["contact_consent"])
 
+    def test_contact_method_and_site_from_real_tilda_titles(self):
+        # Field variables of form3645799701 on steptolead.ru are generated from Russian titles.
+        data = {"tranid": "real-titles-1", "formid": "form3645799701", "Name": "Анна",
+                "Ссылка_на_сайт": "https://example.ru", "Как_удобнее_связаться?": "WhatsApp",
+                "Input": "+7 999 000-00-00", "contact": "+7 999 000-00-00", "Комментарий": "Нужна реклама"}
+        response = self.client.post(self.webhook, headers=self.headers, data=data)
+        self.assertEqual(response.status_code, 200, response.text)
+        row = self.inbound(response.json()["inbound_id"])
+        self.assertEqual(row.raw_payload["contact_method"], "WhatsApp")
+        self.assertEqual(row.raw_payload["website"], "https://example.ru")
+        self.assertEqual(row.raw_payload["comment"], "Нужна реклама")
+        self.assertEqual(row.phone, "+79990000000")
+
     def test_reported_delivery_persisted_once_in_project(self):
         data = {"tranid": "8713176482", "formid": "3645799701", "Name": "тест",
                 "contact": "@test9999999", "ContactMethod": "Telegram", "comment": "переписал",

@@ -132,6 +132,17 @@ def _value(fields: dict[str, str], *names: str) -> str | None:
     return next((fields[name] for name in names if fields.get(name)), None)
 
 
+def _value_like(fields: dict[str, str], parts: tuple[str, ...], skip: tuple[str, ...] = ()) -> str | None:
+    """Fallback for Tilda variable names generated from field titles, e.g. "Как_удобнее_связаться?"."""
+    return next((value for key, value in fields.items()
+                 if value and any(part in key for part in parts) and not any(bad in key for bad in skip)), None)
+
+
+CONTACT_METHOD_FIELDS = ("contactmethod", "способсвязи", "какнастроитьконтакт", "какудобнеесвязаться",
+                         "каксвамисвязаться", "удобныйспособсвязи", "messenger", "мессенджер")
+WEBSITE_FIELDS = ("website", "site", "сайт", "ссылканасайт", "сайткомпании", "адрессайта")
+
+
 def _response(inbound: CrmInbound, duplicate: bool) -> dict:
     return {"ok": True, "lead_id": inbound.id, "inbound_id": inbound.id,
             "duplicate": duplicate, "project_id": inbound.project_id}
@@ -214,7 +225,9 @@ async def _receive_tilda(public_id: str, request: Request, db: AsyncSession):
     existing = await _receipt_inbound(db, row.id, tranid, row.organization_id, row.project_id)
     if existing:
         return _response(existing, True)
-    method = _value(fields, "contactmethod", "способсвязи", "какнастроитьконтакт")
+    method = _value(fields, *CONTACT_METHOD_FIELDS) or _value_like(
+        fields, ("связ", "contactmethod", "способ"), skip=("соглас", "consent", "agree", "policy"))
+    method = method[:120] if method else None
     phone = contact if re.fullmatch(r"[+\d\s()\-]{7,64}", contact) else None
     email = contact if re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", contact) else None
     name = _value(fields, "name", "fullname", "имя") or contact
@@ -225,7 +238,7 @@ async def _receive_tilda(public_id: str, request: Request, db: AsyncSession):
         session_key = None
     normalized = {"source": "tilda", "external_source": "tilda", "external_id": tranid,
         "form_id": form_id, "form_name": row.form_name, "name": name, "contact_method": method,
-        "contact": contact, "website": _value(fields, "website", "site", "сайт"),
+        "contact": contact, "website": (_value(fields, *WEBSITE_FIELDS) or _value_like(fields, ("сайт", "website")) or "")[:500] or None,
         "comment": _value(fields, "comments", "comment", "message", "комментарий"),
         "website_session_key": session_key,
         "utm_source": _value(fields, "utmsource"), "utm_medium": _value(fields, "utmmedium"),
