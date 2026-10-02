@@ -110,7 +110,7 @@ class PortalRoleTests(unittest.TestCase):
         self.assertEqual(self.client.get("/api/portal/crm/leads").json(), [])
         self.assertEqual(self.client.get(f"/api/portal/crm/leads/{lead.json()['id']}/events").status_code, 404)
 
-    def test_inbound_webhook_deduplicates_and_assigns_manager(self):
+    def test_inbound_webhook_queues_until_accepted(self):
         self.client.cookies.set("stl_session", "a" * 43)
         manager = self.client.post("/api/portal/admin/users", headers=self.origin, json={
             "workspace_id": 1, "username": "webhook-manager", "display_name": "Webhook Manager", "role": "sales_manager",
@@ -129,7 +129,7 @@ class PortalRoleTests(unittest.TestCase):
         })
         self.assertEqual(first.status_code, 202, first.text)
         self.assertFalse(first.json()["duplicate"])
-        self.assertEqual(first.json()["assigned_to_id"], manager["id"])
+        self.assertEqual(first.json()["status"], "NEW")
         duplicate = self.client.post(f"/api/portal/inbound/{token}", json={
             "external_id": "form-42", "full_name": "Website Lead", "phone": "+7 (900) 000-00-00",
         })
@@ -140,9 +140,17 @@ class PortalRoleTests(unittest.TestCase):
         })
         self.assertEqual(login.status_code, 200, login.text)
         rows = self.client.get("/api/portal/crm/leads")
+        self.assertEqual(len(rows.json()), 0)
+        project_id = self.client.get("/api/result/projects").json()[0]["id"]
+        queued = self.client.get(f"/api/crm/projects/{project_id}/inbound")
+        self.assertEqual(len(queued.json()["items"]), 1)
+        accepted = self.client.post(f"/api/crm/inbound/{first.json()['inbound_id']}/accept", headers=self.origin,
+                                    json={"responsible_user_id": manager["id"]})
+        self.assertEqual(accepted.status_code, 200, accepted.text)
+        rows = self.client.get("/api/portal/crm/leads")
         self.assertEqual(len(rows.json()), 1)
         self.assertEqual(rows.json()[0]["phone"], "+79000000000")
-        attribution = self.client.get(f"/api/portal/crm/leads/{first.json()['lead_id']}/attribution")
+        attribution = self.client.get(f"/api/portal/crm/leads/{accepted.json()['lead_id']}/attribution")
         self.assertEqual(attribution.status_code, 200, attribution.text)
         self.assertEqual(attribution.json()["external_campaign_id"], "campaign-77")
         self.assertEqual(attribution.json()["utm_source"], "yandex")
@@ -153,6 +161,65 @@ class PortalRoleTests(unittest.TestCase):
             "external_id": "form-43", "full_name": "Rejected Lead", "phone": "+79000000001",
         })
         self.assertEqual(rejected.status_code, 404, rejected.text)
+
+    def test_crm_deal_task_sale_and_tenant_boundary(self):
+        self.client.cookies.set("stl_session", "a" * 43)
+        owner_a = self.client.post("/api/portal/admin/users", headers=self.origin, json={
+            "workspace_id": 1, "username": "crm-owner-a", "display_name": "Owner A", "role": "client_owner"}).json()
+        owner_b = self.client.post("/api/portal/admin/users", headers=self.origin, json={
+            "workspace_id": 2, "username": "crm-owner-b", "display_name": "Owner B", "role": "client_owner"}).json()
+        self.client.cookies.clear()
+        self.client.post("/api/portal/auth/login", headers=self.origin, json={
+            "username": "crm-owner-a", "password": owner_a["temporary_password"]})
+        project_a = self.client.get("/api/result/projects").json()[0]["id"]
+        created = self.client.post("/api/crm/deals", headers=self.origin, json={
+            "project_id": project_a, "name": "Кухня на заказ", "contact_name": "Иван Петров",
+            "phone": "+79000000000", "amount": 120000})
+        self.assertEqual(created.status_code, 201, created.text)
+        deal_id = created.json()["id"]
+        contact_id = self.client.get(f"/api/crm/deals/{deal_id}").json()["contact"]["id"]
+        repeat = self.client.post("/api/crm/deals", headers=self.origin, json={
+            "project_id": project_a, "name": "Вторая кухня", "contact_id": contact_id})
+        self.assertEqual(repeat.status_code, 201, repeat.text)
+        self.assertEqual(self.client.get(f"/api/crm/deals/{repeat.json()['id']}").json()["contact"]["id"], contact_id)
+        changed = self.client.patch(f"/api/crm/deals/{deal_id}", headers=self.origin, json={"amount": 125000})
+        self.assertEqual(changed.status_code, 200, changed.text)
+        board = self.client.get(f"/api/crm/projects/{project_a}/board")
+        self.assertEqual(board.status_code, 200, board.text)
+        self.assertEqual(board.json()["columns"][0]["deals"][0]["task_state"], "NO_TASK")
+        due = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+        task = self.client.post("/api/crm/tasks", headers=self.origin, json={
+            "project_id": project_a, "deal_id": deal_id, "title": "Позвонить клиенту",
+            "type_code": "CALL", "due_at": due})
+        self.assertEqual(task.status_code, 201, task.text)
+        completed = self.client.post(f"/api/crm/tasks/{task.json()['id']}/complete", headers=self.origin,
+                                     json={"result": "Связались"})
+        self.assertEqual(completed.status_code, 200, completed.text)
+        qualified_stage = next(c["stage"]["id"] for c in board.json()["columns"] if c["stage"]["analytics_type"] == "QUALIFIED")
+        moved = self.client.post(f"/api/crm/deals/{deal_id}/move", headers=self.origin,
+                                 json={"stage_id": qualified_stage})
+        self.assertEqual(moved.status_code, 200, moved.text)
+        won_stage = next(c["stage"]["id"] for c in board.json()["columns"] if c["stage"]["analytics_type"] == "WON")
+        won = self.client.post(f"/api/crm/deals/{deal_id}/move", headers=self.origin, json={"stage_id": won_stage})
+        self.assertEqual(won.status_code, 200, won.text)
+        self.assertTrue(won.json()["sale_required"])
+        sale = self.client.post(f"/api/crm/deals/{deal_id}/sales", headers=self.origin, json={"amount": 120000})
+        self.assertEqual(sale.status_code, 201, sale.text)
+        self.assertEqual(self.client.get(f"/api/crm/deals/{deal_id}").json()["sales"][0]["amount"], 120000)
+        today = datetime.now(timezone.utc).date().isoformat()
+        result = self.client.get(f"/api/result?project_id={project_a}&start={today}&end={today}")
+        self.assertEqual(result.status_code, 200, result.text)
+        self.assertEqual(result.json()["current"]["totals"]["sales"], 1)
+        self.assertEqual(result.json()["current"]["totals"]["revenue"], 120000)
+        self.client.cookies.clear()
+        self.client.post("/api/portal/auth/login", headers=self.origin, json={
+            "username": "crm-owner-b", "password": owner_b["temporary_password"]})
+        self.assertEqual(self.client.get(f"/api/crm/deals/{deal_id}").status_code, 404)
+        self.assertNotEqual(self.client.get(f"/api/crm/projects/{project_a}/board").status_code, 200)
+        self.assertEqual(self.client.post(f"/api/crm/tasks/{task.json()['id']}/complete", headers=self.origin,
+                                          json={"result": "Нет доступа"}).status_code, 404)
+        self.assertEqual(self.client.post("/api/crm/deals", headers=self.origin, json={
+            "project_id": project_a, "name": "Чужой проект", "contact_id": contact_id}).status_code, 404)
 
 
 if __name__ == "__main__":

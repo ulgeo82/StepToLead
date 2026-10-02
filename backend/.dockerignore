@@ -4,4 +4,6 @@ __pycache__
 .venv
 .git
 .DS_Store
-
+.env
+.env.*
+.admin-access.txt

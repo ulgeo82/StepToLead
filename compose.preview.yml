@@ -1,0 +1,11 @@
+# Use only with an SSH tunnel. The port is bound to the VPS loopback address,
+# so the portal is not reachable directly from the internet.
+services:
+  frontend:
+    ports:
+      - "127.0.0.1:3000:3000"
+
+  backend:
+    environment:
+      FRONTEND_ORIGIN: http://localhost:13000
+      SESSION_COOKIE_SECURE: "false"

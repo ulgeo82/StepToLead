@@ -1,4 +1,5 @@
 .env
+.env.prod
 .admin-access.txt
 __pycache__/
 *.py[cod]

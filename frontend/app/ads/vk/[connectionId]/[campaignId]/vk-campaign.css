@@ -1,0 +1,52 @@
+.vkDetailMain { padding-bottom: 64px; }
+.vkDetailHeader { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin: 26px 0 20px; }
+.vkDetailHeader h1 { margin: 8px 0 6px; font-size: clamp(30px, 3vw, 46px); line-height: 1.08; letter-spacing: -.045em; color: #10203a; }
+.vkDetailHeader p { margin: 0; color: #72829b; }
+.vkEyebrow { color: #006bfd; font-size: 11px; font-weight: 800; letter-spacing: .17em; }
+.vkDetailHeaderActions { display: flex; gap: 10px; flex-wrap: wrap; }
+.vkDetailHeaderActions a, .vkDetailHeaderActions button { display: inline-flex; align-items: center; min-height: 40px; padding: 0 15px; border: 1px solid #d9e4f3; border-radius: 10px; background: #fff; color: #006bfd; font: inherit; font-size: 13px; font-weight: 700; text-decoration: none; cursor: pointer; }
+.vkDetailHeaderActions button { background: #006bfd; border-color: #006bfd; color: white; }
+.vkDetailHeaderActions button:disabled { opacity: .5; cursor: wait; }
+.vkDetailIntro { display: flex; gap: 15px; align-items: center; flex-wrap: wrap; color: #77869d; font-size: 12px; margin-bottom: 16px; }
+.vkState { display: inline-flex; align-items: center; width: max-content; border-radius: 999px; padding: 5px 10px; background: #ecf3ff; color: #386392; font-size: 11px; font-weight: 700; white-space: nowrap; }
+.vkState.active, .vkState.delivering { background: #e9f9ee; color: #158444; }
+.vkState.blocked, .vkState.not_delivering { background: #fff0e2; color: #bf6d08; }
+.vkState.deleted, .vkState.banned { background: #ffe9eb; color: #c8374d; }
+.vkHeroGrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
+.vkHeroCard { display: flex; flex-direction: column; min-height: 138px; padding: 20px !important; }
+.vkHeroCard span { color: #62728e; font-size: 12px; }
+.vkHeroCard strong { margin-top: 14px; color: #10203a; font-size: clamp(20px, 2vw, 28px); line-height: 1.15; overflow-wrap: anywhere; }
+.vkHeroCard small { color: #92a0b3; margin-top: auto; padding-top: 8px; }
+.vkDetailSection { padding: 22px !important; margin-bottom: 16px; }
+.vkGroupsSection { padding: 0 !important; }
+.vkSectionHead { display: flex; justify-content: space-between; gap: 16px; align-items: baseline; margin-bottom: 20px; }
+.vkSectionHead > div { display: flex; align-items: center; gap: 10px; }
+.vkSectionHead h2 { font-size: 20px; margin: 0; color: #10203a; letter-spacing: -.03em; }
+.vkSectionHead p { margin: 0; color: #8a99ae; font-size: 12px; }
+.vkSectionIndex { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 8px; background: #eaf2ff; color: #006bfd; font-size: 11px; font-weight: 800; }
+.vkFieldGrid, .vkTargetGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.vkDetailField { display: flex; flex-direction: column; min-width: 0; gap: 8px; padding: 14px 15px; border: 1px solid #e9eef6; border-radius: 11px; background: #f8faff; }
+.vkDetailField span { color: #8291a8; font-size: 11px; }
+.vkDetailField strong { color: #24334d; font-size: 13px; line-height: 1.5; font-weight: 650; overflow-wrap: anywhere; }
+.vkGroupCard { margin-bottom: 12px; padding: 22px !important; }
+.vkGroupHead { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
+.vkGroupHead > div > span { color: #7b8ba4; font-size: 11px; font-weight: 750; letter-spacing: .1em; }
+.vkGroupHead h3 { margin: 6px 0 0; color: #10203a; font-size: 19px; }
+.vkIssues { margin-top: 16px; border: 1px solid #f8d9a8; border-radius: 11px; background: #fffaf1; padding: 13px 15px; }
+.vkIssues > strong { display: block; color: #a6650f; font-size: 12px; margin-bottom: 8px; }
+.vkIssues > div { display: flex; flex-wrap: wrap; gap: 7px; }
+.vkIssues span { padding: 5px 8px; border-radius: 6px; background: #fff0d8; color: #a6650f; font-size: 11px; }
+.vkSubsection { margin-top: 22px; padding-top: 20px; border-top: 1px solid #e9eef6; }
+.vkSubsection h4 { display: flex; gap: 8px; align-items: center; margin: 0 0 12px; font-size: 15px; color: #20324c; }
+.vkSubsection h4 span { border-radius: 6px; padding: 2px 7px; background: #eaf2ff; color: #006bfd; font-size: 11px; }
+.vkSubsection p, .vkSubsection small { color: #8898ac; font-size: 12px; }
+.vkSubsection small { display: block; margin-top: 10px; }
+.vkBannerGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.vkBannerCard { display: flex; flex-direction: column; gap: 10px; padding: 16px; border: 1px solid #e4eaf4; border-radius: 12px; background: #fbfcff; }
+.vkBannerCard > div:first-child { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+.vkBannerCard > div:first-child strong { color: #23334c; font-size: 13px; }
+.vkBannerCard > small { margin: 0; }
+.vkBannerCard .vkDetailField { background: #fff; }
+.vkEmpty { padding: 24px !important; color: #8090a7; }
+@media (max-width: 1200px) { .vkHeroGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .vkFieldGrid, .vkTargetGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 740px) { .vkDetailHeader { align-items: flex-start; flex-direction: column; } .vkHeroGrid, .vkFieldGrid, .vkTargetGrid, .vkBannerGrid { grid-template-columns: 1fr; } .vkSectionHead { flex-direction: column; } }

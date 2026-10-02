@@ -13,6 +13,7 @@ export default function AdvertisingPage() {
   const [connections, setConnections] = useState<AdConnection[]>([]);
   const [summary, setSummary] = useState(emptySummary);
   const [modal, setModal] = useState<"client" | "connection" | "token" | null>(null);
+  const [connectionPlatform, setConnectionPlatform] = useState("yandex");
   const [selectedConnection, setSelectedConnection] = useState<AdConnection | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -38,7 +39,7 @@ export default function AdvertisingPage() {
     event.preventDefault(); setBusy("connection"); setError("");
     const data = new FormData(event.currentTarget);
     try {
-      const row = await api<AdConnection>("/marketing/connections", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ workspace_id: Number(data.get("workspace_id")), platform: data.get("platform"), name: data.get("name"), external_account_id: data.get("external_account_id"), access_token: data.get("access_token") }) });
+      const row = await api<AdConnection>("/marketing/connections", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ workspace_id: Number(data.get("workspace_id")), platform: connectionPlatform, name: data.get("name"), ...(connectionPlatform === "vk_ads" ? { client_id: data.get("client_id"), client_secret: data.get("client_secret") } : { external_account_id: data.get("external_account_id"), access_token: data.get("access_token") }) }) });
       setModal(null); setNotice("Кабинет сохранён. Теперь проверьте соединение."); await load(); await test(row.id);
     } catch (e) { setError(e instanceof Error ? e.message : "Не удалось добавить кабинет"); } finally { setBusy(null); }
   }
@@ -52,8 +53,8 @@ export default function AdvertisingPage() {
     if (!selectedConnection) return;
     const data = new FormData(event.currentTarget); setBusy("token"); setError("");
     try {
-      await api(`/marketing/connections/${selectedConnection.id}/token`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ access_token: data.get("access_token") }) });
-      setModal(null); setNotice("Токен заменён. Запускаю повторную проверку…"); await load(); await test(selectedConnection.id);
+      await api(`/marketing/connections/${selectedConnection.id}/token`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(selectedConnection.platform === "vk_ads" ? { client_id: data.get("client_id"), client_secret: data.get("client_secret") } : { access_token: data.get("access_token") }) });
+      setModal(null); setNotice("Данные доступа заменены. Запускаю повторную проверку…"); await load(); await test(selectedConnection.id);
     } catch (e) { setError(e instanceof Error ? e.message : "Не удалось заменить токен"); } finally { setBusy(null); }
   }
   async function sync(id: number) {
@@ -66,9 +67,9 @@ export default function AdvertisingPage() {
     catch (e) { setError(e instanceof Error ? e.message : "Синхронизация не прошла"); await load(); } finally { setBusy(null); }
   }
   async function removeConnection(item: AdConnection) {
-    if (!window.confirm(`Удалить подключение «${item.name}»? Загруженная статистика этого подключения также будет удалена.`)) return;
+    if (!window.confirm(`Отключить «${item.name}»? Историческая статистика сохранится.`)) return;
     setBusy(item.id); setError(""); setNotice("");
-    try { await api(`/marketing/connections/${item.id}`, { method: "DELETE" }); setNotice("Рекламное подключение удалено."); await load(); }
+    try { await api(`/marketing/connections/${item.id}`, { method: "DELETE" }); setNotice("Рекламное подключение отключено. История сохранена."); await load(); }
     catch (e) { setError(e instanceof Error ? e.message : "Не удалось удалить подключение"); }
     finally { setBusy(null); }
   }
@@ -88,10 +89,10 @@ export default function AdvertisingPage() {
     </section>
     <section className="panel adPanel"><div className="panelHead"><div><p className="eyebrow">Источники данных</p><h2>Рекламные кабинеты · {summary.connections}</h2></div><span className="secureHint">Токены хранятся зашифрованно</span></div>
       <div className="adConnectionGrid">{connections.map(item => <article className="adConnection" key={item.id}>
-        <div className="adConnectionTop"><span className={`platformLogo ${item.platform}`}>{item.platform === "meta" ? "M" : "Я"}</span><div><strong>{item.name}</strong><small>{item.workspace_name} · {item.platform_name}</small></div><span className={`adStatus ${item.status}`}>{item.status === "connected" ? "Подключён" : item.status === "error" ? "Ошибка" : "Не проверен"}</span></div>
+        <div className="adConnectionTop"><span className={`platformLogo ${item.platform}`}>{item.platform === "meta" ? "M" : item.platform === "vk_ads" ? "VK" : "Я"}</span><div><strong>{item.name}</strong><small>{item.workspace_name} · {item.platform_name}</small></div><span className={`adStatus ${item.status}`}>{item.status === "connected" ? "Подключён" : item.status === "error" ? "Ошибка" : item.status === "syncing" ? "Синхронизация" : item.status === "disconnected" ? "Отключён" : "Не проверен"}</span></div>
         <dl><div><dt>ID кабинета</dt><dd>{item.external_account_id}</dd></div><div><dt>Последняя синхронизация</dt><dd>{item.last_synced_at ? new Date(item.last_synced_at).toLocaleString("ru-RU") : "Ещё не запускалась"}</dd></div></dl>
         {item.last_error && <p className="adError">{item.last_error}</p>}
-        <div className="adActions"><Link href={`/admin/advertising/${item.workspace_id}`}>Открыть аналитику</Link><button onClick={() => { setSelectedConnection(item); setModal("token"); }}>Обновить токен</button><button onClick={() => test(item.id)} disabled={busy === item.id}>{busy === item.id ? "Проверяем…" : "Проверить"}</button><button className="sync" onClick={() => sync(item.id)} disabled={busy === item.id}>{busy === item.id ? "Загружаем историю…" : "Загрузить всю историю"}</button><button className="danger" onClick={() => removeConnection(item)} disabled={busy === item.id}>Удалить</button></div>
+        <div className="adActions"><Link href={`/admin/advertising/${item.workspace_id}`}>Открыть аналитику</Link><button onClick={() => { setSelectedConnection(item); setModal("token"); }}>{item.platform === "vk_ads" ? "Обновить API-ключи" : "Обновить токен"}</button><button onClick={() => test(item.id)} disabled={busy === item.id}>{busy === item.id ? "Проверяем…" : "Проверить"}</button><button className="sync" onClick={() => sync(item.id)} disabled={busy === item.id || item.status === "disconnected"}>{busy === item.id ? "Загружаем историю…" : "Загрузить доступную историю"}</button><button className="danger" onClick={() => removeConnection(item)} disabled={busy === item.id || item.status === "disconnected"}>Отключить</button></div>
       </article>)}{!connections.length && <div className="empty adEmpty"><span>↗</span><h3>Реклама ещё не подключена</h3><p>Сначала создайте клиента, затем добавьте кабинет Meta Ads или Яндекс Директ.</p></div>}</div>
     </section>
     <section className="adGuide"><strong>Как это работает по-настоящему</strong><span>1. Создаёте клиента</span><span>2. Получаете официальный OAuth-токен платформы</span><span>3. Добавляете ID кабинета и токен</span><span>4. StepToLead проверяет API и загружает всю доступную историю</span></section>
@@ -99,12 +100,11 @@ export default function AdvertisingPage() {
     {modal === "client" && <div className="modalBackdrop"><form className="modal" onSubmit={addClient}><div className="modalHead"><div><p className="eyebrow">Новый workspace</p><h2>Добавить клиента</h2></div><button type="button" className="close" onClick={() => setModal(null)}>×</button></div><label>Название компании<input name="name" required minLength={2} maxLength={180} placeholder="Например, VBI Group" autoFocus /></label><button className="button primary full" disabled={busy === "client"}>{busy ? "Создаём…" : "Создать кабинет"}</button></form></div>}
     {modal === "connection" && <div className="modalBackdrop"><form className="modal adModal" onSubmit={addConnection}><div className="modalHead"><div><p className="eyebrow">Официальное API</p><h2>Подключить рекламу</h2></div><button type="button" className="close" onClick={() => setModal(null)}>×</button></div>
       <label>Клиент<select name="workspace_id" required defaultValue=""><option value="" disabled>Выберите клиента</option>{workspaces.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
-      <label>Платформа<select name="platform" required defaultValue="yandex"><option value="yandex">Яндекс Директ</option><option value="meta">Meta Ads</option></select></label>
+      <label>Платформа<select name="platform" required value={connectionPlatform} onChange={event => setConnectionPlatform(event.target.value)}><option value="yandex">Яндекс Директ</option><option value="meta">Meta Ads</option><option value="vk_ads">VK Реклама</option></select></label>
       <label>Название подключения<input name="name" required placeholder="Основной рекламный кабинет" /></label>
-      <label>ID / логин кабинета<input name="external_account_id" required placeholder="Для Яндекса — Client-Login; для Meta — act_123…" /></label>
-      <label>OAuth access token<input name="access_token" type="password" required minLength={10} autoComplete="off" placeholder="Токен не будет показан повторно" /></label>
-      <p className="formHint">Пароль от рекламного кабинета не нужен. Используется только выданный платформой токен с правом чтения статистики.</p><button className="button primary full" disabled={busy === "connection"}>{busy ? "Подключаем…" : "Сохранить и проверить"}</button>
+      {connectionPlatform === "vk_ads" ? <><p className="formHint">VK Реклама → Настройки → Доступ к API. Используйте новый секрет после отзыва опубликованного.</p><label>Client ID<input name="client_id" required autoComplete="off" /></label><label>Client Secret<input name="client_secret" type="password" required minLength={10} autoComplete="off" /></label></> : <><label>ID / логин кабинета<input name="external_account_id" required placeholder="Для Яндекса — Client-Login; для Meta — act_123…" /></label><label>OAuth access token<input name="access_token" type="password" required minLength={10} autoComplete="off" placeholder="Токен не будет показан повторно" /></label></>}
+      <p className="formHint">Пароль от рекламного кабинета не нужен. Секреты сохраняются зашифрованно.</p><button className="button primary full" disabled={busy === "connection"}>{busy ? "Подключаем…" : "Сохранить и проверить"}</button>
     </form></div>}
-    {modal === "token" && selectedConnection && <div className="modalBackdrop"><form className="modal" onSubmit={replaceToken}><div className="modalHead"><div><p className="eyebrow">{selectedConnection.platform_name}</p><h2>Обновить OAuth-токен</h2></div><button type="button" className="close" onClick={() => setModal(null)}>×</button></div><p className="formHint">Вставьте только значение <b>access_token</b>. ID и секрет OAuth-приложения сюда не подходят.</p><label>Новый access token<input name="access_token" type="password" required minLength={10} autoComplete="off" autoFocus placeholder="Будет сохранён в зашифрованном виде" /></label><button className="button primary full" disabled={busy === "token"}>{busy ? "Сохраняем…" : "Заменить и проверить"}</button></form></div>}
+    {modal === "token" && selectedConnection && <div className="modalBackdrop"><form className="modal" onSubmit={replaceToken}><div className="modalHead"><div><p className="eyebrow">{selectedConnection.platform_name}</p><h2>{selectedConnection.platform === "vk_ads" ? "Обновить API-ключи" : "Обновить OAuth-токен"}</h2></div><button type="button" className="close" onClick={() => setModal(null)}>×</button></div>{selectedConnection.platform === "vk_ads" ? <><label>Новый Client ID<input name="client_id" required autoComplete="off" /></label><label>Новый Client Secret<input name="client_secret" type="password" required minLength={10} autoComplete="off" /></label></> : <><p className="formHint">Вставьте только значение <b>access_token</b>. ID и секрет OAuth-приложения сюда не подходят.</p><label>Новый access token<input name="access_token" type="password" required minLength={10} autoComplete="off" autoFocus placeholder="Будет сохранён в зашифрованном виде" /></label></>}<button className="button primary full" disabled={busy === "token"}>{busy ? "Сохраняем…" : "Заменить и проверить"}</button></form></div>}
   </div>;
 }

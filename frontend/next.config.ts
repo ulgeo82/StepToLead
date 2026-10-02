@@ -6,11 +6,11 @@ const nextConfig: NextConfig = {
   experimental: { proxyTimeout: 120_000 },
   async redirects() {
     return [
-      { source: "/campaigns/:path*", destination: "/admin/campaigns/:path*", permanent: false },
-      { source: "/leads/:path*", destination: "/admin/leads/:path*", permanent: false },
       { source: "/telegram-accounts/:path*", destination: "/admin/accounts/:path*", permanent: false },
       { source: "/proxies/:path*", destination: "/admin/proxies/:path*", permanent: false },
       { source: "/growth-calculator", destination: "/growth", permanent: false },
+      { source: "/leads", destination: "/crm", permanent: false },
+      { source: "/portal/crm", destination: "/crm", permanent: false },
     ];
   },
   async headers() {

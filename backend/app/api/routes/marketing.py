@@ -5,11 +5,11 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
@@ -19,10 +19,11 @@ from app.core.crypto import decrypt_secret, encrypt_secret
 from app.db import get_db
 from app.models.marketing import (AdCampaignMetricDaily, AdConnection, AdHypothesis, AdHypothesisCampaign,
                                   AdMetricDaily, ClientLeadAttribution, ClientWorkspace, LeadInboundReceipt,
-                                  LeadInboundSource)
+                                  LeadInboundSource, Project)
+from app.services.project_scope import default_project
 
 router = APIRouter(prefix="/marketing", tags=["marketing"])
-SUPPORTED = {"meta": "Meta Ads", "yandex": "Яндекс Директ"}
+SUPPORTED = {"meta": "Meta Ads", "yandex": "Яндекс Директ", "vk_ads": "VK Реклама"}
 
 
 class WorkspaceCreate(BaseModel):
@@ -38,33 +39,47 @@ class WorkspaceCreate(BaseModel):
 class ConnectionCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     workspace_id: int = Field(gt=0)
+    project_id: int | None = Field(default=None, gt=0)
     platform: str
     name: str = Field(min_length=2, max_length=180)
-    external_account_id: str = Field(min_length=1, max_length=180)
-    access_token: str = Field(min_length=10, max_length=4096)
+    external_account_id: str = Field(default="", max_length=180)
+    access_token: str | None = Field(default=None, min_length=10, max_length=4096)
+    client_id: str | None = Field(default=None, min_length=1, max_length=4096)
+    client_secret: str | None = Field(default=None, min_length=10, max_length=4096)
 
     @field_validator("platform")
     @classmethod
     def supported_platform(cls, value: str):
         value = value.strip().lower()
         if value not in SUPPORTED:
-            raise ValueError("Сейчас доступны Meta Ads и Яндекс Директ")
+            raise ValueError("Платформа не поддерживается")
         return value
 
-    @field_validator("name", "external_account_id", "access_token")
+    @field_validator("name", "external_account_id")
     @classmethod
     def trim_values(cls, value: str):
         return value.strip()
 
+    @model_validator(mode="after")
+    def credentials_for_platform(self):
+        if self.platform == "vk_ads":
+            if not self.client_id or not self.client_secret:
+                raise ValueError("Для VK Рекламы нужны Client ID и Client Secret из настроек доступа к API")
+        elif not self.external_account_id or not self.access_token:
+            raise ValueError("Укажите ID кабинета и OAuth access token")
+        return self
+
 
 class ConnectionTokenUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    access_token: str = Field(min_length=10, max_length=4096)
+    access_token: str | None = Field(default=None, min_length=10, max_length=4096)
+    client_id: str | None = Field(default=None, min_length=1, max_length=4096)
+    client_secret: str | None = Field(default=None, min_length=10, max_length=4096)
 
     @field_validator("access_token")
     @classmethod
-    def trim_token(cls, value: str):
-        return value.strip()
+    def trim_token(cls, value: str | None):
+        return value.strip() if value else value
 
 
 class HypothesisCreate(BaseModel):
@@ -108,7 +123,189 @@ def _request(url: str, *, method: str = "GET", headers: dict | None = None, payl
     return status, body
 
 
+VK_API = "https://ads.vk.ru"
+
+
+def _vk_oauth(fields: dict[str, str]) -> dict:
+    """VK OAuth uses form encoding; never include credentials or response bodies in errors."""
+    request = urllib.request.Request(
+        f"{VK_API}/api/v2/oauth2/token.json",
+        data=urllib.parse.urlencode(fields).encode(), method="POST",
+        headers={"Content-Type": "application/x-www-form-urlencoded", "User-Agent": "StepToLead/1.0"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=25) as response:
+            result = json.load(response)
+    except urllib.error.HTTPError as exc:
+        raise ValueError(f"VK отклонил авторизацию (HTTP {exc.code}). Проверьте API-доступ и реквизиты.") from None
+    except urllib.error.URLError as exc:
+        raise ValueError("VK API недоступен. Повторите проверку позже.") from None
+    if not isinstance(result, dict) or not result.get("access_token"):
+        raise ValueError("VK не вернул access token")
+    return result
+
+
+def _vk_json(path: str, token: str, params: dict | None = None) -> dict:
+    url = f"{VK_API}{path}"
+    if params:
+        url += "?" + urllib.parse.urlencode(params)
+    request = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}",
+                                                       "User-Agent": "StepToLead/1.0"})
+    try:
+        with urllib.request.urlopen(request, timeout=25) as response:
+            result = json.load(response)
+    except urllib.error.HTTPError as exc:
+        raise ValueError(f"VK API вернул HTTP {exc.code}. Проверьте доступ к выбранному кабинету.") from None
+    except urllib.error.URLError:
+        raise ValueError("VK API недоступен. Повторите синхронизацию позже.") from None
+    if not isinstance(result, dict) or result.get("error"):
+        raise ValueError("VK API не вернул запрошенные данные")
+    return result
+
+
+async def _vk_access_token(db: AsyncSession, row: AdConnection) -> str:
+    now = datetime.now(timezone.utc)
+    expiry = row.vk_access_expires_at
+    if expiry and expiry.tzinfo is None:
+        expiry = expiry.replace(tzinfo=timezone.utc)
+    token = decrypt_secret(row.access_token_encrypted)
+    if token and token != "pending" and expiry and expiry > now + timedelta(minutes=5):
+        return token
+    client_id = decrypt_secret(row.vk_client_id_encrypted)
+    client_secret = decrypt_secret(row.vk_client_secret_encrypted)
+    if not client_id or not client_secret:
+        raise ValueError("Для VK подключения не сохранены Client ID и Client Secret")
+    refresh = decrypt_secret(row.vk_refresh_token_encrypted)
+    fields = ({"grant_type": "refresh_token", "refresh_token": refresh,
+               "client_id": client_id, "client_secret": client_secret} if refresh else
+              {"grant_type": "client_credentials", "client_id": client_id, "client_secret": client_secret})
+    try:
+        data = await run_in_threadpool(_vk_oauth, fields)
+    except ValueError:
+        if not refresh:
+            raise
+        data = await run_in_threadpool(_vk_oauth, {"grant_type": "client_credentials",
+                                                    "client_id": client_id, "client_secret": client_secret})
+    row.access_token_encrypted = encrypt_secret(data["access_token"])
+    if data.get("refresh_token"):
+        row.vk_refresh_token_encrypted = encrypt_secret(data["refresh_token"])
+    row.vk_access_expires_at = now + timedelta(seconds=max(int(data.get("expires_in") or 86400), 60))
+    await db.commit()
+    return data["access_token"]
+
+
+def _vk_metrics(token: str) -> list[dict]:
+    """Import only VK's ad facts. VK goals are not CRM leads."""
+    campaigns = []
+    for offset in range(0, 10000, 100):
+        page = _vk_json("/api/v2/ad_plans.json", token, {"limit": 100, "offset": offset})
+        items = page.get("items", [])
+        if not isinstance(items, list):
+            raise ValueError("VK вернул некорректный список кампаний")
+        campaigns.extend(items)
+        if len(items) < 100:
+            break
+    else:
+        raise ValueError("Слишком много кампаний VK для одной синхронизации")
+    result: dict[date, dict] = {}
+    today = datetime.now(timezone.utc).date()
+    start = today - timedelta(days=365)  # VK limits statistics to the last 366 days.
+    names = {str(item["id"]): item.get("name") or "Кампания без названия" for item in campaigns if item.get("id") is not None}
+    ids = list(names)
+    for index in range(0, len(ids), 200):
+        report = _vk_json("/api/v2/statistics/ad_plans/day.json", token,
+                          {"date_from": start.isoformat(), "date_to": today.isoformat(),
+                           "id": ",".join(ids[index:index + 200]), "metrics": "base"})
+        for campaign in report.get("items", []):
+            campaign_id = str(campaign.get("id"))
+            for point in campaign.get("rows", []):
+                day = date.fromisoformat(point["date"])
+                base = point.get("base") or point.get("metrics", {}).get("base") or {}
+                spend = Decimal(str(base.get("spent") or "0"))
+                impressions = int(base.get("shows") or 0)
+                clicks = int(base.get("clicks") or 0)
+                daily = result.setdefault(day, {"date": day, "spend": Decimal("0"), "impressions": 0,
+                                                "clicks": 0, "leads": 0, "raw": {}, "campaigns": []})
+                daily["spend"] += spend
+                daily["impressions"] += impressions
+                daily["clicks"] += clicks
+                daily["campaigns"].append({"date": day, "external_campaign_id": campaign_id,
+                                           "campaign_name": names.get(campaign_id, "Кампания без названия"),
+                                           "spend": spend, "impressions": impressions, "clicks": clicks,
+                                           "raw": point})
+    return [result[day] for day in sorted(result)]
+
+
+def _vk_campaigns(token: str) -> list[dict]:
+    """Read campaign metadata independently of statistics (including zero-delivery campaigns)."""
+    campaigns = []
+    for offset in range(0, 10000, 100):
+        page = _vk_json("/api/v2/ad_plans.json", token,
+                        {"limit": 100, "offset": offset, "fields": "id,name,status,vkads_status,objective,budget_limit_day"})
+        items = page.get("items", [])
+        if not isinstance(items, list):
+            raise ValueError("VK вернул некорректный список кампаний")
+        campaigns.extend({"id": str(item["id"]), "name": item.get("name") or "Кампания без названия",
+                          "status": item.get("status"), "delivery": item.get("vkads_status"),
+                          "objective": item.get("objective"), "budget_limit_day": item.get("budget_limit_day")}
+                         for item in items if item.get("id") is not None)
+        if len(items) < 100:
+            return campaigns
+    raise ValueError("Слишком много кампаний VK для одного кабинета")
+
+
+def _vk_campaign_detail(token: str, campaign_id: int) -> dict:
+    """Read a campaign and its groups/ads without changing anything in VK."""
+    campaign_fields = ("id,name,status,vkads_status,created,updated,autobidding_mode,"
+                       "budget_limit,budget_limit_day,date_start,date_end,max_price,objective,priced_goal")
+    campaign = _vk_json(f"/api/v2/ad_plans/{campaign_id}.json", token, {"fields": campaign_fields})
+    if str(campaign.get("id")) != str(campaign_id):
+        raise ValueError("VK не вернул выбранную кампанию")
+    groups = []
+    for offset in range(0, 10000, 100):
+        page = _vk_json("/api/v2/ad_groups.json", token,
+                        {"limit": 100, "offset": offset, "fields": "id,ad_plan_id,name,status"})
+        items = page.get("items", [])
+        if not isinstance(items, list):
+            raise ValueError("VK вернул некорректный список групп")
+        groups.extend(item for item in items if str(item.get("ad_plan_id")) == str(campaign_id))
+        if len(groups) > 50:
+            raise ValueError("В кампании больше 50 групп. Уточните кампанию в кабинете VK")
+        if len(items) < 100:
+            break
+    else:
+        raise ValueError("Слишком много групп VK для одного кабинета")
+    group_fields = ("id,ad_plan_id,name,status,delivery,issues,package_id,objective,"
+                    "budget_limit,budget_limit_day,date_start,date_end,max_price,price,"
+                    "age_restrictions,enable_utm,utm,targetings,created,updated")
+    detailed_groups = [_vk_json(f"/api/v2/ad_groups/{int(group['id'])}.json", token,
+                                {"fields": group_fields}) for group in groups]
+    banners = []
+    group_ids = [str(group["id"]) for group in detailed_groups]
+    if group_ids:
+        for offset in range(0, 1000, 100):
+            page = _vk_json("/api/v2/banners.json", token,
+                            {"limit": 100, "offset": offset, "_ad_group_id__in": ",".join(group_ids),
+                             "fields": "id,ad_group_id,name,status,delivery,issues,moderation_status,textblocks,urls"})
+            items = page.get("items", [])
+            if not isinstance(items, list):
+                raise ValueError("VK вернул некорректный список объявлений")
+            banners.extend(item for item in items if str(item.get("ad_group_id")) in group_ids)
+            if len(banners) > 100:
+                raise ValueError("В кампании больше 100 объявлений. Уточните их в кабинете VK")
+            if len(items) < 100:
+                break
+        else:
+            raise ValueError("Слишком много объявлений VK для одной кампании")
+    return {"campaign": campaign,
+            "groups": [{**group, "banners": [banner for banner in banners
+                                                if str(banner.get("ad_group_id")) == str(group.get("id"))]}
+                       for group in detailed_groups]}
+
+
 def _test_connection(connection: AdConnection) -> dict:
+    if connection.platform == "vk_ads":
+        raise ValueError("VK подключение проверяется с обновлением OAuth-токена")
     token = decrypt_secret(connection.access_token_encrypted)
     if connection.platform == "meta":
         account_id = connection.external_account_id.removeprefix("act_")
@@ -222,7 +419,9 @@ async def create_workspace(payload: WorkspaceCreate, request: Request, db: Async
     if await db.scalar(select(ClientWorkspace.id).where(func.lower(ClientWorkspace.name) == payload.name.lower())):
         raise HTTPException(409, "Клиент с таким названием уже существует")
     row = ClientWorkspace(name=payload.name)
-    db.add(row); await db.commit(); await db.refresh(row)
+    db.add(row); await db.flush()
+    await default_project(db, row.id)
+    await db.commit(); await db.refresh(row)
     return row
 
 
@@ -304,7 +503,8 @@ async def create_hypothesis(payload: HypothesisCreate, request: Request, db: Asy
     check_origin(request)
     if not await db.get(ClientWorkspace, payload.workspace_id):
         raise HTTPException(404, "Клиент не найден")
-    row = AdHypothesis(**payload.model_dump())
+    project = await default_project(db, payload.workspace_id)
+    row = AdHypothesis(**payload.model_dump(), project_id=project.id)
     db.add(row); await db.commit(); await db.refresh(row)
     return row
 
@@ -315,7 +515,7 @@ async def assign_campaign(hypothesis_id: int, payload: CampaignAssignment, reque
     check_origin(request)
     hypothesis = await db.get(AdHypothesis, hypothesis_id)
     connection = await db.get(AdConnection, payload.connection_id)
-    if not hypothesis or not connection or hypothesis.workspace_id != connection.workspace_id:
+    if not hypothesis or not connection or hypothesis.project_id != connection.project_id:
         raise HTTPException(404, "Гипотеза или рекламный кабинет не найдены")
     campaign_exists = await db.scalar(select(AdCampaignMetricDaily.id).where(
         AdCampaignMetricDaily.connection_id == payload.connection_id,
@@ -328,18 +528,21 @@ async def assign_campaign(hypothesis_id: int, payload: CampaignAssignment, reque
         AdHypothesisCampaign.external_campaign_id == payload.external_campaign_id,
     ))
     db.add(AdHypothesisCampaign(hypothesis_id=hypothesis_id, **payload.model_dump()))
-    source_ids = select(LeadInboundSource.id).where(LeadInboundSource.workspace_id == hypothesis.workspace_id)
+    source_ids = select(LeadInboundSource.id).where(LeadInboundSource.project_id == hypothesis.project_id)
     await db.execute(update(ClientLeadAttribution).where(
         ClientLeadAttribution.source_id.in_(source_ids),
+        ClientLeadAttribution.connection_id == payload.connection_id,
         ClientLeadAttribution.external_campaign_id == payload.external_campaign_id,
-    ).values(hypothesis_id=hypothesis_id, connection_id=payload.connection_id))
+    ).values(hypothesis_id=hypothesis_id))
     await db.commit()
     return {"ok": True}
 
 
 @router.get("/connections")
 async def connections(db: AsyncSession = Depends(get_db)):
-    rows = (await db.execute(select(AdConnection, ClientWorkspace.name).join(ClientWorkspace).order_by(AdConnection.created_at.desc()))).all()
+    rows = (await db.execute(select(AdConnection, ClientWorkspace.name).join(ClientWorkspace)
+                             .where(AdConnection.platform != "telegram_ads")
+                             .order_by(AdConnection.created_at.desc()))).all()
     return [serialize_connection(connection, name) for connection, name in rows]
 
 
@@ -348,8 +551,14 @@ async def create_connection(payload: ConnectionCreate, request: Request, db: Asy
     check_origin(request)
     if not await db.get(ClientWorkspace, payload.workspace_id):
         raise HTTPException(404, "Клиент не найден")
-    row = AdConnection(workspace_id=payload.workspace_id, platform=payload.platform, name=payload.name,
-                       external_account_id=payload.external_account_id, access_token_encrypted=encrypt_secret(payload.access_token), status="pending")
+    project = await (db.get(Project, payload.project_id) if payload.project_id else default_project(db, payload.workspace_id))
+    if not project or project.workspace_id != payload.workspace_id:
+        raise HTTPException(404, "Проект клиента не найден")
+    row = AdConnection(workspace_id=payload.workspace_id, project_id=project.id, platform=payload.platform, name=payload.name,
+                       external_account_id=payload.external_account_id or "pending",
+                       access_token_encrypted=encrypt_secret(payload.access_token or "pending"), status="pending",
+                       vk_client_id_encrypted=encrypt_secret(payload.client_id) if payload.platform == "vk_ads" else None,
+                       vk_client_secret_encrypted=encrypt_secret(payload.client_secret) if payload.platform == "vk_ads" else None)
     db.add(row); await db.commit(); await db.refresh(row)
     return serialize_connection(row)
 
@@ -360,7 +569,19 @@ async def test_connection(connection_id: int, request: Request, db: AsyncSession
     row = await db.get(AdConnection, connection_id)
     if not row: raise HTTPException(404, "Подключение не найдено")
     try:
-        result = await run_in_threadpool(_test_connection, row)
+        if row.platform == "vk_ads":
+            token = await _vk_access_token(db, row)
+            data = await run_in_threadpool(_vk_json, "/api/v3/user.json", token)
+            account_id = str(data.get("id") or "")
+            if not account_id:
+                raise ValueError("VK не вернул идентификатор кабинета")
+            if row.external_account_id not in {"pending", account_id}:
+                raise ValueError("Токен VK принадлежит другому рекламному кабинету")
+            row.external_account_id = account_id
+            result = {"name": data.get("username"), "currency": data.get("currency"),
+                      "remote_status": data.get("status")}
+        else:
+            result = await run_in_threadpool(_test_connection, row)
         row.status = "connected"; row.currency = result.get("currency"); row.last_error = None
     except Exception as exc:
         row.status = "error"; row.last_error = str(exc)[:1500]; result = None
@@ -375,7 +596,18 @@ async def update_connection_token(connection_id: int, payload: ConnectionTokenUp
     row = await db.get(AdConnection, connection_id)
     if not row:
         raise HTTPException(404, "Подключение не найдено")
-    row.access_token_encrypted = encrypt_secret(payload.access_token)
+    if row.platform == "vk_ads":
+        if not payload.client_id or not payload.client_secret:
+            raise HTTPException(422, "Для VK нужны новые Client ID и Client Secret")
+        row.vk_client_id_encrypted = encrypt_secret(payload.client_id)
+        row.vk_client_secret_encrypted = encrypt_secret(payload.client_secret)
+        row.vk_refresh_token_encrypted = None
+        row.vk_access_expires_at = None
+        row.access_token_encrypted = encrypt_secret("pending")
+    else:
+        if not payload.access_token:
+            raise HTTPException(422, "Укажите новый access token")
+        row.access_token_encrypted = encrypt_secret(payload.access_token)
     row.status = "pending"
     row.last_error = None
     row.last_checked_at = None
@@ -388,8 +620,21 @@ async def sync_connection(connection_id: int, request: Request, db: AsyncSession
     check_origin(request)
     row = await db.get(AdConnection, connection_id)
     if not row: raise HTTPException(404, "Подключение не найдено")
+    if row.status == "disconnected":
+        raise HTTPException(409, "Сначала восстановите подключение")
+    row.status = "syncing"
+    await db.commit()
     try:
-        metrics = await run_in_threadpool(_meta_metrics if row.platform == "meta" else _yandex_metrics, row)
+        if row.platform == "vk_ads":
+            token = await _vk_access_token(db, row)
+            data = await run_in_threadpool(_vk_json, "/api/v3/user.json", token)
+            if str(data.get("id")) != row.external_account_id:
+                raise ValueError("Токен VK больше не соответствует подключенному кабинету")
+            metrics = await run_in_threadpool(_vk_metrics, token)
+        elif row.platform == "meta":
+            metrics = await run_in_threadpool(_meta_metrics, row)
+        else:
+            metrics = await run_in_threadpool(_yandex_metrics, row)
         for item in metrics:
             campaigns = item.pop("campaigns", [])
             existing = await db.scalar(select(AdMetricDaily).where(AdMetricDaily.connection_id == row.id, AdMetricDaily.date == item["date"]))
@@ -410,6 +655,8 @@ async def sync_connection(connection_id: int, request: Request, db: AsyncSession
         row.status = "connected"; row.last_error = None; row.last_synced_at = datetime.now(timezone.utc)
         await db.commit()
     except Exception as exc:
+        await db.rollback()
+        row = await db.get(AdConnection, connection_id)
         row.status = "error"; row.last_error = str(exc)[:1500]; await db.commit()
         raise HTTPException(422, row.last_error)
     metric_dates = [item["date"] for item in metrics]
@@ -421,8 +668,10 @@ async def sync_connection(connection_id: int, request: Request, db: AsyncSession
 @router.delete("/connections/{connection_id}", status_code=204)
 async def remove_connection(connection_id: int, request: Request, db: AsyncSession = Depends(get_db)):
     check_origin(request)
-    if not await db.get(AdConnection, connection_id): raise HTTPException(404, "Подключение не найдено")
-    await db.execute(delete(AdConnection).where(AdConnection.id == connection_id)); await db.commit()
+    row = await db.get(AdConnection, connection_id)
+    if not row: raise HTTPException(404, "Подключение не найдено")
+    row.status = "disconnected"
+    await db.commit()
 
 
 @router.get("/summary")

@@ -1,0 +1,18 @@
+[Unit]
+Description=StepToLead Docker egress through the reachable public IPv4
+Requires=docker.service
+After=docker.service
+PartOf=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStartPre=-/usr/sbin/iptables -t nat -D POSTROUTING -s 172.17.0.0/16 -o eth0 -j SNAT --to-source 200.165.231.11
+ExecStartPre=-/usr/sbin/iptables -t nat -D POSTROUTING -s 172.18.0.0/16 -o eth0 -j SNAT --to-source 200.165.231.11
+ExecStart=/usr/sbin/iptables -t nat -I POSTROUTING 1 -s 172.17.0.0/16 -o eth0 -j SNAT --to-source 200.165.231.11
+ExecStart=/usr/sbin/iptables -t nat -I POSTROUTING 1 -s 172.18.0.0/16 -o eth0 -j SNAT --to-source 200.165.231.11
+ExecStop=-/usr/sbin/iptables -t nat -D POSTROUTING -s 172.18.0.0/16 -o eth0 -j SNAT --to-source 200.165.231.11
+ExecStop=-/usr/sbin/iptables -t nat -D POSTROUTING -s 172.17.0.0/16 -o eth0 -j SNAT --to-source 200.165.231.11
+
+[Install]
+WantedBy=multi-user.target

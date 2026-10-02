@@ -2,7 +2,7 @@ import re
 
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.routes.access import rate_limit
@@ -63,6 +63,8 @@ async def save_lead(payload: GrowthContact, request: Request, db: AsyncSession =
 
 @admin_router.get("/leads")
 async def list_growth_leads(offset: int = 0, db: AsyncSession = Depends(get_db)):
-    rows = (await db.scalars(select(GrowthCalculation).order_by(GrowthCalculation.created_at.desc()).offset(max(0, offset)).limit(50))).all()
+    rows = (await db.scalars(select(GrowthCalculation).where(or_(GrowthCalculation.phone.is_not(None),
+        GrowthCalculation.telegram.is_not(None), GrowthCalculation.email.is_not(None)))
+        .order_by(GrowthCalculation.created_at.desc()).offset(max(0, offset)).limit(50))).all()
     return [{"id": row.id, "name": row.name, "phone": row.phone, "telegram": row.telegram, "email": row.email,
              "inputs": row.inputs, "results": row.results, "status": row.status, "created_at": row.created_at} for row in rows]

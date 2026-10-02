@@ -12,6 +12,28 @@ class ClientWorkspace(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(180), unique=True, index=True)
     status: Mapped[str] = mapped_column(String(24), default="active")
+    legal_name: Mapped[str | None] = mapped_column(String(240))
+    contact_email: Mapped[str | None] = mapped_column(String(254))
+    contact_phone: Mapped[str | None] = mapped_column(String(64))
+    website: Mapped[str | None] = mapped_column(String(500))
+    timezone: Mapped[str] = mapped_column(String(80), default="Europe/Moscow")
+    currency: Mapped[str] = mapped_column(String(12), default="RUB")
+    logo_data: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Project(Base):
+    __tablename__ = "projects"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    workspace_id: Mapped[int] = mapped_column(ForeignKey("client_workspaces.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(180))
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False)
+    website: Mapped[str | None] = mapped_column(String(500))
+    description: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(24), default="active")
+    timezone: Mapped[str | None] = mapped_column(String(80))
+    meeting_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -20,10 +42,15 @@ class AdConnection(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     workspace_id: Mapped[int] = mapped_column(ForeignKey("client_workspaces.id", ondelete="CASCADE"), index=True)
+    project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id"), index=True)
     platform: Mapped[str] = mapped_column(String(32), index=True)
     name: Mapped[str] = mapped_column(String(180))
     external_account_id: Mapped[str] = mapped_column(String(180))
     access_token_encrypted: Mapped[str] = mapped_column(Text)
+    vk_client_id_encrypted: Mapped[str | None] = mapped_column(Text)
+    vk_client_secret_encrypted: Mapped[str | None] = mapped_column(Text)
+    vk_refresh_token_encrypted: Mapped[str | None] = mapped_column(Text)
+    vk_access_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(String(24), default="pending")
     currency: Mapped[str | None] = mapped_column(String(12))
     last_error: Mapped[str | None] = mapped_column(Text)
@@ -66,6 +93,7 @@ class AdHypothesis(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     workspace_id: Mapped[int] = mapped_column(ForeignKey("client_workspaces.id", ondelete="CASCADE"), index=True)
+    project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id"), index=True)
     name: Mapped[str] = mapped_column(String(220))
     audience: Mapped[str | None] = mapped_column(Text)
     offer: Mapped[str | None] = mapped_column(Text)
@@ -93,9 +121,25 @@ class PortalUser(Base):
     password_hash: Mapped[str] = mapped_column(Text)
     display_name: Mapped[str] = mapped_column(String(160))
     role: Mapped[str] = mapped_column(String(32), index=True)
+    manage_sources: Mapped[bool] = mapped_column(Boolean, default=False)
+    manage_integrations: Mapped[bool] = mapped_column(Boolean, default=False)
+    phone: Mapped[str | None] = mapped_column(String(64))
+    permissions: Mapped[list | None] = mapped_column(JSON)
+    last_activity_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     must_change_password: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PortalProjectAccess(Base):
+    __tablename__ = "portal_project_access"
+    __table_args__ = (UniqueConstraint("user_id", "project_id", name="uq_portal_user_project"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("portal_users.id", ondelete="CASCADE"), index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    manage_sources: Mapped[bool] = mapped_column(Boolean, default=False)
+    manage_integrations: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class PortalSession(Base):
@@ -124,14 +168,20 @@ class ClientLead(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     workspace_id: Mapped[int] = mapped_column(ForeignKey("client_workspaces.id", ondelete="CASCADE"), index=True)
+    project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id"), index=True)
+    source_id: Mapped[int | None] = mapped_column(ForeignKey("project_sources.id"), index=True)
+    qualified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    meeting_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     assigned_to_id: Mapped[int | None] = mapped_column(ForeignKey("portal_users.id", ondelete="SET NULL"), index=True)
     full_name: Mapped[str] = mapped_column(String(180))
     phone: Mapped[str | None] = mapped_column(String(64))
     email: Mapped[str | None] = mapped_column(String(254))
+    telegram: Mapped[str | None] = mapped_column(String(120))
     source: Mapped[str] = mapped_column(String(120), default="Вручную")
     status: Mapped[str] = mapped_column(String(32), default="new", index=True)
-    value: Mapped[float] = mapped_column(Numeric(16, 2), default=0)
+    value: Mapped[float | None] = mapped_column(Numeric(16, 2))
     notes: Mapped[str | None] = mapped_column(Text)
+    lost_reason: Mapped[str | None] = mapped_column(Text)
     next_action_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -154,6 +204,7 @@ class LeadInboundSource(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     workspace_id: Mapped[int] = mapped_column(ForeignKey("client_workspaces.id", ondelete="CASCADE"), index=True)
+    project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id"), index=True)
     name: Mapped[str] = mapped_column(String(180))
     token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     token_prefix: Mapped[str] = mapped_column(String(12))
@@ -192,3 +243,87 @@ class ClientLeadAttribution(Base):
     utm_term: Mapped[str | None] = mapped_column(String(500))
     landing_url: Mapped[str | None] = mapped_column(String(1500))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ClientSale(Base):
+    __tablename__ = "client_sales"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    lead_id: Mapped[int] = mapped_column(ForeignKey("client_leads.id", ondelete="CASCADE"), index=True)
+    deal_id: Mapped[int | None] = mapped_column(ForeignKey("crm_deals.id"), index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    amount: Mapped[float | None] = mapped_column(Numeric(16, 2))
+    comment: Mapped[str | None] = mapped_column(Text)
+    confirmed_by_id: Mapped[int | None] = mapped_column(ForeignKey("portal_users.id", ondelete="SET NULL"))
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ProjectEconomics(Base):
+    __tablename__ = "project_economics"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), unique=True, index=True)
+    growth_calculation_id: Mapped[int] = mapped_column(ForeignKey("growth_calculations.id"))
+    allowable_cac: Mapped[float | None] = mapped_column(Numeric(16, 2))
+    activated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ProjectSource(Base):
+    __tablename__ = "project_sources"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(180))
+    kind: Mapped[str] = mapped_column(String(20))
+    method: Mapped[str] = mapped_column(String(20))
+    category: Mapped[str | None] = mapped_column(String(80))
+    status: Mapped[str] = mapped_column(String(24), default="active")
+    data_mode: Mapped[str | None] = mapped_column(String(20))
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("portal_users.id", ondelete="SET NULL"))
+    source_metadata: Mapped[dict | None] = mapped_column("metadata", JSON)
+    connection_id: Mapped[int | None] = mapped_column(ForeignKey("ad_connections.id", ondelete="SET NULL"), unique=True)
+    inbound_source_id: Mapped[int | None] = mapped_column(ForeignKey("lead_inbound_sources.id", ondelete="SET NULL"), unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class SourceMetricDaily(Base):
+    __tablename__ = "source_metrics_daily"
+    __table_args__ = (UniqueConstraint("source_id", "date", name="uq_source_metric_day"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source_id: Mapped[int] = mapped_column(ForeignKey("project_sources.id", ondelete="CASCADE"), index=True)
+    date: Mapped[date] = mapped_column(Date)
+    spend: Mapped[float | None] = mapped_column(Numeric(16, 2))
+    impressions: Mapped[int | None] = mapped_column()
+    clicks: Mapped[int | None] = mapped_column()
+    aggregated_leads: Mapped[int | None] = mapped_column()
+    aggregated_qualified: Mapped[int | None] = mapped_column()
+    aggregated_sales: Mapped[int | None] = mapped_column()
+    aggregated_revenue: Mapped[float | None] = mapped_column(Numeric(16, 2))
+
+
+class ProjectLostReason(Base):
+    __tablename__ = "project_lost_reasons"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    label: Mapped[str] = mapped_column(String(160))
+    is_system: Mapped[bool] = mapped_column(Boolean, default=False)
+    status: Mapped[str] = mapped_column(String(24), default="active")
+    position: Mapped[int] = mapped_column(default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ProjectNotificationRule(Base):
+    __tablename__ = "project_notification_rules"
+    __table_args__ = (UniqueConstraint("project_id", "event_key", name="uq_project_notification_rule"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    event_key: Mapped[str] = mapped_column(String(48))
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    threshold: Mapped[float | None] = mapped_column(Numeric(12, 2))
+    in_app: Mapped[bool] = mapped_column(Boolean, default=True)
+    email: Mapped[bool] = mapped_column(Boolean, default=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

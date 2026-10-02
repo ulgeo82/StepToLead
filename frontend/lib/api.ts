@@ -59,7 +59,7 @@ export type TelegramAccount = {
 
 export type ClientWorkspace = { id: number; name: string; status: string; created_at: string };
 export type AdConnection = {
-  id: number; workspace_id: number; workspace_name?: string; platform: "meta" | "yandex";
+  id: number; workspace_id: number; workspace_name?: string; platform: "meta" | "yandex" | "vk_ads";
   platform_name: string; name: string; external_account_id: string; status: string;
   currency: string | null; last_error: string | null; last_checked_at: string | null;
   last_synced_at: string | null; created_at: string;
@@ -74,7 +74,7 @@ export type CrmLeadStatus = "new" | "contacted" | "qualified" | "proposal" | "wo
 export type CrmLead = {
   id: number; workspace_id: number; assigned_to_id: number | null; assigned_to_name: string | null;
   full_name: string; phone: string | null; email: string | null; source: string; status: CrmLeadStatus;
-  status_name: string; value: number; notes: string | null; next_action_at: string | null;
+  status_name: string; value: number | null; notes: string | null; next_action_at: string | null;
   created_at: string; updated_at: string;
 };
 export type LeadInboundSource = {
