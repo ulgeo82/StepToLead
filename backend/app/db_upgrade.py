@@ -45,7 +45,11 @@ def upgrade_existing_schema(connection):
         "project_sources": {"category": "VARCHAR(80)", "status": "VARCHAR(24) NOT NULL DEFAULT 'active'",
                             "data_mode": "VARCHAR(20)", "created_by_id": "INTEGER REFERENCES portal_users(id)",
                             "metadata": "JSON"},
-        "crm_contacts": {"phone_normalized": "VARCHAR(32)", "email_normalized": "VARCHAR(254)"},
+        "crm_contacts": {"phone_normalized": "VARCHAR(32)", "email_normalized": "VARCHAR(254)",
+                         "position": "VARCHAR(120)", "notes": "TEXT", "tags": "JSON"},
+        "crm_deals": {"tags": "JSON", "stage_entered_at": "TIMESTAMP WITH TIME ZONE",
+                      "last_activity_at": "TIMESTAMP WITH TIME ZONE",
+                      "first_response_at": "TIMESTAMP WITH TIME ZONE", "automation_state": "JSON"},
         "crm_inbound": {"website_session_id": "INTEGER REFERENCES website_sessions(id)"},
         "website_sessions": {"engaged": "BOOLEAN NOT NULL DEFAULT false",
                              "cta_clicked": "BOOLEAN NOT NULL DEFAULT false",
@@ -57,6 +61,11 @@ def upgrade_existing_schema(connection):
         for name, declaration in additions.items():
             if name not in existing:
                 connection.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {name} {declaration}")
+    if "crm_deals" in inspector.get_table_names():
+        connection.execute(text("UPDATE crm_deals SET stage_entered_at = COALESCE(updated_at, created_at) "
+                                "WHERE stage_entered_at IS NULL"))
+        connection.execute(text("UPDATE crm_deals SET last_activity_at = COALESCE(updated_at, created_at) "
+                                "WHERE last_activity_at IS NULL"))
     if "crm_inbound" in inspector.get_table_names():
         indexes = {index["name"] for index in inspector.get_indexes("crm_inbound")}
         if "ix_crm_inbound_website_session_id" not in indexes:

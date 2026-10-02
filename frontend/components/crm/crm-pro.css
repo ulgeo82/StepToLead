@@ -1,0 +1,231 @@
+/* CRM 2.0 — kanban, deal card, contacts, automation and sales analytics */
+.crmOkBar{display:flex;justify-content:space-between;gap:10px;margin:0 0 12px;padding:10px 12px;border-radius:8px;background:#e8f7ee;color:#17693d;font-size:12px}
+.crmOkBar button,.resultError button{border:0;background:none;color:inherit;cursor:pointer;font-size:16px}
+.crmTabs b{margin-left:6px}
+.crmFiltersPro{flex-wrap:wrap}
+.crmFiltersPro select{max-width:190px}
+.crmTagInput{width:110px!important}
+.crmToggle,.crmGhost{min-height:36px;padding:0 12px;border:1px solid #dce5f2;border-radius:7px;background:#fff;color:#40556f;font-size:12px;cursor:pointer;white-space:nowrap}
+.crmToggle.on{border-color:#006bfd;background:#eaf2ff;color:#006bfd;font-weight:650}
+.crmGhost:hover,.crmToggle:hover{border-color:#a9c9f7}
+.crmLinkButton{padding:0;border:0;background:none;color:#006bfd;font-size:11px;cursor:pointer}
+.crmLinkButton:disabled{opacity:.5}
+.crmDanger{color:#c43a4f!important}
+.crmCounters{grid-template-columns:repeat(5,minmax(0,1fr))}
+.crmCountSum{cursor:default;background:#f6faff}
+.crmCountSum strong{font-size:18px!important}
+.crmColumn>header{gap:8px}
+.crmColumn>header div{display:flex;flex-direction:column;gap:3px;min-width:0}
+.crmColumn>header small{color:#6c829e;font-size:10px;font-weight:600}
+.crmCard{position:relative}
+.crmCard.idle{border-left:3px solid #f0a400}
+.crmCardTop{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+.crmCardTop strong{white-space:nowrap}
+.crmCardTags{display:flex;gap:4px;flex-wrap:wrap}
+.crmCardTags i{padding:2px 6px;border-radius:9px;background:#f1edff;color:#6a45d8;font-size:9px;font-style:normal}
+.crmCardFoot{display:flex;justify-content:space-between;align-items:center;gap:6px}
+.crmCardAge{color:#8a9bb3;font-size:9px;white-space:nowrap}
+.crmEmpty{color:#8b9cb3;font-size:11px;text-align:center}
+.crmBulk{position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:-4px -4px 10px;padding:10px;border-radius:8px;background:#0f2a4d;color:#fff;font-size:12px}
+.crmBulk select,.crmBulk input{min-height:32px;padding:0 8px;border:0;border-radius:6px;font-size:11px}
+.crmBulk button{min-height:32px;padding:0 10px;border:0;border-radius:6px;background:#fff;color:#0f2a4d;font-size:11px;cursor:pointer}
+.crmBulk .crmLinkButton{background:none;color:#cfe2ff}
+.crmList table tr.selected td{background:#f0f6ff}
+.crmList table tbody tr{cursor:pointer}
+.crmInlineTags{display:block;color:#6a45d8;font-size:10px}
+.crmBad{color:#cc3550!important}
+.crmGood{color:#148747}
+.crmSearch{min-height:36px;width:min(300px,100%);padding:8px 10px;border:1px solid #dce5f2;border-radius:7px}
+.crmMuted{color:#7b8ea8;font-size:11px}
+.crmPre{white-space:pre-wrap;overflow-wrap:anywhere}
+.crmTaskGroups .overdue h3{color:#cc3550}
+.crmTaskGroups .today h3{color:#148747}
+.crmInboundPro{align-items:flex-start}
+.crmInboundPro>div:first-child{display:flex;flex-direction:column;gap:4px;min-width:0}
+.crmInboundPro p{margin:4px 0 0;color:#2c405c;font-size:12px}
+.crmInboundActions{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end;max-width:420px}
+.crmInboundActions .crmPrimary{min-height:32px;padding:0 12px;font-size:11px}
+.crmPipelines{display:grid;gap:6px;margin-bottom:22px}
+.crmPipelines>div{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid #e3eaf5;border-radius:9px}
+.crmPipelines>div.active{border-color:#8bbcff;background:#f5f9ff}
+.crmPipelines button{padding:5px 9px;border:1px solid #d6e3f5;border-radius:6px;background:#fff;color:#006bfd;font-size:10px;cursor:pointer}
+.crmPipelines .crmPipelineName{flex:1;border:0;background:none;padding:0;text-align:left;color:#14253e;font-size:13px;font-weight:700}
+.crmPipelineName small{margin-left:8px;padding:2px 6px;border-radius:6px;background:#e8f1ff;color:#006bfd;font-size:9px;font-weight:600}
+.crmPipelines span{color:#7b8ea8;font-size:11px}
+
+/* modals */
+.crmModal{width:min(560px,100%)}
+.crmModalLead{margin:0 0 10px;color:#61748f;font-size:12px;line-height:1.45}
+.crmChips{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 10px}
+.crmChips button{padding:5px 9px;border:1px solid #d6e3f5;border-radius:14px;background:#f6f9fe;color:#33506f;font-size:11px;cursor:pointer}
+.crmChips button.active,.crmChips button:hover{border-color:#006bfd;background:#eaf2ff;color:#006bfd}
+.crmCheck{flex-direction:row!important;align-items:center;gap:8px}
+.crmCheck small{color:#8193ab}
+.crmNextTask{padding:10px 12px;border-radius:10px;background:#f6f9fe}
+.crmFormError{margin:8px 0;padding:8px 10px;border-radius:7px;background:#fff0f1;color:#b8344a;font-size:12px}
+.crmOk{margin:8px 0;padding:8px 10px;border-radius:7px;background:#e8f7ee;color:#17693d;font-size:12px}
+.crmFormActions{display:flex;gap:8px;justify-content:flex-end}
+.crmFormActions .resultPrimary{width:auto;padding:0 18px;margin:0}
+.crmPicker{position:relative}
+.crmPickerList{position:absolute;z-index:3;left:0;right:0;display:flex;flex-direction:column;max-height:220px;overflow:auto;border:1px solid #d6e3f5;border-radius:8px;background:#fff;box-shadow:0 10px 25px #12305a22}
+.crmPickerList.static{position:static;box-shadow:none;margin-top:8px}
+.crmPickerList button{display:flex;flex-direction:column;align-items:flex-start;gap:2px;padding:9px 11px;border:0;border-bottom:1px solid #eef2f8;background:#fff;color:#14253e;font-size:12px;text-align:left;cursor:pointer}
+.crmPickerList button:hover{background:#f2f7ff}
+.crmPickerList small{color:#7b8ea8;font-size:10px}
+.crmFieldset{margin:0 0 12px;padding:10px 12px;border:1px solid #e3eaf5;border-radius:10px}
+.crmFieldset legend{padding:0 6px;color:#40556f;font-size:12px;font-weight:700}
+.crmFieldset>select{width:100%;min-height:36px;margin-bottom:8px}
+.crmChecks{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.crmChecks label{flex-direction:row!important;align-items:center;gap:6px}
+
+/* deal card */
+.crmCardBackdrop{position:fixed;inset:0;z-index:49;background:#0f1d3266}
+.crmCardPanel{position:fixed;z-index:50;top:0;right:0;bottom:0;width:min(1060px,100vw);display:flex;flex-direction:column;background:#f6f9fd;box-shadow:-20px 0 60px #10284a33;color:#14243b;animation:crmSlide .18s ease-out}
+@keyframes crmSlide{from{transform:translateX(30px);opacity:.6}to{transform:none;opacity:1}}
+.crmCardLoading{margin:auto;color:#6f839e}
+.crmCardHeader{display:flex;justify-content:space-between;gap:16px;padding:18px 22px 10px;background:#fff}
+.crmCardTitle{min-width:0;flex:1}
+.crmCardTitle small{color:#7b8ea8;font-size:11px}
+.crmCardTitle h2{margin:4px 0;font-size:22px}
+.crmTitleInput{width:100%;margin:4px 0;padding:2px 4px;border:1px solid transparent;border-radius:6px;background:transparent;color:#0f2140;font-size:22px;font-weight:750}
+.crmTitleInput:hover,.crmTitleInput:focus{border-color:#cfe0f6;background:#fff;outline:none}
+.crmCardMeta{display:flex;flex-wrap:wrap;gap:8px;align-items:center;color:#61748f;font-size:11px}
+.crmCardMeta strong{color:#0f2140;font-size:17px}
+.crmIdle{padding:3px 7px;border-radius:6px;background:#fff3dd;color:#a26200}
+.crmArchived{padding:3px 7px;border-radius:6px;background:#eceff4;color:#5d6d82}
+.crmClose{width:36px;height:36px;border:0;border-radius:8px;background:#f0f4fa;color:#40556f;font-size:22px;cursor:pointer}
+.crmRibbon{display:flex;gap:3px;padding:0 22px 12px;background:#fff;overflow-x:auto}
+.crmRibbon button{--stage:#006bfd;flex:1;min-width:110px;position:relative;padding:9px 12px;border:0;background:#edf1f7;color:#5a6e89;font-size:11px;font-weight:600;cursor:pointer;clip-path:polygon(0 0,calc(100% - 10px) 0,100% 50%,calc(100% - 10px) 100%,0 100%,10px 50%)}
+.crmRibbon button:first-child{clip-path:polygon(0 0,calc(100% - 10px) 0,100% 50%,calc(100% - 10px) 100%,0 100%);border-radius:6px 0 0 6px}
+.crmRibbon button.passed{background:color-mix(in srgb,var(--stage) 22%,#fff);color:#1d3557}
+.crmRibbon button.current{background:var(--stage);color:#fff}
+.crmRibbon button.lost{flex:0 0 auto;min-width:90px;clip-path:none;border-radius:6px;margin-left:8px;background:#fff0f1;color:#c43a4f}
+.crmRibbon button.lost.current{background:#e5485f;color:#fff}
+.crmRibbon button:disabled{cursor:default}
+.crmRibbon button:not(:disabled):hover{filter:brightness(.96)}
+.crmQuick{display:flex;flex-wrap:wrap;gap:6px;padding:10px 22px;border-top:1px solid #edf1f7;border-bottom:1px solid #e3e9f2;background:#fff}
+.crmQuick a,.crmQuick button{display:inline-flex;align-items:center;min-height:32px;padding:0 12px;border:1px solid #d6e3f5;border-radius:8px;background:#fff;color:#1d3b63;font-size:12px;font-weight:600;text-decoration:none;cursor:pointer}
+.crmQuick a:hover,.crmQuick button:hover{border-color:#006bfd;color:#006bfd}
+.crmCardError,.crmCardNotice{margin:10px 22px 0;padding:8px 12px;border-radius:8px;font-size:12px}
+.crmCardError{background:#fff0f1;color:#b8344a}
+.crmCardError button{border:0;background:none;color:inherit;cursor:pointer}
+.crmCardNotice{background:#e8f7ee;color:#17693d}
+.crmCardBody{flex:1;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.15fr);gap:14px;padding:14px 22px 22px;overflow:auto}
+.crmCardMain,.crmCardFeed{display:flex;flex-direction:column;gap:12px;min-width:0}
+.crmBlock{padding:14px 16px;border:1px solid #e3e9f2;border-radius:12px;background:#fff}
+.crmBlock h3{margin:0 0 10px;color:#3c516d;font-size:11px;font-weight:750;text-transform:uppercase;letter-spacing:.4px}
+.crmBlockHead{display:flex;justify-content:space-between;align-items:baseline}
+.crmBlock p{margin:4px 0;font-size:12px}
+.crmBlock a{color:#006bfd}
+.crmContactName{padding:0;border:0;background:none;color:#0f2140;font-size:16px;font-weight:750;cursor:pointer;text-align:left}
+.crmContactName:hover{color:#006bfd}
+.crmFieldGrid{display:grid;grid-template-columns:1fr 1fr;gap:9px 10px}
+.crmFieldGrid label{display:flex;flex-direction:column;gap:4px;color:#6c7f99;font-size:10px}
+.crmFieldGrid input,.crmFieldGrid select{min-height:34px;padding:6px 8px;border:1px solid #dce5f2;border-radius:7px;background:#fff;color:#14253e;font-size:12px}
+.crmFieldGrid input:disabled,.crmFieldGrid select:disabled{background:#f6f8fb}
+.crmTags{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:12px}
+.crmTags span{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:12px;background:#f1edff;color:#6a45d8;font-size:11px}
+.crmTags span button{padding:0;border:0;background:none;color:#8b74d9;cursor:pointer}
+.crmTags input{width:90px;min-height:26px;padding:0 8px;border:1px dashed #c9bdf5;border-radius:12px;font-size:11px}
+.crmLostNote{margin-top:10px!important;padding:8px 10px;border-radius:8px;background:#fff0f1;color:#a83246}
+.crmKV{display:grid;grid-template-columns:120px minmax(0,1fr);gap:8px}
+.crmKV>span:first-child{color:#7b8ea8}
+.crmWarnLine{margin:0 0 10px;padding:8px 10px;border-radius:8px;background:#fff6e5;color:#9a5d00;font-size:12px}
+.crmTaskItem{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:9px 10px;border:1px solid #e6edf6;border-radius:9px;margin-bottom:6px}
+.crmTaskItem.overdue{border-color:#f5c2cb;background:#fff7f8}
+.crmTaskItem div{display:flex;flex-direction:column;gap:3px;min-width:0}
+.crmTaskItem b{font-size:12px}
+.crmTaskItem small{color:#7b8ea8;font-size:10px}
+.crmTaskItem button{flex:none;padding:6px 10px;border:1px solid #bcd6fb;border-radius:7px;background:#f3f8ff;color:#006bfd;font-size:11px;cursor:pointer}
+.crmComposer{margin-bottom:12px}
+.crmComposerTabs{display:flex;gap:4px;margin-bottom:6px}
+.crmComposerTabs button{padding:5px 10px;border:0;border-radius:6px;background:#f0f4fa;color:#50647f;font-size:11px;cursor:pointer}
+.crmComposerTabs button.active{background:#006bfd;color:#fff}
+.crmComposer textarea{width:100%;min-height:64px;padding:9px;border:1px solid #dce5f2;border-radius:8px;font:inherit;font-size:12px;resize:vertical}
+.crmComposer .crmPrimary{margin-top:6px;min-height:32px;font-size:12px}
+.crmTimeline{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.crmTimeline li{display:grid;grid-template-columns:26px minmax(0,1fr);gap:8px;padding:8px 0;border-top:1px solid #f0f3f8}
+.crmTimeline i{width:24px;height:24px;display:grid;place-items:center;border-radius:50%;background:#eef3fa;font-size:11px;font-style:normal}
+.crmTimeline p{margin:0 0 2px!important;color:#1f3350}
+.crmTimeline small{color:#8b9cb3;font-size:10px}
+.crmTimeline li.comment p{padding:8px 10px;border-radius:0 10px 10px 10px;background:#fff8e1}
+.crmTimeline li.touch i{background:#e5f6ff}
+.crmTimeline li.auto i{background:#fff3dd}
+.crmTimeline li.won i{background:#e3f7ea}
+.crmTimeline li.lost i{background:#ffecef}
+.crmTimeline li.stage p{font-weight:650}
+
+/* contact card */
+.crmContactModal{width:min(680px,100%)}
+.crmContactStats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
+.crmContactStats div{padding:10px;border-radius:9px;background:#f4f8fd}
+.crmContactStats span{display:block;color:#7b8ea8;font-size:10px}
+.crmContactStats b{font-size:16px}
+.crmDupes{display:flex;flex-direction:column;gap:5px;margin-bottom:12px;padding:10px;border-radius:9px;background:#fff6e5;color:#7d4c00;font-size:12px}
+.crmDupes span{display:flex;justify-content:space-between;gap:8px;align-items:center}
+.crmDupes button{padding:4px 9px;border:1px solid #e6b866;border-radius:6px;background:#fff;color:#8a5600;font-size:11px;cursor:pointer}
+.crmContactInfo p{margin:3px 0;font-size:13px}
+.crmContactInfo .crmQuick{padding:10px 0;border:0}
+.crmNotes{padding:9px 11px;border-radius:9px;background:#fffbea;font-size:12px}
+.crmSub{margin:16px 0 8px;color:#3c516d;font-size:12px;text-transform:uppercase;letter-spacing:.4px}
+.crmContactDeals{display:flex;flex-direction:column;gap:6px}
+.crmContactDeals button{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 12px;border:1px solid #e3eaf5;border-radius:9px;background:#fff;text-align:left;cursor:pointer}
+.crmContactDeals button:hover{border-color:#8bbcff}
+.crmContactDeals span{display:flex;flex-direction:column;gap:2px}
+.crmContactDeals small{color:#7b8ea8;font-size:10px}
+.crmContactForm label{display:flex;flex-direction:column;gap:4px}
+
+/* automation */
+.crmHeadActions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.crmHeadActions select{min-height:36px;padding:0 8px;border:1px solid #dce5f2;border-radius:7px}
+.crmAutoStages{display:flex;gap:10px;overflow-x:auto;padding:4px 0 12px}
+.crmAutoColumn{--stage:#006bfd;min-width:250px;width:250px;padding:8px;border-radius:10px;background:#f3f7fc}
+.crmAutoColumn>header{padding:8px 6px 10px;border-top:3px solid var(--stage);color:#14253e;font-size:12px;font-weight:700}
+.crmAutoColumn article{display:flex;flex-direction:column;gap:4px;margin-bottom:8px;padding:10px;border:1px solid #e1e9f4;border-radius:9px;background:#fff}
+.crmAutoColumn article.off{opacity:.55}
+.crmAutoColumn article small{color:#7b8ea8;font-size:10px}
+.crmAutoColumn article b{font-size:12px}
+.crmAutoColumn article span{color:#5b3fc4;font-size:11px}
+.crmAutoColumn article em{color:#97a7bc;font-size:10px;font-style:normal}
+.crmAutoColumn article div{display:flex;gap:4px;flex-wrap:wrap;margin-top:4px}
+.crmAutoColumn article div button{padding:3px 7px;border:1px solid #dbe6f5;border-radius:5px;background:#fff;color:#006bfd;font-size:10px;cursor:pointer}
+.crmAutoHint{margin-top:6px;padding:12px 14px;border-radius:10px;background:#f4f0ff;color:#4a3596;font-size:12px;line-height:1.5}
+
+/* sales report */
+.crmReport{display:flex;flex-direction:column;gap:12px}
+.crmReportHead{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap}
+.crmReportHead h2{margin:0;font-size:20px}
+.crmReportHead p{margin:4px 0 0;color:#778aa4;font-size:12px}
+.crmReportFilters{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap}
+.crmReportFilters label{display:flex;flex-direction:column;gap:3px;color:#72829a;font-size:10px}
+.crmReportFilters input,.crmReportFilters select{min-height:34px;padding:0 8px;border:1px solid #dce5f2;border-radius:7px}
+.crmKpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.crmKpi{display:flex;flex-direction:column;gap:4px;padding:14px;border:1px solid #e3e9f2;border-radius:12px;background:#fff}
+.crmKpi span{color:#6f829d;font-size:11px}
+.crmKpi strong{color:#0f2140;font-size:22px;letter-spacing:-.5px}
+.crmKpi small{color:#8b9cb3;font-size:10px}
+.crmKpi.good strong{color:#138048}
+.crmKpi.warn strong{color:#b06d00}
+.crmKpi.bad strong{color:#c8344b}
+.crmReportGrid{display:grid;grid-template-columns:1.3fr 1fr;gap:12px}
+.crmReportCard{padding:16px;border:1px solid #e3e9f2;border-radius:12px;background:#fff}
+.crmReportCard h3{margin:0 0 12px;font-size:14px}
+.crmFunnelRow{display:grid;grid-template-columns:140px minmax(0,1fr) 54px 92px;gap:10px;align-items:center;margin-bottom:8px;font-size:12px}
+.crmFunnelRow>div{height:22px;border-radius:6px;background:#f0f4fa;overflow:hidden}
+.crmFunnelRow i{display:block;height:100%;min-width:3px;border-radius:6px;background:#006bfd}
+.crmFunnelRow.lost i{background:#ef6b7e}
+.crmFunnelRow b{text-align:right}
+.crmFunnelRow small{color:#7b8ea8;font-size:10px}
+.crmTableScroll{overflow:auto}
+.crmTableScroll table{width:100%;border-collapse:collapse;font-size:12px}
+.crmTableScroll th{padding:8px;background:#f4f7fc;color:#667891;font-size:10px;font-weight:600;text-align:right;white-space:nowrap}
+.crmTableScroll td{padding:9px 8px;border-bottom:1px solid #edf2f8;text-align:right;white-space:nowrap}
+.crmTableScroll th:first-child,.crmTableScroll td:first-child{text-align:left}
+.crmTableScroll td.bad{color:#c8344b;font-weight:650}
+
+@media(max-width:1100px){.crmCardBody{grid-template-columns:1fr}.crmKpis{grid-template-columns:repeat(2,minmax(0,1fr))}.crmReportGrid{grid-template-columns:1fr}.crmCounters{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:700px){.crmFieldGrid{grid-template-columns:1fr}.crmKpis{grid-template-columns:1fr 1fr}.crmFunnelRow{grid-template-columns:90px minmax(0,1fr) 40px}.crmFunnelRow small{display:none}.crmCardHeader,.crmRibbon,.crmQuick,.crmCardBody{padding-left:14px;padding-right:14px}.crmContactStats{grid-template-columns:1fr}}
+.crmFiltersPro .crmView{margin-left:0}
+.crmFiltersPro .crmView button,.crmHeadActions select,.crmReportFilters select,.crmReportFilters input{font-size:12px}
+.crmHeadActions .crmPrimary,.crmSectionHead .crmPrimary{min-height:36px;padding:0 14px;font-size:12px}
+.crmFiltersPro select,.crmFiltersPro input{font-size:12px}

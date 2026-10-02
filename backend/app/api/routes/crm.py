@@ -1,4 +1,5 @@
 """Client CRM. Existing ClientLead/ClientSale remain the reporting facts."""
+import json
 import re
 from datetime import datetime, time, timedelta, timezone
 from decimal import Decimal
@@ -12,6 +13,7 @@ from app.core.access import check_origin, require_portal_user
 from app.core.permissions import effective_permissions, require_permission
 from app.db import get_db
 from app.services.notifications import flush_telegram, notify
+from app.services import crm_automation
 from app.models.crm import (CrmActivity, CrmContact, CrmCustomFieldDefinition, CrmDeal, CrmInbound,
                             CrmPipeline, CrmStage, CrmStageHistory, CrmTask, CrmTaskType)
 from app.models.marketing import (AdCampaignMetricDaily, AdConnection, AdHypothesisCampaign, ClientLead, ClientLeadAttribution, ClientLeadEvent, ClientSale,
@@ -35,7 +37,13 @@ def json_value(value):
 
 
 def norm_phone(value: str | None):
-    return re.sub(r"\D", "", value or "")
+    """Digits only, Russian numbers unified to 7XXXXXXXXXX so 8 999… and +7 999… match."""
+    digits = re.sub(r"\D", "", value or "")
+    if len(digits) == 11 and digits[0] == "8":
+        digits = "7" + digits[1:]
+    elif len(digits) == 10 and digits[0] == "9":
+        digits = "7" + digits
+    return digits
 
 
 def task_state(task: CrmTask | None):
@@ -104,8 +112,16 @@ async def deal_for(db: AsyncSession, user: PortalUser, deal_id: int):
     return deal
 
 
+HUMAN_TOUCH = {"COMMENT_ADDED", "TASK_COMPLETED", "STAGE_CHANGED", "CALL_LOGGED", "MESSAGE_SENT", "MEETING_HELD",
+               "DEAL_WON", "DEAL_LOST", "SALE_CREATED"}
+
+
 def activity(db, deal: CrmDeal | None, user: PortalUser | None, kind: str, payload: dict,
-             inbound: CrmInbound | None = None):
+             inbound: CrmInbound | None = None, touch: bool = True):
+    if deal is not None and touch:
+        deal.last_activity_at = now()
+        if user is not None and deal.first_response_at is None and kind in HUMAN_TOUCH:
+            deal.first_response_at = now()  # speed-to-lead: first real action by a person
     db.add(CrmActivity(workspace_id=(deal or inbound).workspace_id, project_id=(deal or inbound).project_id,
                        deal_id=deal.id if deal else None, inbound_id=inbound.id if inbound else None,
                        actor_id=user.id if user else None, actor_name=user.display_name if user else "Система",
@@ -210,7 +226,21 @@ def deal_json(deal: CrmDeal, contact: CrmContact, stage: CrmStage, task: CrmTask
             "origin": deal.origin, "custom_fields": deal.custom_fields or {},
             "attribution_snapshot": deal.attribution_snapshot or {}, "lost_reason_id": deal.lost_reason_id,
             "archived_at": deal.archived_at, "created_at": deal.created_at, "updated_at": deal.updated_at,
+            "tags": deal.tags or [], "stage_entered_at": deal.stage_entered_at,
+            "days_in_stage": days_since(deal.stage_entered_at or deal.created_at),
+            "last_activity_at": deal.last_activity_at,
+            "idle_days": days_since(deal.last_activity_at or deal.updated_at or deal.created_at),
+            "first_response_at": deal.first_response_at, "lost_comment": deal.lost_comment,
+            "closed_at": deal.closed_at,
             "next_task": task_json(task) if task else None, "task_state": task_state(task)}
+
+
+def days_since(value: datetime | None) -> int | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return max(0, (now() - value).days)
 
 
 def task_json(task: CrmTask):
@@ -252,7 +282,8 @@ class DealCreate(BaseModel):
 
 class DealUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    name: str | None = None
+    name: str | None = Field(default=None, min_length=2, max_length=220)
+    tags: list[str] | None = Field(default=None, max_length=20)
     amount: float | None = Field(default=None, ge=0)
     responsible_user_id: int | None = None
     source_id: int | None = None
@@ -279,8 +310,17 @@ class TaskCreate(BaseModel):
     priority: str = "NORMAL"
 
 
+class NextTask(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    type_code: str = "CALL"
+    title: str = Field(min_length=2, max_length=220)
+    due_at: datetime
+    responsible_user_id: int | None = None
+
+
 class TaskComplete(BaseModel):
     result: str = Field(min_length=1, max_length=4000)
+    next_task: NextTask | None = None
 
 
 class TaskUpdate(BaseModel):
@@ -350,6 +390,7 @@ async def create_deal_fact(db: AsyncSession, project: Project, contact: CrmConta
                    lead_id=lead.id, inbound_id=inbound.id if inbound else None, pipeline_id=pipeline.id,
                    stage_id=stage.id, responsible_user_id=owner_id, name=name, amount=amount,
                    source_id=source_id, origin=origin, custom_fields=custom_fields or {}, attribution_snapshot=snapshot or {},
+                   tags=[], stage_entered_at=now(), last_activity_at=now(), automation_state={},
                    **({"created_at": created_at} if created_at else {}))
     db.add(deal); await db.flush()
     db.add(ClientLeadEvent(workspace_id=project.workspace_id, lead_id=lead.id,
@@ -408,13 +449,16 @@ async def create_deal_fact(db: AsyncSession, project: Project, contact: CrmConta
     db.add(CrmStageHistory(deal_id=deal.id, from_stage_id=None, to_stage_id=stage.id,
                            actor_id=actor.id if actor else None))
     activity(db, deal, actor, "DEAL_CREATED", {"stage_id": stage.id, "lead_id": lead.id}, inbound)
+    await crm_automation.on_stage_enter(db, deal, stage, created=True)
     return deal
 
 
 @router.get("/projects/{project_id}/board")
 async def board(project_id: int, pipeline_id: int | None = None, page: int = Query(1, ge=1),
                 per_stage: int = Query(20, ge=1, le=100), state: str | None = None,
-                search: str | None = None, archived: bool = False, db: AsyncSession = Depends(get_db),
+                search: str | None = None, archived: bool = False, responsible_user_id: int | None = None,
+                source_id: int | None = None, tag: str | None = None, mine: bool = False,
+                idle_days: int | None = Query(None, ge=1, le=365), db: AsyncSession = Depends(get_db),
                 user: PortalUser = Depends(require_portal_user)):
     require_permission(user, "view_crm")
     await project_for(db, user, project_id)
@@ -428,7 +472,23 @@ async def board(project_id: int, pipeline_id: int | None = None, page: int = Que
     count_base = own_filter(select(CrmDeal.id).where(CrmDeal.project_id == project_id,
         CrmDeal.pipeline_id == pipeline.id, (CrmDeal.archived_at.is_not(None) if archived else CrmDeal.archived_at.is_(None)),
         CrmDeal.stage_id.in_([stage.id for stage in stages])), user)
-    if search: count_base = count_base.where(CrmDeal.name.ilike(f"%{search}%"))
+    def narrow(query):
+        if search:
+            term = f"%{search.strip()}%"
+            query = query.where(or_(CrmDeal.name.ilike(term), CrmDeal.contact_id.in_(select(CrmContact.id).where(
+                CrmContact.project_id == project_id, or_(CrmContact.name.ilike(term), CrmContact.phones.cast(String).ilike(term),
+                                                         CrmContact.emails.cast(String).ilike(term), CrmContact.company.ilike(term))))))
+        owner = user.id if mine else responsible_user_id
+        if owner: query = query.where(CrmDeal.responsible_user_id == owner)
+        if source_id: query = query.where(CrmDeal.source_id == source_id)
+        if tag:
+            # JSON may be stored with escaped non-ASCII; match both spellings, LIKE-escaped.
+            label = tag.strip()
+            query = query.where(or_(CrmDeal.tags.cast(String).contains(json.dumps(label), autoescape=True),
+                                    CrmDeal.tags.cast(String).contains(json.dumps(label, ensure_ascii=False), autoescape=True)))
+        if idle_days: query = query.where(CrmDeal.last_activity_at <= now() - timedelta(days=idle_days))
+        return query
+    count_base = narrow(count_base)
     counts = {}
     state_conditions = {"OVERDUE": due < midnight, "TODAY": (due >= midnight) & (due < tomorrow),
                         "PLANNED": due >= tomorrow, "NO_TASK": due.is_(None)}
@@ -442,11 +502,11 @@ async def board(project_id: int, pipeline_id: int | None = None, page: int = Que
                           .outerjoin(PortalUser, PortalUser.id == CrmDeal.responsible_user_id)
                           .where(CrmDeal.project_id == project_id, CrmDeal.stage_id == stage.id,
                                  (CrmDeal.archived_at.is_not(None) if archived else CrmDeal.archived_at.is_(None))), user)
-        if search:
-            base = base.where(CrmDeal.name.ilike(f"%{search}%"))
+        base = narrow(base)
         if state in state_conditions:
             base = base.where(state_conditions[state])
         total = await db.scalar(select(func.count()).select_from(base.subquery())) or 0
+        amount_total = await db.scalar(select(func.coalesce(func.sum(base.subquery().c.amount), 0))) or 0
         rows = (await db.execute(base.order_by(CrmDeal.updated_at.desc(), CrmDeal.id.desc())
                                  .offset((page - 1) * per_stage).limit(per_stage))).all()
         ids = [deal.id for deal, *_ in rows]
@@ -462,7 +522,7 @@ async def board(project_id: int, pipeline_id: int | None = None, page: int = Que
             items.append(item)
         columns.append({"stage": {"id": stage.id, "name": stage.name, "analytics_type": stage.analytics_type,
                                      "color": stage.color, "required_fields": stage.required_fields or []},
-                        "total": total, "deals": items, "has_more": page * per_stage < total})
+                        "total": total, "amount": float(amount_total), "deals": items, "has_more": page * per_stage < total})
     inbound_count = await db.scalar(select(func.count(CrmInbound.id)).where(
         CrmInbound.project_id == project_id, CrmInbound.status == "NEW")) or 0
     return {"pipeline": {"id": pipeline.id, "name": pipeline.name}, "columns": columns,
@@ -689,6 +749,8 @@ async def update_deal(deal_id: int, payload: DealUpdate, request: Request, db: A
     if "responsible_user_id" in changes:
         await validate_owner(db, deal.project_id, deal.workspace_id, changes["responsible_user_id"])
     lead = await db.get(ClientLead, deal.lead_id) if deal.lead_id else None
+    if "tags" in changes:
+        changes["tags"] = crm_automation.normalize_tags(changes["tags"])
     for key, value in changes.items():
         old = getattr(deal, key)
         if old == value:
@@ -697,7 +759,7 @@ async def update_deal(deal_id: int, payload: DealUpdate, request: Request, db: A
             await validate_custom_values(db, deal.project_id, value or {})
         setattr(deal, key, value)
         activity(db, deal, user, "ATTRIBUTION_CHANGED" if key == "source_id" else
-                 "OWNER_CHANGED" if key == "responsible_user_id" else "FIELD_CHANGED",
+                 "OWNER_CHANGED" if key == "responsible_user_id" else "TAGS_CHANGED" if key == "tags" else "FIELD_CHANGED",
                  {"field": key, "old": json_value(old), "new": json_value(value)})
         if lead and key == "amount": lead.value = value
         if lead and key == "responsible_user_id": lead.assigned_to_id = value
@@ -746,6 +808,7 @@ async def move_deal(deal_id: int, payload: StageMove, request: Request, db: Asyn
         raise HTTPException(422, {"message": "Заполните обязательные поля", "fields": missing})
     old_id = deal.stage_id
     deal.stage_id = stage.id
+    deal.stage_entered_at = now()
     if stage.analytics_type == "LOST":
         deal.lost_reason_id = payload.lost_reason_id
         deal.lost_comment = payload.lost_comment
@@ -771,8 +834,10 @@ async def move_deal(deal_id: int, payload: StageMove, request: Request, db: Asyn
         elif lead.status not in {"qualified", "won"}: lead.status = "new"
     if stage.analytics_type == "WON": activity(db, deal, user, "DEAL_WON", {"sale_required": True})
     if stage.analytics_type == "LOST": activity(db, deal, user, "DEAL_LOST", {"reason_id": payload.lost_reason_id})
+    automations = await crm_automation.on_stage_enter(db, deal, stage)
     await db.commit()
-    return {"ok": True, "sale_required": stage.analytics_type == "WON"}
+    flush_telegram(db)
+    return {"ok": True, "sale_required": stage.analytics_type == "WON", "automations": automations}
 
 
 @router.post("/deals/{deal_id}/sales", status_code=201)
@@ -911,6 +976,7 @@ async def accept_inbound(inbound_id: int, payload: InboundAction, request: Reque
     inbound.status = "ACCEPTED"; inbound.contact_id = contact.id; inbound.deal_id = deal.id; inbound.processed_at = now()
     activity(db, deal, user, "INBOUND_ACCEPTED", {"inbound_id": inbound.id}, inbound)
     await db.commit()
+    flush_telegram(db)
     return {"deal_id": deal.id, "contact_id": contact.id, "lead_id": deal.lead_id}
 
 
@@ -1010,11 +1076,24 @@ async def complete_task(task_id: int, payload: TaskComplete, request: Request,
     if task.status != "OPEN":
         raise HTTPException(409, "Задача уже закрыта")
     task.status = "COMPLETED"; task.result = payload.result; task.completed_at = now()
-    if task.deal_id:
-        deal = await deal_for(db, user, task.deal_id)
-        activity(db, deal, user, "TASK_COMPLETED", {"task_id": task.id, "result": payload.result})
+    deal = await deal_for(db, user, task.deal_id) if task.deal_id else None
+    if deal:
+        activity(db, deal, user, "TASK_COMPLETED", {"task_id": task.id, "title": task.title, "result": payload.result})
+    next_task = None
+    if payload.next_task:
+        follow = payload.next_task
+        if follow.type_code not in TASK_TYPES:
+            raise HTTPException(422, "Неизвестный тип задачи")
+        owner_id = follow.responsible_user_id or task.responsible_user_id or user.id
+        await validate_owner(db, task.project_id, task.workspace_id, owner_id)
+        next_task = CrmTask(workspace_id=task.workspace_id, project_id=task.project_id, deal_id=task.deal_id,
+                            contact_id=task.contact_id, type_code=follow.type_code, title=follow.title,
+                            responsible_user_id=owner_id, due_at=follow.due_at, created_by_id=user.id)
+        db.add(next_task); await db.flush()
+        if deal:
+            activity(db, deal, user, "TASK_CREATED", {"task_id": next_task.id, "title": next_task.title}, touch=False)
     await db.commit()
-    return {"ok": True, "create_next_task": True}
+    return {"ok": True, "next_task": task_json(next_task) if next_task else None}
 
 
 @router.patch("/tasks/{task_id}")

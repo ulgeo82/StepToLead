@@ -12,6 +12,7 @@ from app.db import Base, engine
 from app.db_upgrade import upgrade_existing_schema
 from app.services.avito_leads import run_worker as run_avito_worker
 from app.services.campaign_runner import run_campaigns
+from app.services.crm_automation import run_worker as run_crm_worker
 from app.services.telegram_parser import run_parser_worker
 
 
@@ -23,18 +24,22 @@ async def lifespan(_: FastAPI):
     runner = asyncio.create_task(run_campaigns())
     parser_worker = asyncio.create_task(run_parser_worker())
     avito_worker = asyncio.create_task(run_avito_worker())
+    crm_worker = asyncio.create_task(run_crm_worker())
     try:
         yield
     finally:
         runner.cancel()
         parser_worker.cancel()
         avito_worker.cancel()
+        crm_worker.cancel()
         with suppress(asyncio.CancelledError):
             await runner
         with suppress(asyncio.CancelledError):
             await parser_worker
         with suppress(asyncio.CancelledError):
             await avito_worker
+        with suppress(asyncio.CancelledError):
+            await crm_worker
         await engine.dispose()
 
 

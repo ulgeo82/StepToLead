@@ -506,8 +506,12 @@ async def create_crm_lead(payload: LeadCreate, request: Request, db: AsyncSessio
     deal = CrmDeal(workspace_id=user.workspace_id, project_id=project.id, contact_id=contact.id,
                    lead_id=lead.id, pipeline_id=pipeline.id, stage_id=stage.id,
                    responsible_user_id=lead.assigned_to_id, name=lead.full_name, amount=lead.value,
-                   origin="MANUAL", custom_fields={}, attribution_snapshot={})
+                   origin="MANUAL", custom_fields={}, attribution_snapshot={}, tags=[],
+                   stage_entered_at=datetime.now(timezone.utc), last_activity_at=datetime.now(timezone.utc),
+                   automation_state={})
     db.add(deal); await db.flush()
+    from app.services.crm_automation import on_stage_enter
+    await on_stage_enter(db, deal, stage, created=True)
     db.add(CrmStageHistory(deal_id=deal.id, from_stage_id=None, to_stage_id=stage.id, actor_id=user.id))
     db.add(CrmActivity(workspace_id=user.workspace_id, project_id=project.id, deal_id=deal.id,
                        actor_id=user.id, actor_name=user.display_name, event_type="DEAL_CREATED", payload={"lead_id": lead.id}))

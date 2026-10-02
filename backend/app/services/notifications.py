@@ -128,3 +128,17 @@ def flush_telegram(db: AsyncSession) -> None:
 
 def discard_telegram(db: AsyncSession) -> None:
     db.sync_session.info.pop(PENDING_KEY, None)
+
+
+def direct(db: AsyncSession, workspace_id: int, user_ids: list[int], title: str, body: str,
+           users: dict[int, PortalUser]) -> None:
+    """Notify specific users (automation rules): cabinet notification + Telegram if linked. Call before commit."""
+    for user_id in user_ids:
+        user = users.get(user_id)
+        if not user:
+            continue
+        db.add(PortalNotification(workspace_id=workspace_id, user_id=user.id, level="info",
+                                  title=title[:180], body=body))
+        if telegram_configured() and user.telegram_chat_id:
+            text = f"<b>{html.escape(title)}</b>\n{html.escape(body)}"
+            db.sync_session.info.setdefault(PENDING_KEY, []).append((user.telegram_chat_id, text))
