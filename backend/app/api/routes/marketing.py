@@ -20,10 +20,14 @@ from app.db import get_db
 from app.models.marketing import (AdCampaignMetricDaily, AdConnection, AdHypothesis, AdHypothesisCampaign,
                                   AdMetricDaily, ClientLeadAttribution, ClientWorkspace, LeadInboundReceipt,
                                   LeadInboundSource, Project)
+from app.services import avito
 from app.services.project_scope import default_project
 
 router = APIRouter(prefix="/marketing", tags=["marketing"])
-SUPPORTED = {"meta": "Meta Ads", "yandex": "Яндекс Директ", "vk_ads": "VK Реклама"}
+SUPPORTED = {"meta": "Meta Ads", "yandex": "Яндекс Директ", "vk_ads": "VK Реклама",
+             "avito_items": "Авито · Объявления", "avito_ads": "Авито Реклама"}
+# Platforms authorised with Client ID + Client Secret (stored in the generic vk_* OAuth columns).
+CLIENT_CREDENTIAL_PLATFORMS = {"vk_ads", "avito_items", "avito_ads"}
 
 
 class WorkspaceCreate(BaseModel):
@@ -65,6 +69,12 @@ class ConnectionCreate(BaseModel):
         if self.platform == "vk_ads":
             if not self.client_id or not self.client_secret:
                 raise ValueError("Для VK Рекламы нужны Client ID и Client Secret из настроек доступа к API")
+        elif self.platform == "avito_items":
+            if not self.client_id or not self.client_secret:
+                raise ValueError("Для Авито нужны Client ID и Client Secret: avito.ru/professionals/api")
+        elif self.platform == "avito_ads":
+            if not self.client_id or not self.client_secret or not self.external_account_id.isdigit():
+                raise ValueError("Для Авито Рекламы нужны ID аккаунта (число) и ключи из вкладки «API» кабинета")
         elif not self.external_account_id or not self.access_token:
             raise ValueError("Укажите ID кабинета и OAuth access token")
         return self
@@ -557,8 +567,8 @@ async def create_connection(payload: ConnectionCreate, request: Request, db: Asy
     row = AdConnection(workspace_id=payload.workspace_id, project_id=project.id, platform=payload.platform, name=payload.name,
                        external_account_id=payload.external_account_id or "pending",
                        access_token_encrypted=encrypt_secret(payload.access_token or "pending"), status="pending",
-                       vk_client_id_encrypted=encrypt_secret(payload.client_id) if payload.platform == "vk_ads" else None,
-                       vk_client_secret_encrypted=encrypt_secret(payload.client_secret) if payload.platform == "vk_ads" else None)
+                       vk_client_id_encrypted=encrypt_secret(payload.client_id) if payload.platform in CLIENT_CREDENTIAL_PLATFORMS else None,
+                       vk_client_secret_encrypted=encrypt_secret(payload.client_secret) if payload.platform in CLIENT_CREDENTIAL_PLATFORMS else None)
     db.add(row); await db.commit(); await db.refresh(row)
     return serialize_connection(row)
 
@@ -580,6 +590,8 @@ async def test_connection(connection_id: int, request: Request, db: AsyncSession
             row.external_account_id = account_id
             result = {"name": data.get("username"), "currency": data.get("currency"),
                       "remote_status": data.get("status")}
+        elif row.platform in avito.PLATFORMS:
+            result = await avito.test(db, row)
         else:
             result = await run_in_threadpool(_test_connection, row)
         row.status = "connected"; row.currency = result.get("currency"); row.last_error = None
@@ -596,9 +608,9 @@ async def update_connection_token(connection_id: int, payload: ConnectionTokenUp
     row = await db.get(AdConnection, connection_id)
     if not row:
         raise HTTPException(404, "Подключение не найдено")
-    if row.platform == "vk_ads":
+    if row.platform in CLIENT_CREDENTIAL_PLATFORMS:
         if not payload.client_id or not payload.client_secret:
-            raise HTTPException(422, "Для VK нужны новые Client ID и Client Secret")
+            raise HTTPException(422, "Нужны новые Client ID и Client Secret")
         row.vk_client_id_encrypted = encrypt_secret(payload.client_id)
         row.vk_client_secret_encrypted = encrypt_secret(payload.client_secret)
         row.vk_refresh_token_encrypted = None
@@ -613,6 +625,27 @@ async def update_connection_token(connection_id: int, payload: ConnectionTokenUp
     row.last_checked_at = None
     await db.commit()
     return {"ok": True}
+
+
+async def store_metrics(db: AsyncSession, row: AdConnection, metrics: list[dict]) -> None:
+    """Upsert daily account and campaign facts. Does not commit. Pops "campaigns" from each item."""
+    for item in metrics:
+        campaigns = item.pop("campaigns", [])
+        existing = await db.scalar(select(AdMetricDaily).where(AdMetricDaily.connection_id == row.id, AdMetricDaily.date == item["date"]))
+        if existing:
+            for key in ("spend", "impressions", "clicks", "leads", "raw"): setattr(existing, key, item[key])
+        else: db.add(AdMetricDaily(connection_id=row.id, **item))
+        for campaign in campaigns:
+            campaign_row = await db.scalar(select(AdCampaignMetricDaily).where(
+                AdCampaignMetricDaily.connection_id == row.id,
+                AdCampaignMetricDaily.date == campaign["date"],
+                AdCampaignMetricDaily.external_campaign_id == campaign["external_campaign_id"],
+            ))
+            if campaign_row:
+                for key in ("campaign_name", "spend", "impressions", "clicks", "raw"):
+                    setattr(campaign_row, key, campaign[key])
+            else:
+                db.add(AdCampaignMetricDaily(connection_id=row.id, **campaign))
 
 
 @router.post("/connections/{connection_id}/sync")
@@ -633,25 +666,11 @@ async def sync_connection(connection_id: int, request: Request, db: AsyncSession
             metrics = await run_in_threadpool(_vk_metrics, token)
         elif row.platform == "meta":
             metrics = await run_in_threadpool(_meta_metrics, row)
+        elif row.platform in avito.PLATFORMS:
+            metrics = await avito.metrics(db, row)
         else:
             metrics = await run_in_threadpool(_yandex_metrics, row)
-        for item in metrics:
-            campaigns = item.pop("campaigns", [])
-            existing = await db.scalar(select(AdMetricDaily).where(AdMetricDaily.connection_id == row.id, AdMetricDaily.date == item["date"]))
-            if existing:
-                for key in ("spend", "impressions", "clicks", "leads", "raw"): setattr(existing, key, item[key])
-            else: db.add(AdMetricDaily(connection_id=row.id, **item))
-            for campaign in campaigns:
-                campaign_row = await db.scalar(select(AdCampaignMetricDaily).where(
-                    AdCampaignMetricDaily.connection_id == row.id,
-                    AdCampaignMetricDaily.date == campaign["date"],
-                    AdCampaignMetricDaily.external_campaign_id == campaign["external_campaign_id"],
-                ))
-                if campaign_row:
-                    for key in ("campaign_name", "spend", "impressions", "clicks", "raw"):
-                        setattr(campaign_row, key, campaign[key])
-                else:
-                    db.add(AdCampaignMetricDaily(connection_id=row.id, **campaign))
+        await store_metrics(db, row, metrics)
         row.status = "connected"; row.last_error = None; row.last_synced_at = datetime.now(timezone.utc)
         await db.commit()
     except Exception as exc:

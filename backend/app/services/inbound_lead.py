@@ -14,7 +14,8 @@ from app.services.project_scope import default_project
 
 async def create_inbound(db: AsyncSession, source: LeadInboundSource, payload,
                          *, site_id: int | None = None, commit: bool = True,
-                         allow_raw_contact: bool = False) -> dict:
+                         allow_raw_contact: bool = False, attribution_extra: dict | None = None) -> dict:
+    """attribution_extra is trusted server-side data (e.g. verified_connection_id); never pass user input."""
     project = await default_project(db, source.workspace_id)
     project_id = source.project_id or project.id
     phone_digits = re.sub(r"\D", "", payload.phone or "")
@@ -57,6 +58,8 @@ async def create_inbound(db: AsyncSession, source: LeadInboundSource, payload,
                     value = getattr(website_session, key, None)
                     if value:
                         attribution[key] = value
+    if attribution_extra:
+        attribution.update({key: value for key, value in attribution_extra.items() if value is not None})
     inbound = CrmInbound(workspace_id=source.workspace_id, project_id=project_id,
                          website_session_id=website_session.id if website_session else None,
                          inbound_source_id=source.id, source_id=mapped.id,

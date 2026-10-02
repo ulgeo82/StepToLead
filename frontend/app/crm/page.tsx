@@ -35,6 +35,8 @@ function clientFields(data: Record<string, unknown>) {
     ["Имя", ["name", "full_name"]], ["Способ связи", ["contact_method"]],
     ["Контакт", ["contact"]], ["Телефон", ["phone"]], ["Email", ["email"]],
     ["Сайт клиента", ["website"]], ["Комментарий", ["comment", "notes"]],
+    ["Объявление Авито", ["item_title"]], ["Ссылка на объявление", ["item_url"]], ["Цена в объявлении", ["item_price"]],
+    ["Профиль покупателя", ["buyer_profile_url"]], ["Запись звонка", ["call_record_url"]],
   ];
   const seen = new Set<string>();
   return fields.flatMap(([label, keys]) => {

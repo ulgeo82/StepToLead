@@ -18,7 +18,7 @@ from app.models.marketing import (AdConnection, AdHypothesisCampaign, AdMetricDa
                                   ClientLeadEvent, ClientWorkspace, LeadInboundReceipt, LeadInboundSource,
                                   PortalNotification, PortalSession, PortalUser, ProjectSource, ProjectLostReason)
 from app.services.project_scope import default_project
-from app.api.routes.settings import in_app_rule_enabled, reasons as project_reasons
+from app.api.routes.settings import reasons as project_reasons
 from app.models.crm import CrmInbound, CrmActivity, CrmContact, CrmDeal, CrmStage, CrmStageHistory
 from app.models.website import WebsiteSession
 from app.services.inbound_lead import create_inbound

@@ -335,7 +335,7 @@ async def create_deal_fact(db: AsyncSession, project: Project, contact: CrmConta
                            created_at: datetime | None = None):
     if not (contact.phones or contact.emails or contact.telegram or
             (inbound and (inbound.raw_payload.get("contact_consent") or (
-                inbound.raw_payload.get("external_source") == "tilda" and inbound.raw_payload.get("contact"))))):
+                inbound.raw_payload.get("external_source") in {"tilda", "avito"} and inbound.raw_payload.get("contact"))))):
         raise HTTPException(422, "Для лида нужен контакт или подтверждённое согласие на связь")
     # A real contact is required before this point. Lead remains the shared analytics fact.
     source = await db.get(ProjectSource, source_id) if source_id else None
@@ -359,7 +359,15 @@ async def create_deal_fact(db: AsyncSession, project: Project, contact: CrmConta
         campaign_id = (snapshot or {}).get("external_campaign_id")
         connection_id = None
         hypothesis_id = None
-        if campaign_id:
+        # Server-side integrations (Avito chats/calls) know their cabinet for sure; a payload cannot set this key.
+        verified = (snapshot or {}).get("verified_connection_id")
+        if verified and str(verified).isdigit():
+            verified_row = await db.get(AdConnection, int(verified))
+            if verified_row and verified_row.project_id == project.id:
+                connection_id = verified_row.id
+                snapshot = {**snapshot, "connection_id": verified_row.id, "platform": verified_row.platform,
+                            "ad_account": verified_row.name}
+        if campaign_id and connection_id is None:
             metric_candidates = (await db.scalars(select(AdConnection.id).join(
                 AdCampaignMetricDaily, AdCampaignMetricDaily.connection_id == AdConnection.id).where(
                 AdConnection.project_id == project.id,
