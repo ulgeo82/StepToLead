@@ -137,7 +137,7 @@ class MessagingTests(unittest.TestCase):
         self.assertEqual(visible, [second])
         self.assertEqual(self.client.get(f"/api/crm/conversations/{first}").status_code, 403)
         self.assertEqual(self.client.post("/api/crm/projects/1/channels", headers=ORIGIN,
-                                          json={"kind": "telegram_bot", "name": "x", "token": "1234567890"}).status_code, 403)
+                                          json={"kind": "telegram_bot", "name": "Бот", "token": "1234567890"}).status_code, 403)
 
     def test_whatsapp_parse(self):
         base = {"timestamp": 1588091580, "idMessage": "ABC", "senderData": {"chatId": "79001234567@c.us", "senderName": "Иван"}}

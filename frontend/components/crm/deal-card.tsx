@@ -3,6 +3,7 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { money } from "@/components/reporting";
 import { DealChats } from "./inbox";
+import { CallButton, DealCalls } from "./telephony";
 import { CompleteTaskModal, NewTaskModal } from "./task-modals";
 import { contactLinks, CustomField, Deal, day, days, describeActivity, Pipeline, priorityLabels, request,
   Source, stateLabels, Task, Team, typeLabels, when } from "./shared";
@@ -31,10 +32,10 @@ const platformNames: Record<string, string> = { avito_items: "Авито · Об
 const linkify = (value: string) => /^https?:\/\//.test(value)
   ? <a href={value} target="_blank" rel="noopener noreferrer">{value}</a> : value;
 
-export function DealCard({ dealId, projectId, pipelines, team, sources, fields, lostReasons, can, onClose, onChanged, onOpenContact }: {
+export function DealCard({ dealId, projectId, pipelines, team, sources, fields, lostReasons, can, onClose, onChanged, onOpenContact, canDial = false }: {
   dealId: number; projectId: number; pipelines: Pipeline[]; team: Team[]; sources: Source[]; fields: CustomField[];
   lostReasons: Reason[]; can: (name: string) => boolean; onClose: () => void; onChanged: () => void;
-  onOpenContact: (id: number) => void }) {
+  onOpenContact: (id: number) => void; canDial?: boolean }) {
   const [deal, setDeal] = useState<Deal | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -117,7 +118,8 @@ export function DealCard({ dealId, projectId, pipelines, team, sources, fields, 
       onClick={() => moveTo(stage.id)} title={`Перевести на этап «${stage.name}»`}>{stage.name}</button>)}
       {lostStage && <button className={`lost ${deal.stage_id === lostStage.id ? "current" : ""}`} disabled={!can("move_deal") || busy || !!deal.archived_at} onClick={() => moveTo(lostStage.id)}>✕ {lostStage.name}</button>}</nav>
 
-    <div className="crmQuick">{links.call && <a href={links.call} onClick={() => can("edit_deal") && logTouch("CALL")}>📞 Позвонить</a>}
+    <div className="crmQuick">{links.call && (canDial ? <CallButton projectId={projectId} phone={deal.contact.phones[0]} dealId={deal.id} canDial onNotice={(t, failed) => failed ? setError(t) : setNotice(t)}/>
+      : <a href={links.call} onClick={() => can("edit_deal") && logTouch("CALL")}>📞 Позвонить</a>)}
       {links.whatsapp && <a href={links.whatsapp} target="_blank" rel="noopener noreferrer" onClick={() => can("edit_deal") && logTouch("MESSAGE")}>WhatsApp</a>}
       {links.telegram && <a href={links.telegram} target="_blank" rel="noopener noreferrer" onClick={() => can("edit_deal") && logTouch("MESSAGE")}>Telegram</a>}
       {links.email && <a href={links.email}>✉ Email</a>}
@@ -169,6 +171,8 @@ export function DealCard({ dealId, projectId, pipelines, team, sources, fields, 
             return <div key={t.id} className={`crmTaskItem ${overdue ? "overdue" : ""}`}><div><b>{typeLabels[t.type_code] || t.type_code}: {t.title}</b>
               <small>{when(t.due_at)}{t.priority === "HIGH" ? ` · ${priorityLabels.HIGH}` : ""}{t.description ? ` · ${t.description}` : ""}</small></div>
               {can("manage_tasks") && <button onClick={() => setCompleting(t)}>Завершить</button>}</div>; })}</div>
+
+        <DealCalls dealId={deal.id} refreshKey={deal.activities?.length}/>
 
         <DealChats dealId={deal.id} projectId={projectId} canWrite={can("edit_deal")} phone={deal.contact.phones[0] || null}/>
 

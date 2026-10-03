@@ -296,3 +296,56 @@
 @media(max-width:900px){.chatInbox{grid-template-columns:1fr;height:auto}.chatList{max-height:360px;border-right:0;border-bottom:1px solid #e8eef6}.chatBubble{max-width:88%}}
 .chatTemplates b{color:#14253e;font-size:12px;font-weight:650}
 .chatBadge.avito{font-size:14px}
+
+/* ---------------------------------------------------------------- telephony */
+.callDial{border:0;background:none;color:inherit;font:inherit;cursor:pointer;padding:0}
+.crmQuick .callDial{min-height:30px;padding:0 10px;border:1px solid #dce5f2;border-radius:7px;background:#fff;color:#1f3b5c;font-size:12px}
+.crmQuick .callDial:hover{border-color:#006bfd;color:#006bfd}
+.callsTab .crmKpis{margin:4px 0 14px}
+.callStats{margin-bottom:14px}
+.callFilters{display:flex;gap:8px;margin:0 0 10px}
+.callFilters input{min-width:180px}
+.callTable td{text-align:left!important;vertical-align:middle}
+.callTable th{text-align:left!important}
+.callTable td small{display:block;color:#8b9cb3;font-size:11px}
+.callTable tr.missed td:first-child{color:#c8344b;font-weight:600}
+.callIcon{display:inline-grid;place-items:center;width:22px;height:22px;margin-right:6px;border-radius:50%;background:#eaf2ff;color:#006bfd;font-size:12px}
+.callIcon.missed{background:#fdecef;color:#c8344b}
+.callIcon.noanswer{background:#fff4e0;color:#b06d00}
+.callBack{display:inline-block;margin-right:8px;padding:2px 8px;border-radius:10px;background:#fff4e0;color:#9a5d00;font-size:11px}
+.callAudio{height:30px;max-width:240px}
+.callEmpty{padding:28px;text-align:center;color:#6f829d}
+.callList{display:flex;flex-direction:column;gap:6px}
+.callRow{display:grid;grid-template-columns:24px 1fr auto;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #f0f3f8}
+.callRow i{font-style:normal;color:#006bfd}
+.callRow.missed i,.callRow.missed b{color:#c8344b}
+.callRow.noanswer i{color:#b06d00}
+.callRow small{display:block;color:#8b9cb3;font-size:11px}
+.callRow b{font-size:12px;font-weight:600}
+.callPopups{position:fixed;right:20px;bottom:20px;z-index:80;display:flex;flex-direction:column;gap:10px}
+.callPopup{display:flex;flex-direction:column;gap:4px;width:300px;padding:14px;border:1px solid #cfe0fb;border-radius:14px;background:#fff;box-shadow:0 12px 32px rgba(15,33,64,.18)}
+.callPopup header{display:flex;align-items:center;gap:8px;color:#006bfd;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.4px}
+.callPopup header button{margin-left:auto;border:0;background:none;color:#8b9cb3;font-size:18px;cursor:pointer}
+.callPopup b{font-size:17px;color:#0f2140}
+.callPopup p{margin:4px 0;color:#40556f;font-size:12px}
+.callPopup small{color:#8b9cb3;font-size:11px}
+.callPopup .crmPrimary,.callPopup .crmGhost{margin-top:8px}
+.callPulse{width:9px;height:9px;border-radius:50%;background:#18a058;box-shadow:0 0 0 0 rgba(24,160,88,.6);animation:callPulse 1.4s infinite}
+@keyframes callPulse{70%{box-shadow:0 0 0 10px rgba(24,160,88,0)}100%{box-shadow:0 0 0 0 rgba(24,160,88,0)}}
+.callSettings{max-width:640px}
+.callSettings form{display:flex;flex-direction:column;gap:10px}
+.callSettings details{margin-top:12px;font-size:12px}
+.callSettings details summary{cursor:pointer;color:#40556f}
+.callSteps{margin:0 0 6px;padding-left:18px;color:#40556f;font-size:12px;line-height:1.55}
+.callConnState{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid #e3e9f2;border-radius:10px;margin-bottom:12px}
+.callConnState small{display:block;color:#6f829d;font-size:11px}
+.callConnState .crmGhost{margin-left:auto}
+.callDot{width:10px;height:10px;border-radius:50%;background:#c3cfdf}
+.callDot.connected{background:#18a058}
+.callDot.error{background:#c8344b}
+.callWebhookRow{display:flex;gap:8px;align-items:center}
+.callWebhookRow code{flex:1;overflow:auto;padding:8px 10px;border-radius:7px;background:#f4f7fc;color:#0f2140;font-size:12px;white-space:nowrap}
+.callMap{display:flex;flex-direction:column;gap:6px;margin-bottom:10px}
+.callMap label{display:grid;grid-template-columns:1fr 220px;align-items:center;gap:10px;font-size:12px}
+.callMap select{min-height:32px}
+@media(max-width:700px){.callMap label{grid-template-columns:1fr}.callPopup{width:calc(100vw - 40px)}}

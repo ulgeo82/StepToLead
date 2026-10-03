@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     encryption_secret: str = "change-this-before-production"
     account_status_interval: int = 20
     session_cookie_secure: bool = False  # В production HTTPS обязательно True.
+    recordings_dir: str = "data/recordings"  # Call recordings (kept for TelephonyConnection.retention_days).
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

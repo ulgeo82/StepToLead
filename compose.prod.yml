@@ -39,6 +39,9 @@ services:
       TELEGRAM_API_ID: ${TELEGRAM_API_ID:-0}
       TELEGRAM_API_HASH: ${TELEGRAM_API_HASH:-}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      RECORDINGS_DIR: /app/data/recordings
+    volumes:
+      - call_recordings:/app/data/recordings
     depends_on:
       postgres:
         condition: service_healthy
@@ -76,6 +79,7 @@ services:
       - frontend
 
 volumes:
+  call_recordings:
   postgres_prod_data:
   redis_prod_data:
   caddy_prod_data:

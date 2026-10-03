@@ -109,7 +109,7 @@ class CrmProTests(unittest.TestCase):
         self.assertEqual(listed[0]["fired_count"], 1)
 
     def test_bulk_tags_responsible_and_guarded_moves(self):
-        a, b = self.deal("A", "+79990000011"), self.deal("B", "+79990000012")
+        a, b = self.deal("Сделка A", "+79990000011"), self.deal("Сделка B", "+79990000012")
         tagged = self.client.post("/api/crm/deals/bulk", headers=ORIGIN, json={"deal_ids": [a, b], "action": "tag_add", "tag": " горячий "})
         self.assertEqual(tagged.json()["updated"], 2)
         board = self.client.get("/api/crm/projects/1/board?tag=горячий").json()
@@ -118,12 +118,12 @@ class CrmProTests(unittest.TestCase):
         self.assertEqual(won.json()["skipped"], [a])  # a sale needs an amount and confirmation in the card
         moved = self.client.post("/api/crm/deals/bulk", headers=ORIGIN, json={"deal_ids": [a, b], "action": "move", "stage_id": self.stage["QUALIFIED"]})
         self.assertEqual(moved.json()["updated"], 2)
-        board = self.client.get(f"/api/crm/projects/1/board?search=Клиент A").json()
+        board = self.client.get(f"/api/crm/projects/1/board?search=Сделка A").json()
         self.assertEqual(sum(c["total"] for c in board["columns"]), 1)
         self.assertIn("amount", board["columns"][0])
 
     def test_contact_card_merge_and_edit(self):
-        first, second = self.deal("A", "+7 999 000-00-21"), self.deal("B", "89990000021")
+        first, second = self.deal("Сделка A", "+7 999 000-00-21"), self.deal("Сделка B", "89990000021")
         contact_a = self.client.get(f"/api/crm/deals/{first}").json()["contact"]["id"]
         contact_b = self.client.get(f"/api/crm/deals/{second}").json()["contact"]["id"]
         card = self.client.get(f"/api/crm/contacts/{contact_a}").json()
@@ -163,7 +163,7 @@ class CrmProTests(unittest.TestCase):
         self.assertEqual(len(pipelines[1]["stages"]), len(self.pipeline["stages"]))
         refused = self.client.patch(f"/api/crm/pipelines/{self.pipeline['id']}", headers=ORIGIN, json={"archived": True})
         self.assertEqual(refused.status_code, 409)
-        a, b = self.deal("A", "+79990000031", amount=100000), self.deal("B", "+79990000032")
+        a, b = self.deal("Сделка A", "+79990000031", amount=100000), self.deal("Сделка B", "+79990000032")
         self.client.post(f"/api/crm/deals/{a}/move", headers=ORIGIN, json={"stage_id": self.stage["QUALIFIED"]})
         won = self.client.post(f"/api/crm/deals/{a}/move", headers=ORIGIN, json={"stage_id": self.stage["WON"]})
         self.assertTrue(won.json()["sale_required"])
@@ -177,7 +177,7 @@ class CrmProTests(unittest.TestCase):
         csv = self.client.get("/api/crm/projects/1/deals.csv")
         self.assertEqual(csv.status_code, 200)
         self.assertIn("Сделка;Воронка;Этап", csv.text)
-        self.assertIn("Клиент A", csv.text)
+        self.assertIn("Клиент Сделка A", csv.text)
         _ = b
 
 

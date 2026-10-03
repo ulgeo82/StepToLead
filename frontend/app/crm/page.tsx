@@ -9,6 +9,7 @@ import { ContactCard } from "@/components/crm/contact-card";
 import { DealCard } from "@/components/crm/deal-card";
 import { Inbox } from "@/components/crm/inbox";
 import { SalesReport } from "@/components/crm/report";
+import { CallsTab, IncomingCall, useTelephony } from "@/components/crm/telephony";
 import { CompleteTaskModal, NewTaskModal } from "@/components/crm/task-modals";
 import { Board, Contact, CustomField, Deal, days, Inbound, Pipeline, Project, rejectReasons, request, Source,
   Stage, stateLabels, Task, Team, typeLabels, when } from "@/components/crm/shared";
@@ -16,7 +17,7 @@ import "../result/result.css";
 import "./crm.css";
 import "@/components/crm/crm-pro.css";
 
-type Tab = "deals" | "chats" | "contacts" | "tasks" | "inbound" | "report" | "automation" | "pipeline";
+type Tab = "deals" | "chats" | "calls" | "contacts" | "tasks" | "inbound" | "report" | "automation" | "pipeline";
 type Modal = "deal" | "stage" | "field" | "lost" | "pipeline" | "task" | null;
 
 export default function CrmPage() {
@@ -25,6 +26,7 @@ export default function CrmPage() {
   const [role, setRole] = useState("");
   const [permissions, setPermissions] = useState<string[]>([]);
   const [tab, setTab] = useState<Tab>("deals");
+  const telephony = useTelephony(projectId);
   const [view, setView] = useState<"kanban" | "list">("kanban");
   const [archived, setArchived] = useState(false);
   const [board, setBoard] = useState<Board | null>(null);
@@ -255,7 +257,7 @@ export default function CrmPage() {
       {error && <div className="resultError" role="alert">{error} <button onClick={() => setError("")}>×</button></div>}
       {notice && <div className="crmOkBar" role="status">{notice} <button onClick={() => setNotice("")}>×</button></div>}
       {!projectId ? <div className="resultLoading">{error.includes("401") || error.includes("вход") ? <><p>Для работы с CRM войдите в клиентский кабинет.</p><Link href="/portal/login?next=%2Fcrm">Войти →</Link></> : "Нет доступного проекта"}</div> : <>
-      <div className="crmTabs">{([["deals", "▣ Сделки"], ["chats", "💬 Чаты"], ["inbound", "Неразобранное"], ["tasks", "◷ Задачи"], ["contacts", "♙ Контакты"], ["report", "📊 Аналитика продаж"],
+      <div className="crmTabs">{([["deals", "▣ Сделки"], ["chats", "💬 Чаты"], ["calls", "📞 Звонки"], ["inbound", "Неразобранное"], ["tasks", "◷ Задачи"], ["contacts", "♙ Контакты"], ["report", "📊 Аналитика продаж"],
         ...(can("manage_pipeline") ? [["automation", "⚡ Автоматизация"], ["pipeline", "⚙ Воронки и поля"]] : [])] as [Tab, string][]).map(([key, label]) =>
         <button key={key} className={tab === key ? "active" : ""} onClick={() => setTab(key)}>{label}{key === "inbound" && board?.inbound_count ? <b>{board.inbound_count}</b> : null}{key === "chats" && unreadChats ? <b>{unreadChats}</b> : null}</button>)}</div>
 
@@ -331,6 +333,7 @@ export default function CrmPage() {
         {!inbound.length && <p className="crmEmpty">{inboundStatus === "NEW" ? "Всё разобрано 👌" : "Обращений с таким статусом нет"}</p>}</section>}
 
       {tab === "chats" && <Inbox projectId={projectId} team={team} can={can} onOpenDeal={id => setDealId(id)} onOpenInbound={() => setTab("inbound")}/>}
+      {tab === "calls" && <CallsTab projectId={projectId} team={team} info={telephony.info} reloadInfo={telephony.reload} onOpenDeal={id => setDealId(id)} onOpenInbound={() => setTab("inbound")}/>}
       {tab === "report" && <SalesReport projectId={projectId} pipelines={pipelines} pipelineId={currentPipelineId}/>}
       {tab === "automation" && <Automations projectId={projectId} pipelines={pipelines} pipelineId={currentPipelineId} team={team} sources={sources} canManage={can("manage_pipeline")}/>}
 
@@ -352,9 +355,10 @@ export default function CrmPage() {
       </>}
     </main>
 
-    {dealId && projectId && <><div className="crmCardBackdrop" onClick={() => setDealId(null)}/><DealCard dealId={dealId} projectId={projectId} pipelines={pipelines} team={team} sources={sources} fields={fields} lostReasons={lostReasons} can={can}
+    {dealId && projectId && <><div className="crmCardBackdrop" onClick={() => setDealId(null)}/><DealCard dealId={dealId} projectId={projectId} canDial={telephony.canDial} pipelines={pipelines} team={team} sources={sources} fields={fields} lostReasons={lostReasons} can={can}
       onClose={() => setDealId(null)} onChanged={refresh} onOpenContact={id => setContactId(id)}/></>}
-    {contactId && <ContactCard contactId={contactId} can={can} onClose={() => setContactId(null)} onOpenDeal={id => { setContactId(null); setDealId(id); }} onChanged={refresh}/>}
+    {projectId && <IncomingCall projectId={projectId} enabled={Boolean(telephony.info?.connection?.active)} onOpenDeal={id => setDealId(id)} onOpenInbound={() => setTab("inbound")}/>}
+    {contactId && <ContactCard contactId={contactId} projectId={projectId ?? undefined} canDial={telephony.canDial} can={can} onClose={() => setContactId(null)} onOpenDeal={id => { setContactId(null); setDealId(id); }} onChanged={refresh}/>}
     {completing && <CompleteTaskModal task={completing} team={team} onClose={() => setCompleting(null)} onDone={() => { setCompleting(null); refresh(); setNotice("Задача завершена"); }}/>}
     {modal === "task" && projectId && <NewTaskModal projectId={projectId} team={team} deals={allDeals} onClose={() => setModal(null)} onDone={() => { setModal(null); refresh(); setNotice("Задача поставлена"); }}/>}
     {rejecting && <InboundReject item={rejecting} onClose={() => setRejecting(null)} onSubmit={async reason => { const ok = await mutate(`/crm/inbound/${rejecting.id}/reject`, "POST", { rejection_reason: reason }, "Заявка отклонена"); if (ok) setRejecting(null); }}/>}

@@ -2,6 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { money } from "@/components/reporting";
+import { CallButton } from "./telephony";
 import { contactLinks, Deal, day, request, Task, typeLabels, when } from "./shared";
 
 type Card = { id: number; name: string; phones: string[]; emails: string[]; telegram: string | null; company: string | null;
@@ -10,7 +11,7 @@ type Card = { id: number; name: string; phones: string[]; emails: string[]; tele
 
 const list = (value: FormDataEntryValue | null) => String(value || "").split(/[,;\n]/).map(v => v.trim()).filter(Boolean);
 
-export function ContactCard({ contactId, can, onClose, onOpenDeal, onChanged }: { contactId: number;
+export function ContactCard({ contactId, can, onClose, onOpenDeal, onChanged, projectId, canDial = false }: { contactId: number; projectId?: number; canDial?: boolean;
   can: (name: string) => boolean; onClose: () => void; onOpenDeal: (id: number) => void; onChanged: () => void }) {
   const [card, setCard] = useState<Card | null>(null);
   const [edit, setEdit] = useState(false);
@@ -50,7 +51,7 @@ export function ContactCard({ contactId, can, onClose, onOpenDeal, onChanged }: 
           {(card.company || card.position) && <p className="crmMuted">{[card.position, card.company].filter(Boolean).join(" · ")}</p>}
           {card.phones.map(p => <p key={p}><a href={`tel:${p}`}>{p}</a></p>)}{card.emails.map(m => <p key={m}><a href={`mailto:${m}`}>{m}</a></p>)}
           {card.telegram && <p>Telegram: {card.telegram}</p>}
-          <div className="crmQuick">{(() => { const l = contactLinks(card); return <>{l.call && <a href={l.call}>📞 Позвонить</a>}{l.whatsapp && <a href={l.whatsapp} target="_blank" rel="noopener noreferrer">WhatsApp</a>}{l.telegram && <a href={l.telegram} target="_blank" rel="noopener noreferrer">Telegram</a>}{l.email && <a href={l.email}>✉ Email</a>}</>; })()}
+          <div className="crmQuick">{(() => { const l = contactLinks(card); return <>{l.call && (canDial && projectId ? <CallButton projectId={projectId} phone={card.phones[0]} canDial onNotice={(t, failed) => setError(failed ? t : "") }/> : <a href={l.call}>📞 Позвонить</a>)}{l.whatsapp && <a href={l.whatsapp} target="_blank" rel="noopener noreferrer">WhatsApp</a>}{l.telegram && <a href={l.telegram} target="_blank" rel="noopener noreferrer">Telegram</a>}{l.email && <a href={l.email}>✉ Email</a>}</>; })()}
             {can("edit_deal") && <button onClick={() => setEdit(true)}>✎ Редактировать</button>}</div>
           {card.tags.length > 0 && <div className="crmTags">{card.tags.map(t => <span key={t}>#{t}</span>)}</div>}
           {card.notes && <p className="crmPre crmNotes">{card.notes}</p>}</div>}

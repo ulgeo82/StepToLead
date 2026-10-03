@@ -10,3 +10,4 @@ frontend/.next/
 frontend/*.tsbuildinfo
 outputs/
 .DS_Store
+backend/data/
