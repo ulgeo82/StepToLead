@@ -14,7 +14,7 @@ from app.db import get_db
 from app.models.crm import CrmContact, CrmDeal
 from app.models.marketing import AdConnection, PortalUser
 from app.models.messaging import Conversation, Message, MessagingChannel, ReplyTemplate
-from app.services import ai, avito, messaging
+from app.services import plans, ai, avito, messaging
 
 router = APIRouter(prefix="/crm", tags=["messaging"], dependencies=[Depends(require_portal_user)])
 
@@ -110,6 +110,8 @@ async def create_channel(project_id: int, payload: ChannelIn, request: Request, 
     project = await project_for(db, user, project_id)
     if payload.kind not in messaging.KINDS:
         raise HTTPException(422, "Неизвестный тип канала")
+    if payload.kind == "telegram_bot":
+        await plans.require(db, project.workspace_id, "all_chats")
     config: dict = {}
     if payload.kind == "avito":
         cabinet = await db.get(AdConnection, payload.connection_id or 0)
@@ -238,7 +240,7 @@ async def conversation_detail(conversation_id: int, before_id: int | None = None
     return {**conversation_json(row, channel, contact.name if contact else None, deal.name if deal else None,
                                 owner.display_name if owner else None),
             "messages": [message_json(m) for m in messages], "has_more": len(messages) == 100,
-            "ai_available": ai.configured()}
+            "ai_available": ai.configured() and await plans.has(db, row.workspace_id, "ai_chat")}
 
 
 class SendIn(BaseModel):
@@ -403,6 +405,7 @@ async def ai_suggest(conversation_id: int, request: Request, db: AsyncSession = 
     """Draft of the next reply. The manager edits and sends it; nothing goes to the client automatically."""
     check_origin(request); require_permission(user, "view_crm")
     row = await conversation_for(db, user, conversation_id)
+    await plans.require(db, row.workspace_id, "ai_chat")
     project, channel, messages, deal_line = await ai_context(db, row)
     if not messages:
         raise HTTPException(422, "В диалоге ещё нет сообщений")
@@ -427,6 +430,7 @@ async def ai_summary(conversation_id: int, payload: SummaryIn, request: Request,
     from app.api.routes.crm import activity
     check_origin(request); require_permission(user, "view_crm")
     row = await conversation_for(db, user, conversation_id)
+    await plans.require(db, row.workspace_id, "ai_chat")
     _, _, messages, _ = await ai_context(db, row)
     if not messages:
         raise HTTPException(422, "В диалоге ещё нет сообщений")
@@ -449,7 +453,8 @@ async def get_ai_settings(project_id: int, db: AsyncSession = Depends(get_db), u
     project = await project_for(db, user, project_id)
     from app.services import call_ai
     return {**ai_settings(project), "configured": ai.configured(), "provider": ai.provider_name(),
-            "calls_available": call_ai.available(), "default_checklist": "\n".join(call_ai.DEFAULT_CHECKLIST),
+            "calls_available": call_ai.available() and await plans.has(db, project.workspace_id, "ai_calls"),
+            "chat_allowed": await plans.has(db, project.workspace_id, "ai_chat"), "default_checklist": "\n".join(call_ai.DEFAULT_CHECKLIST),
             "can_manage": can_manage_channels(user)}
 
 

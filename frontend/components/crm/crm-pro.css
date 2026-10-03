@@ -384,7 +384,8 @@ button.callAi{cursor:pointer}
 .callAi.bad{background:#fdeaee;color:#c8344b}
 .callStats td.good{color:#16803c;font-weight:600}
 .callStats td.warn{color:#a05f00;font-weight:600}
-.callAiModal{max-width:640px}
+.resultModalBackdrop:has(.callAiModal){white-space:normal}
+.crmModal.callAiModal{width:min(640px,100%);white-space:normal;text-align:left}
 .callAiModal section{margin-top:12px}
 .callAiModal h3{margin:0 0 4px;font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:#7a8ca5}
 .callAiModal p{margin:0;font-size:14px;line-height:1.5;color:#0f2140}
@@ -413,7 +414,7 @@ button.callAi{cursor:pointer}
 .docActions{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:center}
 .docActions a.crmLinkButton{text-decoration:none}
 .docActions .muted{color:#8a99ad}
-.docEditor{max-width:760px}
+.crmModal.docEditor{width:min(780px,100%);white-space:normal}
 .docItems{display:flex;flex-direction:column;gap:6px;margin:4px 0 6px}
 .docItemsHead,.docItem{display:grid;grid-template-columns:minmax(0,1fr) 64px 56px 96px 70px 96px 26px;gap:6px;align-items:center}
 .docItemsHead span{font-size:11px;color:#7a8ca5;text-transform:uppercase;letter-spacing:.03em}
@@ -427,10 +428,11 @@ button.callAi{cursor:pointer}
   .docItem{grid-template-columns:1fr 1fr 1fr 26px;padding:8px;border:1px solid #e3e9f2;border-radius:10px}
   .docItem input:first-child{grid-column:1/-1}.docItem b{grid-column:1/4;text-align:left}}
 /* amoCRM import */
-.amoImport{max-width:720px}
+.crmModal.amoImport{width:min(720px,100%);white-space:normal}
+.amoImport label.crmCheck{display:flex;flex-wrap:wrap}.amoImport label.crmCheck small{flex-basis:100%;padding-left:24px}
 .amoSteps{margin:0 0 12px;padding-left:20px;font-size:13px;line-height:1.55;color:#40536f}
 .amoPick{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap}
-.amoFile{position:relative;overflow:hidden;cursor:pointer;display:inline-flex;align-items:center;min-height:38px;padding:0 14px}
+.amoFile{position:relative;overflow:hidden;cursor:pointer;display:inline-flex!important;flex-direction:row!important;align-items:center;min-height:40px;padding:0 16px!important;font-weight:600;color:#006bfd!important;border-style:dashed!important}
 .amoFile input{position:absolute;inset:0;opacity:0;cursor:pointer}
 .amoSummary{font-size:14px;margin:12px 0 4px}.amoCols{font-size:11px;line-height:1.5}
 .amoImport h3{margin:14px 0 6px;font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:#7a8ca5}

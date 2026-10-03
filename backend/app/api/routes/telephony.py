@@ -18,7 +18,7 @@ from app.db import get_db
 from app.models.crm import CrmContact, CrmDeal, CrmStage, CrmTask
 from app.models.marketing import AdConnection, PortalUser, ProjectSource
 from app.models.telephony import Call, TelephonyConnection
-from app.services import call_ai, telephony
+from app.services import call_ai, plans, telephony
 from app.services.messaging import project_people
 from app.services.telephony import TelephonyError
 
@@ -149,6 +149,7 @@ async def connect_telephony(project_id: int, payload: ConnectionIn, request: Req
     if not can_manage_channels(user):
         raise HTTPException(403, "Подключать телефонию может руководитель или владелец")
     project = await project_for(db, user, project_id)
+    await plans.require(db, project.workspace_id, "telephony")
     if payload.provider not in telephony.PROVIDERS:
         raise HTTPException(422, "Этот провайдер пока не поддерживается")
     if await project_connection(db, project.id):
@@ -462,6 +463,7 @@ async def queue_call_analysis(call_id: int, request: Request, db: AsyncSession =
     """Analyze (or re-analyze) a call on demand; the worker picks it up within a minute."""
     check_origin(request); require_permission(user, "view_crm")
     call = await visible_call(db, user, call_id)
+    await plans.require(db, call.workspace_id, "ai_calls")
     if not call_ai.available():
         raise HTTPException(422, "Разбор звонков не подключён: нужен ключ ИИ и распознавания речи в настройках сервера")
     if call.status != "answered" or call.duration_sec < 10:

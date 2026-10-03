@@ -292,9 +292,10 @@ class MetrikaIn(BaseModel):
 @router.put("/projects/{project_id}/metrika")
 async def connect_metrika(project_id: int, payload: MetrikaIn, request: Request, db: AsyncSession = Depends(get_db),
                           user: PortalUser = Depends(require_portal_user)):
-    from app.services import conversions
+    from app.services import conversions, plans
     check_origin(request)
     project = await project_for(db, user, project_id)
+    await plans.require(db, project.workspace_id, "conversions")
     if not can_manage(user):
         raise HTTPException(403, "Подключать Метрику может руководитель или владелец")
     try:
@@ -399,3 +400,39 @@ async def admin_health(db: AsyncSession = Depends(get_db)):
     from app.models.marketing import ClientWorkspace
     workspaces = (await db.scalars(select(ClientWorkspace).order_by(ClientWorkspace.id))).all()
     return [await client_health(db, w.id) for w in workspaces]
+
+
+# --------------------------------------------------------------------------- tariffs
+
+@router.get("/plan")
+async def my_plan(db: AsyncSession = Depends(get_db), user: PortalUser = Depends(require_portal_user)):
+    """The client's tariff and what it includes (Settings → Компания)."""
+    from app.services import plans
+    return await plans.overview(db, user.workspace_id)
+
+
+class PlanIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    plan: str | None = Field(default=None, pattern=r"^(start|growth|system)$")
+
+
+@admin_router.get("/plans")
+async def admin_plans(db: AsyncSession = Depends(get_db)):
+    from app.models.marketing import ClientWorkspace
+    from app.services import plans
+    rows = (await db.scalars(select(ClientWorkspace).order_by(ClientWorkspace.id))).all()
+    return {"plans": [plans.plan_info(c) for c in plans.ORDER], "features": plans.FEATURES,
+            "workspaces": [{"workspace_id": w.id, "plan": w.plan if w.plan in plans.PLANS else None} for w in rows]}
+
+
+@admin_router.put("/workspaces/{workspace_id}/plan")
+async def admin_set_plan(workspace_id: int, payload: PlanIn, request: Request, db: AsyncSession = Depends(get_db)):
+    from app.models.marketing import ClientWorkspace
+    from app.services import plans
+    check_origin(request)
+    workspace = await db.get(ClientWorkspace, workspace_id)
+    if not workspace:
+        raise HTTPException(404, "Клиент не найден")
+    workspace.plan = payload.plan
+    await db.commit()
+    return await plans.overview(db, workspace.id)

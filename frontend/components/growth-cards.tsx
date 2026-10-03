@@ -50,7 +50,7 @@ export function ConversionsCard({ projectId }: { projectId: number }) {
 }
 
 type AiSettings = { knowledge: string; tone: string; goal: string; configured: boolean; provider: string | null; can_manage: boolean;
-  calls: boolean; call_checklist: string; calls_available: boolean; default_checklist: string };
+  calls: boolean; call_checklist: string; calls_available: boolean; default_checklist: string; chat_allowed?: boolean };
 
 /** Settings → «Подключения»: the knowledge base the AI assistant answers from. */
 export function AiSettingsCard({ projectId }: { projectId: number }) {
@@ -66,6 +66,7 @@ export function AiSettingsCard({ projectId }: { projectId: number }) {
   }
   if (!data) return null;
   return <section className="resultPanel settingsCard"><h2>ИИ-помощник: чаты и звонки</h2>
+    {data.chat_allowed === false && <p className="crmFormError">ИИ-подсказки и резюме в чатах входят в тариф «Рост», разбор звонков — в «Систему». Базу знаний можно заполнить заранее.</p>}
     <p>{data.configured ? `Подключён: ${data.provider}. ` : "Сервис ИИ ещё не подключён на сервере — базу знаний можно заполнить заранее. "}
       В чате появятся кнопки «Подсказать ответ» и «Резюме переписки». ИИ только пишет черновик — отправляет менеджер. Факты ИИ берёт только отсюда.</p>
     {error && <p className="crmFormError">{error}</p>}{notice && <p className="crmOk">{notice}</p>}

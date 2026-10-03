@@ -16,7 +16,8 @@ from app.models.crm import CrmActivity, CrmDeal, CrmDocument
 from app.models.telephony import Call
 from app.models.website import WebsiteSite
 from app.api.routes import widget as widget_routes
-from app.services import ai, call_ai, care, documents
+from app.services import ai, call_ai, care, documents, plans
+from app.core.access import COOKIE
 import io
 from openpyxl import Workbook
 from app.models.marketing import ClientLead, ClientSale
@@ -281,6 +282,48 @@ class Stage3Tests(unittest.TestCase):
         self.assertEqual((again["created"], again["skipped_duplicates"]), (0, 3))
         bad = self.client.post("/api/crm/projects/1/import/amocrm/preview", headers=ORIGIN, files={"file": ("x.txt", b"hello", "text/plain")})
         self.assertEqual(bad.status_code, 422)
+
+    # ------------------------------------------------------------------ tariffs
+    def set_plan(self, plan):
+        self.client.cookies.clear(); self.client.cookies.set(COOKIE, "a" * 43)
+        r = self.client.put("/api/portal/admin/workspaces/1/plan", headers=ORIGIN, json={"plan": plan})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.as_user(1)
+        return r.json()
+
+    def test_tariff_limits(self):
+        self.assertEqual(self.client.get("/api/crm/plan").json()["name"], "Индивидуальный")
+        start = self.set_plan("start")
+        self.assertEqual((start["name"], start["users"], start["users_used"]), ("Старт", 3, 2))
+        invite = lambda email: self.client.post("/api/team", headers=ORIGIN, json={"display_name": "Новый менеджер", "email": email, "role": "sales_manager"})
+        self.assertEqual(invite("m3@romax.ru").status_code, 201)
+        blocked = invite("m4@romax.ru")
+        self.assertEqual(blocked.status_code, 403); self.assertIn("до 3 сотрудников", blocked.json()["detail"])
+        tel = self.client.post("/api/crm/projects/1/telephony", headers=ORIGIN, json={"api_key": "key-123", "api_salt": "salt-456"})
+        self.assertEqual(tel.status_code, 403); self.assertIn("тариф «Рост»", tel.json()["detail"])
+        bot = self.client.post("/api/crm/projects/1/channels", headers=ORIGIN, json={"kind": "telegram_bot", "name": "Бот", "token": "1:abc"})
+        self.assertEqual(bot.status_code, 403)
+        metrika = self.client.put("/api/crm/projects/1/metrika", headers=ORIGIN, json={"counter_id": 99, "token": "y0_" + "x" * 30})
+        self.assertEqual(metrika.status_code, 403)
+        with patch.object(ai, "configured", return_value=True):
+            self.assertFalse(self.client.get("/api/crm/projects/1/ai-settings").json()["chat_allowed"])
+
+        self.set_plan("growth")
+        self.assertEqual(invite("m4@romax.ru").status_code, 201)
+        self.assertEqual(invite("m5@romax.ru").status_code, 201)
+        with patch.object(Mango, "users", AsyncMock(return_value=[])):
+            self.assertEqual(self.client.post("/api/crm/projects/1/telephony", headers=ORIGIN, json={"api_key": "key-123", "api_salt": "salt-456"}).status_code, 201)
+        overview = self.client.get("/api/crm/plan").json()
+        included = {f["key"]: f["included"] for f in overview["all_features"]}
+        self.assertEqual((included["telephony"], included["ai_calls"]), (True, False))
+        self.assertFalse(self.run_db(lambda db: plans.has(db, 1, "ai_calls")))
+
+        self.set_plan(None)
+        self.assertTrue(self.run_db(lambda db: plans.has(db, 1, "ai_calls")))
+        self.assertEqual(self.client.get("/api/crm/plan").json()["users"], None)
+        self.client.cookies.clear(); self.client.cookies.set(COOKIE, "a" * 43)
+        listing = self.client.get("/api/portal/admin/plans").json()
+        self.assertEqual([p["name"] for p in listing["plans"]], ["Старт", "Рост", "Система"])
 
 
 del Base  # keep stage-2 tests from being collected twice

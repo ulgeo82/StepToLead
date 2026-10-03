@@ -10,7 +10,7 @@ from app.models.crm import CrmContact, CrmDeal
 def upgrade_existing_schema(connection):
     inspector = inspect(connection)
     columns = {
-        "client_workspaces": {"legal_name": "VARCHAR(240)", "contact_email": "VARCHAR(254)",
+        "client_workspaces": {"plan": "VARCHAR(16)", "legal_name": "VARCHAR(240)", "contact_email": "VARCHAR(254)",
                               "contact_phone": "VARCHAR(64)", "website": "VARCHAR(500)",
                               "timezone": "VARCHAR(80) NOT NULL DEFAULT 'Europe/Moscow'",
                               "currency": "VARCHAR(12) NOT NULL DEFAULT 'RUB'", "logo_data": "TEXT"},

@@ -290,7 +290,9 @@ async def enqueue_new(db: AsyncSession) -> None:
     projects: dict[int, dict] = {}
     for call in rows:
         if call.project_id not in projects:
-            projects[call.project_id] = project_settings(await db.get(Project, call.project_id))
+            from app.services import plans
+            conf = project_settings(await db.get(Project, call.project_id))
+            projects[call.project_id] = {**conf, "enabled": conf["enabled"] and await plans.has(db, call.workspace_id, "ai_calls")}
         if (call.meta or {}).get("internal"):
             call.ai_status = "skipped"
         else:

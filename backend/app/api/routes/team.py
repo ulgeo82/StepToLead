@@ -139,6 +139,8 @@ async def invite_member(payload: Invite, request: Request, db: AsyncSession = De
     email = str(payload.email).lower()
     if await db.scalar(select(PortalUser.id).where(PortalUser.username == email)):
         raise HTTPException(409, "Этот email уже используется")
+    from app.services import plans
+    await plans.require_seat(db, actor.workspace_id)
     password = secrets.token_urlsafe(18)
     member = PortalUser(workspace_id=actor.workspace_id, username=email, display_name=payload.display_name.strip(),
                         phone=payload.phone, role=payload.role, permissions=permissions,
