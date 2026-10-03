@@ -16,7 +16,7 @@ from app.core.crypto import encrypt_secret
 from app.core.permissions import effective_permissions, require_permission
 from app.db import get_db
 from app.models.crm import CrmContact, CrmDeal, CrmStage, CrmTask
-from app.models.marketing import PortalUser
+from app.models.marketing import AdConnection, PortalUser, ProjectSource
 from app.models.telephony import Call, TelephonyConnection
 from app.services import telephony
 from app.services.messaging import project_people
@@ -65,7 +65,20 @@ def connection_json(conn: TelephonyConnection, manage: bool) -> dict:
     if manage:
         result.update({"webhook_path": f"/api/telephony/{conn.provider}/{conn.public_id}",
                        "pbx_users": data.get("pbx_users") or [], "user_map": data.get("user_map") or {}})
+    result["line_map"] = data.get("line_map") or {}
     return result
+
+
+async def tracking_options(db: AsyncSession, conn: TelephonyConnection) -> dict:
+    """Call tracking setup: numbers seen in calls plus the channels a number can be tied to."""
+    seen = (await db.scalars(select(Call.line_number).where(Call.connection_id == conn.id, Call.line_number.is_not(None))
+                             .distinct().limit(50))).all()
+    lines = sorted({telephony.norm_phone(n) for n in seen if telephony.norm_phone(n)} | set((conn.config or {}).get("line_map") or {}))
+    ads = (await db.scalars(select(AdConnection).where(AdConnection.project_id == conn.project_id))).all()
+    sources = (await db.scalars(select(ProjectSource).where(ProjectSource.project_id == conn.project_id,
+                                                            ProjectSource.inbound_source_id.is_(None)))).all()
+    return {"lines": lines, "channels": [*({"kind": "ad", "id": a.id, "label": a.name} for a in ads),
+                                         *({"kind": "source", "id": s.id, "label": s.name} for s in sources)]}
 
 
 async def connection_for(db: AsyncSession, user: PortalUser, connection_id: int, manage: bool = False) -> TelephonyConnection:
@@ -104,6 +117,7 @@ async def telephony_settings(project_id: int, db: AsyncSession = Depends(get_db)
     if manage:
         members = [{"id": u.id, "name": u.display_name} for u in (await project_people(db, project_id)).values()]
     return {"connection": connection_json(conn, manage) if conn else None, "can_manage": manage, "members": members,
+            "tracking": await tracking_options(db, conn) if conn and manage else None,
             "my_extension": telephony.extension_for_user(conn, user.id) if conn else None,
             "providers": [{"code": k, "name": v} for k, v in telephony.PROVIDERS.items()]}
 
@@ -125,6 +139,7 @@ class ConnectionPatch(BaseModel):
     user_map: dict[str, int | None] | None = None
     create_leads: bool | None = None
     missed_task_minutes: int | None = Field(default=None, ge=1, le=1440)
+    line_map: dict[str, dict | None] | None = None  # tracking number → {"kind": "ad"|"source", "id": int}
 
 
 @router.post("/projects/{project_id}/telephony", status_code=201)
@@ -188,6 +203,21 @@ async def update_telephony(connection_id: int, payload: ConnectionPatch, request
                 raise HTTPException(422, "Одному сотруднику можно назначить только один внутренний номер")
             seen.add(uid); mapping[extension] = uid
         telephony.set_cfg(conn, user_map=mapping)
+    if payload.line_map is not None:
+        options = await tracking_options(db, conn)
+        allowed = {(c["kind"], c["id"]): c["label"] for c in options["channels"]}
+        routes = {}
+        for number, route in payload.line_map.items():
+            digits = telephony.norm_phone(number)
+            if not digits:
+                raise HTTPException(422, f"Некорректный номер: {number}")
+            if not route:
+                continue
+            key = (route.get("kind"), route.get("id"))
+            if key not in allowed:
+                raise HTTPException(422, "Канал не найден в проекте")
+            routes[digits] = {"kind": key[0], "id": key[1], "label": allowed[key]}
+        telephony.set_cfg(conn, line_map=routes)
     if payload.create_leads is not None:
         telephony.set_cfg(conn, create_leads=payload.create_leads)
     if payload.missed_task_minutes is not None:
@@ -231,6 +261,10 @@ async def calls_json(db: AsyncSession, rows: list[Call]) -> list[dict]:
         CrmDeal.id.in_({r.deal_id for r in rows if r.deal_id})))).all()} if rows else {}
     users = {u.id: u for u in (await db.scalars(select(PortalUser).where(
         PortalUser.id.in_({r.user_id for r in rows if r.user_id})))).all()} if rows else {}
+    routes = {}
+    for conn in (await db.scalars(select(TelephonyConnection).where(
+            TelephonyConnection.id.in_({r.connection_id for r in rows})))).all() if rows else []:
+        routes[conn.id] = conn
     tasks = {t.id: t for t in (await db.scalars(select(CrmTask).where(
         CrmTask.id.in_({r.task_id for r in rows if r.task_id})))).all()} if rows else {}
     result = []
@@ -246,7 +280,9 @@ async def calls_json(db: AsyncSession, rows: list[Call]) -> list[dict]:
             "inbound_id": r.inbound_id,
             "has_recording": bool((r.recording_path or r.recording_id) and not r.recording_deleted_at),
             "recording_deleted": bool(r.recording_deleted_at),
-            "callback_status": task.status if task else None, "callback_task_id": r.task_id})
+            "callback_status": task.status if task else None, "callback_task_id": r.task_id,
+            "channel": (telephony.line_route(routes[r.connection_id], r.line_number) or {}).get("label")
+            if r.connection_id in routes else None})
     return result
 
 

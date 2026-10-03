@@ -14,7 +14,8 @@ from app.services.project_scope import default_project
 
 async def create_inbound(db: AsyncSession, source: LeadInboundSource, payload,
                          *, site_id: int | None = None, commit: bool = True,
-                         allow_raw_contact: bool = False, attribution_extra: dict | None = None) -> dict:
+                         allow_raw_contact: bool = False, attribution_extra: dict | None = None,
+                         source_override_id: int | None = None) -> dict:
     """attribution_extra is trusted server-side data (e.g. verified_connection_id); never pass user input."""
     project = await default_project(db, source.workspace_id)
     project_id = source.project_id or project.id
@@ -34,6 +35,10 @@ async def create_inbound(db: AsyncSession, source: LeadInboundSource, payload,
             return {"ok": True, "inbound_id": existing.id, "duplicate": True, "status": existing.status}
     mapped = await db.scalar(select(ProjectSource).where(ProjectSource.project_id == project_id,
                                                        ProjectSource.inbound_source_id == source.id))
+    if source_override_id:  # server-side routing (call tracking line → channel); never from request data
+        override = await db.get(ProjectSource, source_override_id)
+        if override and override.project_id == project_id:
+            mapped = override
     if mapped is None:
         mapped = ProjectSource(project_id=project_id, name=source.name, kind="INTEGRATION",
                                method="API", category="Сайт", status="active", inbound_source_id=source.id)

@@ -242,6 +242,8 @@ async def run_worker() -> None:
                 hour = now().replace(minute=0, second=0, microsecond=0)
                 if last_hourly != hour or now().minute in (1, 31):
                     await scheduled(db)
+                    from app.services.conversions import upload_all
+                    await upload_all(db)  # sales from the CRM back to Metrica/Direct
                     last_hourly = hour
         except asyncio.CancelledError:
             raise

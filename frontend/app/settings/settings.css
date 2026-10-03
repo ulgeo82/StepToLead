@@ -25,3 +25,20 @@
 .integrationSources b{color:#1f3b5c}
 .integrationSources label{display:flex;gap:6px;align-items:center;color:#40556f;white-space:nowrap}
 @media(max-width:900px){.integrationGroups{grid-template-columns:1fr}.integrationSources>div{grid-template-columns:1fr}}
+.convStats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:12px 0}
+.convStats>div{display:flex;flex-direction:column;gap:3px;padding:12px;border:1px solid #e3e9f2;border-radius:10px}
+.convStats span{color:#6f829d;font-size:11px}.convStats b{color:#0f2140;font-size:20px}.convStats small{color:#8b9cb3;font-size:11px}
+.convMetrika{display:grid;grid-template-columns:10px 1fr auto auto;gap:10px;align-items:center;padding:10px 12px;border:1px solid #e3e9f2;border-radius:10px}
+.convMetrika small{display:block;color:#8b9cb3;font-size:11px}
+.convForm,.aiForm{display:flex;flex-direction:column;gap:10px;margin-top:10px}
+.convForm label,.aiForm label{display:flex;flex-direction:column;gap:5px;color:#6f829d;font-size:12px}
+.convForm input,.aiForm input,.aiForm textarea{min-height:36px;padding:8px 10px;border:1px solid #dce5f2;border-radius:8px;font:inherit;font-size:13px;color:#0f2140}
+.convForm .crmPrimary,.aiForm .crmPrimary{align-self:flex-start}
+.convHint{margin:12px 0 8px!important;color:#8b9cb3!important;font-size:11px!important}
+.convCsv{display:inline-flex;align-items:center;text-decoration:none}
+.settingsCard .crmPrimary{min-height:36px;padding:0 16px;border:0;border-radius:8px;background:#006bfd;color:#fff;font-weight:650;font-size:13px;cursor:pointer}
+.settingsCard .crmPrimary:disabled{opacity:.6}
+.settingsCard .crmGhost{min-height:34px;padding:0 12px;border:1px solid #dce5f2;border-radius:7px;background:#fff;color:#40556f;font-size:12px;cursor:pointer;white-space:nowrap}
+.settingsCard .crmOk{margin:8px 0;padding:8px 10px;border-radius:7px;background:#e8f7ee;color:#17693d;font-size:12px}
+.settingsCard .crmFormError{margin:8px 0;padding:8px 10px;border-radius:7px;background:#fdecef;color:#a52a3d;font-size:12px}
+.settingsCard .chatError{color:#c8344b}

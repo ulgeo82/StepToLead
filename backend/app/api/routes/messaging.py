@@ -14,7 +14,7 @@ from app.db import get_db
 from app.models.crm import CrmContact, CrmDeal
 from app.models.marketing import AdConnection, PortalUser
 from app.models.messaging import Conversation, Message, MessagingChannel, ReplyTemplate
-from app.services import avito, messaging
+from app.services import ai, avito, messaging
 
 router = APIRouter(prefix="/crm", tags=["messaging"], dependencies=[Depends(require_portal_user)])
 
@@ -237,7 +237,8 @@ async def conversation_detail(conversation_id: int, before_id: int | None = None
     owner = await db.get(PortalUser, row.assigned_user_id) if row.assigned_user_id else None
     return {**conversation_json(row, channel, contact.name if contact else None, deal.name if deal else None,
                                 owner.display_name if owner else None),
-            "messages": [message_json(m) for m in messages], "has_more": len(messages) == 100}
+            "messages": [message_json(m) for m in messages], "has_more": len(messages) == 100,
+            "ai_available": ai.configured()}
 
 
 class SendIn(BaseModel):
@@ -370,3 +371,99 @@ async def start_conversation(deal_id: int, payload: StartChat, request: Request,
         row.deal_id, row.contact_id = deal.id, contact.id
     await db.commit()
     return conversation_json(row, channel)
+
+
+# --------------------------------------------------------------------------- AI assistant
+
+def ai_settings(project) -> dict:
+    data = dict((project.portal_state or {}).get("ai") or {})
+    return {"knowledge": data.get("knowledge") or "", "tone": data.get("tone") or "", "goal": data.get("goal") or ""}
+
+
+async def ai_context(db: AsyncSession, row: Conversation):
+    from app.models.crm import CrmStage
+    from app.models.marketing import Project
+    project = await db.get(Project, row.project_id)
+    channel = await db.get(MessagingChannel, row.channel_id)
+    messages = list(reversed((await db.scalars(select(Message).where(Message.conversation_id == row.id)
+                                               .order_by(Message.sent_at.desc(), Message.id.desc()).limit(30))).all()))
+    deal_line = None
+    if row.deal_id:
+        deal = await db.get(CrmDeal, row.deal_id)
+        stage = await db.get(CrmStage, deal.stage_id) if deal else None
+        if deal:
+            deal_line = f"«{deal.name}», этап «{stage.name if stage else '—'}»" + (f", бюджет {float(deal.amount):,.0f} ₽".replace(",", " ") if deal.amount else "")
+    return project, channel, messages, deal_line
+
+
+@router.post("/conversations/{conversation_id}/ai/suggest")
+async def ai_suggest(conversation_id: int, request: Request, db: AsyncSession = Depends(get_db),
+                     user: PortalUser = Depends(require_portal_user)):
+    """Draft of the next reply. The manager edits and sends it; nothing goes to the client automatically."""
+    check_origin(request); require_permission(user, "view_crm")
+    row = await conversation_for(db, user, conversation_id)
+    project, channel, messages, deal_line = await ai_context(db, row)
+    if not messages:
+        raise HTTPException(422, "В диалоге ещё нет сообщений")
+    limit = 1000 if channel and channel.kind == "avito" else 1500
+    try:
+        text = await ai.complete(ai.suggest_prompt(project.name, messaging.KINDS.get(channel.kind, "чате") if channel else "чате",
+                                                   ai_settings(project), deal_line, limit),
+                                 ai.transcript(messages, row.title), max_tokens=400)
+    except ai.AIError as exc:
+        raise HTTPException(422, str(exc)) from None
+    return {"text": text[:limit]}
+
+
+class SummaryIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    save: bool = False
+
+
+@router.post("/conversations/{conversation_id}/ai/summary")
+async def ai_summary(conversation_id: int, payload: SummaryIn, request: Request, db: AsyncSession = Depends(get_db),
+                     user: PortalUser = Depends(require_portal_user)):
+    from app.api.routes.crm import activity
+    check_origin(request); require_permission(user, "view_crm")
+    row = await conversation_for(db, user, conversation_id)
+    _, _, messages, _ = await ai_context(db, row)
+    if not messages:
+        raise HTTPException(422, "В диалоге ещё нет сообщений")
+    lines = "\n".join(f"{'Клиент' if m.direction == 'in' else 'Менеджер'}: {m.text}" for m in messages if m.text)
+    try:
+        text = await ai.complete(ai.SUMMARY_PROMPT, [{"role": "user", "content": lines[-12000:]}], max_tokens=500, temperature=0.1)
+    except ai.AIError as exc:
+        raise HTTPException(422, str(exc)) from None
+    saved = False
+    if payload.save and row.deal_id:
+        deal = await db.get(CrmDeal, row.deal_id)
+        activity(db, deal, user, "COMMENT_ADDED", {"text": f"Резюме переписки (ИИ):\n{text}"}, touch=False)
+        await db.commit(); saved = True
+    return {"text": text, "saved": saved}
+
+
+@router.get("/projects/{project_id}/ai-settings")
+async def get_ai_settings(project_id: int, db: AsyncSession = Depends(get_db), user: PortalUser = Depends(require_portal_user)):
+    require_permission(user, "view_crm")
+    project = await project_for(db, user, project_id)
+    return {**ai_settings(project), "configured": ai.configured(), "provider": ai.provider_name(),
+            "can_manage": can_manage_channels(user)}
+
+
+class AISettingsIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    knowledge: str = Field(default="", max_length=8000)
+    tone: str = Field(default="", max_length=300)
+    goal: str = Field(default="", max_length=300)
+
+
+@router.put("/projects/{project_id}/ai-settings")
+async def put_ai_settings(project_id: int, payload: AISettingsIn, request: Request, db: AsyncSession = Depends(get_db),
+                          user: PortalUser = Depends(require_portal_user)):
+    check_origin(request)
+    project = await project_for(db, user, project_id)
+    if not can_manage_channels(user):
+        raise HTTPException(403, "Базу знаний меняет руководитель или владелец")
+    project.portal_state = {**(project.portal_state or {}), "ai": {k: v.strip() for k, v in payload.model_dump().items()}}
+    await db.commit()
+    return await get_ai_settings(project_id, db, user)

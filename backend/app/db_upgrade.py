@@ -58,7 +58,8 @@ def upgrade_existing_schema(connection):
         "website_sessions": {"engaged": "BOOLEAN NOT NULL DEFAULT false",
                              "cta_clicked": "BOOLEAN NOT NULL DEFAULT false",
                              "form_started": "BOOLEAN NOT NULL DEFAULT false",
-                             "form_succeeded": "BOOLEAN NOT NULL DEFAULT false"},
+                             "form_succeeded": "BOOLEAN NOT NULL DEFAULT false",
+                             "click_type": "VARCHAR(12)", "ym_client_id": "VARCHAR(32)"},
     }
     for table, additions in columns.items():
         existing = {column["name"] for column in inspector.get_columns(table)}

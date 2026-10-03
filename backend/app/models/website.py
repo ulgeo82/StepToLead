@@ -54,6 +54,8 @@ class WebsiteSession(Base):
     utm_content: Mapped[str | None] = mapped_column(String(500))
     utm_term: Mapped[str | None] = mapped_column(String(500))
     click_id: Mapped[str | None] = mapped_column(String(255))
+    click_type: Mapped[str | None] = mapped_column(String(12))      # yclid | gclid | vkclid
+    ym_client_id: Mapped[str | None] = mapped_column(String(32))    # Yandex Metrica ClientId for offline conversions
     is_new_visitor: Mapped[bool] = mapped_column(Boolean, default=False)
     page_views: Mapped[int] = mapped_column(default=0)
     engaged: Mapped[bool] = mapped_column(Boolean, default=False)

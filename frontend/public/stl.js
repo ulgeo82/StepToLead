@@ -21,8 +21,10 @@
   for (const field of ["utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term"])
     if (params.get(field)) attribution[field] = params.get(field).slice(0, 500);
   for (const field of ["yclid", "gclid", "vkclid"]) if (params.get(field)) {
-    attribution.click_id = params.get(field).slice(0, 255); break;
+    attribution.click_id = params.get(field).slice(0, 255); attribution.click_type = field; break;
   }
+  // Yandex Metrica ClientId: lets sales from the CRM go back to Metrica/Direct as offline conversions.
+  const metricaClient = () => { const m = document.cookie.match(/(?:^|;\s*)_ym_uid=(\d{6,32})/); return m ? m[1] : undefined; };
   if (params.get("stl_connection_id")) attribution.connection_id = Number(params.get("stl_connection_id")) || null;
   if (params.get("stl_campaign_id")) attribution.external_campaign_id = params.get("stl_campaign_id").slice(0, 180);
   const page = () => `${location.origin}${location.pathname}`;
@@ -33,7 +35,7 @@
   function flush() {
     if (!consent || !queue.length) return;
     const events = queue.splice(0, 20);
-    const data = JSON.stringify({ visitor, session, new_visitor: newVisitor, referrer: document.referrer || null, device: device(), browser: browser(), os: os(), ...attribution, events });
+    const data = JSON.stringify({ visitor, session, new_visitor: newVisitor, referrer: document.referrer || null, device: device(), browser: browser(), os: os(), ...attribution, ym_client_id: metricaClient(), events });
     const blob = new Blob([data], { type: "text/plain" });
     if (navigator.sendBeacon && navigator.sendBeacon(endpoint, blob)) return;
     fetch(endpoint, { method: "POST", mode: "cors", credentials: "omit", headers: { "Content-Type": "text/plain" }, body: data, keepalive: true }).catch(() => {});

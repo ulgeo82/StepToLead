@@ -205,3 +205,29 @@ class CrmCustomFieldDefinition(Base):
     field_type: Mapped[str] = mapped_column(String(20))
     options: Mapped[list | None] = mapped_column(JSON)
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class OfflineConversion(Base):
+    """A CRM result (qualified lead, sale) to send back to ad systems so their strategies learn on sales."""
+    __tablename__ = "offline_conversions"
+    __table_args__ = (UniqueConstraint("lead_id", "kind", name="uq_offline_conversion_lead_kind"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    workspace_id: Mapped[int] = mapped_column(ForeignKey("client_workspaces.id"), index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    deal_id: Mapped[int | None] = mapped_column(ForeignKey("crm_deals.id", ondelete="SET NULL"), index=True)
+    lead_id: Mapped[int] = mapped_column(ForeignKey("client_leads.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(16))           # qualified | sale
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    value: Mapped[float | None] = mapped_column(Numeric(16, 2))
+    yclid: Mapped[str | None] = mapped_column(String(255))
+    ym_client_id: Mapped[str | None] = mapped_column(String(32))
+    vkclid: Mapped[str | None] = mapped_column(String(255))
+    phone: Mapped[str | None] = mapped_column(String(32))
+    email: Mapped[str | None] = mapped_column(String(254))
+    # pending → sent (Metrica accepted) | no_id (nothing to match in Metrica, CSV only) | error
+    status: Mapped[str] = mapped_column(String(12), default="pending", index=True)
+    error: Mapped[str | None] = mapped_column(String(300))
+    upload_id: Mapped[str | None] = mapped_column(String(40))
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

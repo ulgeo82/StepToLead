@@ -102,6 +102,12 @@ def set_cfg(conn: TelephonyConnection, **values) -> None:
     conn.config = {**cfg(conn), **values}
 
 
+def line_route(conn: TelephonyConnection, line: str | None) -> dict | None:
+    """Call tracking: which channel a tracking number belongs to — {"kind": "ad"|"source", "id": …, "label": …}."""
+    digits = norm_phone(line)
+    return (cfg(conn).get("line_map") or {}).get(digits) if digits else None
+
+
 def lock_for(connection_id: int) -> asyncio.Lock:
     return _locks.setdefault(connection_id, asyncio.Lock())
 
@@ -377,7 +383,12 @@ async def link_crm(db: AsyncSession, conn: TelephonyConnection, call: Call) -> N
                 "external_id": f"call:{conn.id}:{call.entry_id}"[:180], "full_name": f"Звонок {pretty_phone(digits)}",
                 "phone": phone, "source": "phone", "external_source": "phone", "contact_method": "Телефон",
                 "contact": phone, "notes": note, "call_id": call.id, "line_number": call.line_number, "contact_consent": False})
-            result = await create_inbound(db, await ensure_source(db, conn), payload, commit=False, allow_raw_contact=True)
+            route = line_route(conn, call.line_number)
+            result = await create_inbound(db, await ensure_source(db, conn), payload, commit=False, allow_raw_contact=True,
+                                          attribution_extra={"verified_connection_id": route["id"], "call_tracking_line": call.line_number}
+                                          if route and route.get("kind") == "ad" else
+                                          ({"call_tracking_line": call.line_number} if route else None),
+                                          source_override_id=route["id"] if route and route.get("kind") == "source" else None)
             inbound = await db.get(CrmInbound, result.get("inbound_id")) if result.get("inbound_id") else None
             if result.get("deal_id"):  # calls are a trusted source: the request is already a deal
                 deal_row = await db.get(CrmDeal, result["deal_id"])

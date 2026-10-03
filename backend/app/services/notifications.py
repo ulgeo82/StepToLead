@@ -89,10 +89,12 @@ async def notify(db: AsyncSession, project_id: int | None, event_key: str, title
             ids.add(assignee_id)
     ids.discard(actor_id)  # Nobody needs a notification about their own action.
     recipients = [members[uid] for uid in sorted(ids)]
+    from app.services import push
     for user in recipients:
         if state["in_app"]:
             db.add(PortalNotification(workspace_id=project.workspace_id, user_id=user.id, level="success",
                                       title=title[:180], body=body))
+            push.queue(db, user.id, title, body, f"/crm?project_id={project.id}")
         if state["telegram"] and telegram_configured() and user.telegram_chat_id:
             lines = [f"<b>{html.escape(title)}</b> · {html.escape(project.name)}", html.escape(body)]
             lines += [html.escape(line) for line in details or [] if line]
@@ -122,7 +124,9 @@ async def _send_all(messages: list[tuple[str, str]]) -> None:
 
 
 def flush_telegram(db: AsyncSession) -> None:
-    """Send queued Telegram messages in the background. Call right after a successful commit."""
+    """Send queued Telegram messages (and web pushes) in the background. Call right after a successful commit."""
+    from app.services import push
+    push.flush(db)
     messages = db.sync_session.info.pop(PENDING_KEY, None)
     if not messages:
         return
@@ -132,6 +136,8 @@ def flush_telegram(db: AsyncSession) -> None:
 
 
 def discard_telegram(db: AsyncSession) -> None:
+    from app.services import push
+    push.discard(db)
     db.sync_session.info.pop(PENDING_KEY, None)
 
 
@@ -144,6 +150,8 @@ def direct(db: AsyncSession, workspace_id: int, user_ids: list[int], title: str,
             continue
         db.add(PortalNotification(workspace_id=workspace_id, user_id=user.id, level="info",
                                   title=title[:180], body=body))
+        from app.services import push
+        push.queue(db, user.id, title, body)
         if telegram_configured() and user.telegram_chat_id:
             text = f"<b>{html.escape(title)}</b>\n{html.escape(body)}"
             db.sync_session.info.setdefault(PENDING_KEY, []).append((user.telegram_chat_id, text))

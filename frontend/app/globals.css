@@ -90,3 +90,11 @@
 @media(max-width:1000px){.clientWorkspaceGrid{grid-template-columns:1fr}.portalKpis{grid-template-columns:repeat(2,1fr)}.portalGrid{grid-template-columns:1fr}}
 @media(max-width:760px){.clientsPage .pageHeader{align-items:flex-start;flex-direction:column}.portalShell{display:block}.portalSidebar{position:static;width:100%;height:auto;padding:14px;flex-direction:row;align-items:center;gap:12px}.portalCompany,.portalSidebar nav{display:none}.portalSidebar>button{margin:0 0 0 auto;padding:0 14px}.portalMain{padding:24px 18px 60px}.portalMain header h1{font-size:38px}.portalAlert{align-items:flex-start;flex-direction:column}.portalKpis{grid-template-columns:1fr 1fr}}
 @media(max-width:480px){.portalKpis{grid-template-columns:1fr}.clientWorkspaceHead{grid-template-columns:42px 1fr}.clientWorkspaceHead i{grid-column:1/-1;width:max-content}.memberRow{grid-template-columns:34px 1fr}.memberRow>b{grid-column:2}}
+
+/* Admin: client health */
+.clientHealth{display:flex;gap:10px;align-items:center;margin:12px 0 4px;padding:9px 11px;border-radius:10px;background:#eef9f2}
+.clientHealth b{display:grid;place-items:center;min-width:38px;height:38px;border-radius:50%;background:#18a058;color:#fff;font-size:13px}
+.clientHealth strong{display:block;font-size:12px;color:#17693d}
+.clientHealth small{display:block;margin-top:2px;color:#5e6b63;font-size:11px}
+.clientHealth.warning{background:#fff6e5}.clientHealth.warning b{background:#d88a00}.clientHealth.warning strong{color:#8a5800}
+.clientHealth.risk{background:#fdecef}.clientHealth.risk b{background:#c8344b}.clientHealth.risk strong{color:#a52a3d}

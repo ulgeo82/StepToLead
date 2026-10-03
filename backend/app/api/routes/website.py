@@ -99,6 +99,8 @@ class EventBatch(BaseModel):
     utm_content: str | None = Field(default=None, max_length=500)
     utm_term: str | None = Field(default=None, max_length=500)
     click_id: str | None = Field(default=None, max_length=255)
+    click_type: str | None = Field(default=None, pattern="^(yclid|gclid|vkclid)$")
+    ym_client_id: str | None = Field(default=None, pattern=r"^\d{6,32}$")  # Yandex Metrica ClientId (_ym_uid)
     connection_id: int | None = Field(default=None, gt=0)
     external_campaign_id: str | None = Field(default=None, max_length=180)
     events: list[CollectedEvent] = Field(min_length=1, max_length=20)
@@ -206,10 +208,14 @@ async def collect(public_key: str, request: Request, db: AsyncSession = Depends(
                                  utm_source=safe_label(payload.utm_source), utm_medium=safe_label(payload.utm_medium),
                                  utm_campaign=safe_label(payload.utm_campaign), utm_content=safe_label(payload.utm_content),
                                  utm_term=safe_label(payload.utm_term), click_id=payload.click_id,
+                                 click_type=payload.click_type if payload.click_id else None,
+                                 ym_client_id=payload.ym_client_id,
                                  connection_id=verified_connection,
                                  external_campaign_id=payload.external_campaign_id if verified_connection else None)
         db.add(session)
         await db.flush()
+    elif payload.ym_client_id and not session.ym_client_id:
+        session.ym_client_id = payload.ym_client_id  # Metrica sets its cookie a moment after our first beacon
     existing = set((await db.scalars(select(WebsiteEvent.event_key).where(WebsiteEvent.site_id == site.id,
                                 WebsiteEvent.event_key.in_([event.key for event in payload.events])))).all())
     prior_semantics = (await db.execute(select(WebsiteEvent.event_name, WebsiteEvent.element_name,

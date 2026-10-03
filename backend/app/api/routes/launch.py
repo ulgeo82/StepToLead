@@ -5,6 +5,7 @@ import secrets
 from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -261,3 +262,140 @@ async def patch_source(source_id: int, payload: SourcePatch, request: Request, d
             setattr(source, key, value)
     await db.commit()
     return {"id": source.id, "auto_accept": source.auto_accept, "auto_assign": source.auto_assign}
+
+
+# --------------------------------------------------------------------------- offline conversions
+
+@router.get("/projects/{project_id}/conversions")
+async def conversions_overview(project_id: int, db: AsyncSession = Depends(get_db), user: PortalUser = Depends(require_portal_user)):
+    from app.models.crm import OfflineConversion
+    from app.services import conversions
+    project = await project_for(db, user, project_id)
+    data = conversions.metrika_cfg(project)
+    rows = (await db.execute(select(OfflineConversion.kind, OfflineConversion.status, func.count()).where(
+        OfflineConversion.project_id == project.id).group_by(OfflineConversion.kind, OfflineConversion.status))).all()
+    stats = {}
+    for kind, status, amount in rows:
+        stats.setdefault(kind, {"pending": 0, "sent": 0, "no_id": 0, "error": 0})[status] = amount
+    return {"can_manage": can_manage(user), "stats": stats, "kinds": conversions.KIND_NAMES,
+            "metrika": {"connected": bool(data.get("counter_id")), "counter_id": data.get("counter_id"),
+                        "counter_name": data.get("counter_name"), "last_error": data.get("last_error"),
+                        "last_upload_at": data.get("last_upload_at"), "last_upload_rows": data.get("last_upload_rows")}}
+
+
+class MetrikaIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    counter_id: int = Field(gt=0)
+    token: str = Field(min_length=20, max_length=200)
+
+
+@router.put("/projects/{project_id}/metrika")
+async def connect_metrika(project_id: int, payload: MetrikaIn, request: Request, db: AsyncSession = Depends(get_db),
+                          user: PortalUser = Depends(require_portal_user)):
+    from app.services import conversions
+    check_origin(request)
+    project = await project_for(db, user, project_id)
+    if not can_manage(user):
+        raise HTTPException(403, "Подключать Метрику может руководитель или владелец")
+    try:
+        await conversions.connect(project, payload.counter_id, payload.token.strip())
+    except conversions.MetrikaError as exc:
+        raise HTTPException(422, str(exc)) from None
+    await db.commit()
+    return await conversions_overview(project_id, db, user)
+
+
+@router.delete("/projects/{project_id}/metrika")
+async def disconnect_metrika(project_id: int, request: Request, db: AsyncSession = Depends(get_db),
+                             user: PortalUser = Depends(require_portal_user)):
+    from app.services import conversions
+    check_origin(request)
+    project = await project_for(db, user, project_id)
+    if not can_manage(user):
+        raise HTTPException(403, "Отключать Метрику может руководитель или владелец")
+    conversions.save_metrika(project, None)
+    await db.commit()
+    return {"ok": True}
+
+
+@router.post("/projects/{project_id}/conversions/upload")
+async def upload_now(project_id: int, request: Request, db: AsyncSession = Depends(get_db),
+                     user: PortalUser = Depends(require_portal_user)):
+    from app.services import conversions
+    check_origin(request)
+    project = await project_for(db, user, project_id)
+    if not can_manage(user):
+        raise HTTPException(403, "Недостаточно прав")
+    sent = await conversions.upload(db, project)
+    error = conversions.metrika_cfg(project).get("last_error")
+    if error:
+        raise HTTPException(422, error)
+    return {"sent": sent}
+
+
+@router.get("/projects/{project_id}/conversions.csv")
+async def conversions_csv(project_id: int, kind: str | None = None, db: AsyncSession = Depends(get_db),
+                          user: PortalUser = Depends(require_portal_user)):
+    """For VK Ads «Офлайн-конверсии» and audiences. Contains phones, so only for managers of the project."""
+    from app.models.crm import OfflineConversion
+    from app.services import conversions
+    project = await project_for(db, user, project_id)
+    if not can_manage(user):
+        raise HTTPException(403, "Выгрузку с телефонами клиентов может скачать руководитель или владелец")
+    query = select(OfflineConversion).where(OfflineConversion.project_id == project.id)
+    if kind in conversions.KIND_NAMES:
+        query = query.where(OfflineConversion.kind == kind)
+    rows = (await db.scalars(query.order_by(OfflineConversion.occurred_at))).all()
+    return Response(conversions.export_csv(list(rows)), media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="conversions-{project.id}.csv"'})
+
+
+# --------------------------------------------------------------------------- client health (agency admin)
+
+async def client_health(db: AsyncSession, workspace_id: int) -> dict:
+    """A client whose leads are not processed leaves saying «реклама не работает» — see it weeks earlier."""
+    import statistics
+    from datetime import timedelta
+    from app.models.crm import CrmTask
+    from app.models.marketing import ClientSale
+    current = datetime.now(timezone.utc)
+    week, month = current - timedelta(days=7), current - timedelta(days=30)
+
+    def aware(value):
+        return value.replace(tzinfo=timezone.utc) if value is not None and value.tzinfo is None else value
+    users = (await db.scalars(select(PortalUser).where(PortalUser.workspace_id == workspace_id, PortalUser.active.is_(True)))).all()
+    last_seen = max((aware(u.last_activity_at) for u in users if u.last_activity_at), default=None)
+    deals = (await db.scalars(select(CrmDeal).where(CrmDeal.workspace_id == workspace_id, CrmDeal.created_at >= month))).all()
+    week_deals = [d for d in deals if aware(d.created_at) >= week]
+    waits = [(aware(d.first_response_at) - aware(d.created_at)).total_seconds() / 60 for d in week_deals if d.first_response_at]
+    unanswered = sum(1 for d in week_deals if d.first_response_at is None and d.closed_at is None and d.archived_at is None)
+    open_ids = [d.id for d in deals if d.closed_at is None and d.archived_at is None]
+    with_task = set((await db.scalars(select(CrmTask.deal_id).where(CrmTask.deal_id.in_(open_ids), CrmTask.status == "OPEN"))).all()) if open_ids else set()
+    no_task = len([i for i in open_ids if i not in with_task])
+    sales = await db.scalar(select(func.count(ClientSale.id)).join(Project, Project.id == ClientSale.project_id).where(
+        Project.workspace_id == workspace_id, ClientSale.occurred_at >= month)) or 0
+    median = statistics.median(waits) if waits else None
+    score, reasons = 100, []
+    if last_seen is None or last_seen < week:
+        score -= 30; reasons.append("Клиент не заходил в портал больше недели" if last_seen else "Клиент ещё ни разу не заходил в портал")
+    if median is not None and median > 60:
+        score -= 20; reasons.append(f"Медленный ответ на заявки: {median:.0f} мин")
+    elif median is not None and median > 15:
+        score -= 10; reasons.append(f"Ответ на заявки дольше 15 минут: {median:.0f} мин")
+    if unanswered:
+        score -= min(20, unanswered * 5); reasons.append(f"Без ответа: {unanswered} заявок за неделю")
+    if open_ids and no_task / len(open_ids) > 0.3:
+        score -= 15; reasons.append(f"Без следующего шага: {no_task} из {len(open_ids)} открытых сделок")
+    if len(deals) >= 10 and not sales:
+        score -= 15; reasons.append("За месяц не подтверждено ни одной продажи — ROMI не посчитать")
+    status = "good" if score >= 75 else "warning" if score >= 50 else "risk"
+    return {"workspace_id": workspace_id, "score": max(0, score), "status": status, "reasons": reasons,
+            "last_seen_at": last_seen, "leads_7d": len(week_deals), "median_response_min": round(median) if median is not None else None,
+            "unanswered_7d": unanswered, "open_without_task": no_task, "sales_30d": sales}
+
+
+@admin_router.get("/health")
+async def admin_health(db: AsyncSession = Depends(get_db)):
+    from app.models.marketing import ClientWorkspace
+    workspaces = (await db.scalars(select(ClientWorkspace).order_by(ClientWorkspace.id))).all()
+    return [await client_health(db, w.id) for w in workspaces]

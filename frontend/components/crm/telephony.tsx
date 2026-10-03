@@ -8,13 +8,15 @@ export type CallRow = { id: number; direction: "in" | "out"; status: string; pho
   duration_sec: number; wait_sec: number; contact_id: number | null; contact_name: string | null; deal_id: number | null;
   deal_name: string | null; inbound_id: number | null; has_recording: boolean; recording_deleted: boolean;
   callback_status: string | null; callback_task_id: number | null; stage_name?: string | null; amount?: number | null;
-  responsible_name?: string | null };
+  responsible_name?: string | null; channel?: string | null };
 type PbxUser = { extension: string; name: string; numbers: string[] };
 type Connection = { id: number; provider: string; provider_name: string; name: string; active: boolean; status: string;
   last_error: string | null; last_event_at: string | null; retention_days: number; create_leads: boolean; missed_task_minutes: number;
-  webhook_path?: string; pbx_users?: PbxUser[]; user_map?: Record<string, number> };
+  webhook_path?: string; pbx_users?: PbxUser[]; user_map?: Record<string, number>;
+  line_map?: Record<string, { kind: string; id: number; label: string }> };
+type Tracking = { lines: string[]; channels: { kind: string; id: number; label: string }[] };
 export type TelephonyInfo = { connection: Connection | null; can_manage: boolean; my_extension: string | null;
-  members: { id: number; name: string }[] };
+  members: { id: number; name: string }[]; tracking?: Tracking | null };
 type Bucket = { total: number; incoming: number; outgoing: number; answered_in: number; missed_in: number; answered_out: number;
   talk_sec: number; avg_wait_sec: number | null };
 type Log = { items: CallRow[]; total: number; page: number;
@@ -147,7 +149,7 @@ export function CallsTab({ projectId, team, info, reloadInfo, onOpenDeal, onOpen
       <input placeholder="Поиск по номеру" value={search} onChange={e => setSearch(e.target.value)}/></div>
     <div className="crmTableScroll"><table className="callTable"><thead><tr><th>Звонок</th><th>Клиент</th><th>Сделка</th><th>Менеджер</th><th>Когда</th><th>Длительность</th><th>Запись</th><th/></tr></thead>
       <tbody>{log?.items.map(c => { const l = callLabel(c);
-        return <tr key={c.id} className={l.tone}><td><span className={`callIcon ${l.tone}`}>{l.icon}</span>{l.text}</td>
+        return <tr key={c.id} className={l.tone}><td><span className={`callIcon ${l.tone}`}>{l.icon}</span>{l.text}{c.channel && <small className="callChannel">{c.channel}</small>}</td>
           <td><b>{c.contact_name || fmtPhone(c.phone) || "Номер скрыт"}</b>{c.contact_name && c.phone ? <small>{fmtPhone(c.phone)}</small> : null}</td>
           <td>{c.deal_id ? <button className="crmLinkButton" onClick={() => onOpenDeal(c.deal_id!)}>{c.deal_name}</button>
             : c.inbound_id ? <button className="crmLinkButton" onClick={onOpenInbound}>заявка</button> : "—"}</td>
@@ -173,7 +175,20 @@ function TelephonySettings({ projectId, info, onClose, onChanged }: { projectId:
   const [notice, setNotice] = useState("");
   const [map, setMap] = useState<Record<string, number>>(conn?.user_map || {});
   const [copied, setCopied] = useState(false);
+  const [lines, setLines] = useState<Record<string, string>>({});
+  const [newLine, setNewLine] = useState("");
   useEffect(() => { setMap(conn?.user_map || {}); }, [conn?.user_map]);
+  useEffect(() => {
+    const current: Record<string, string> = {};
+    for (const n of info?.tracking?.lines || []) current[n] = "";
+    for (const [n, r] of Object.entries(conn?.line_map || {})) current[n] = `${r.kind}:${r.id}`;
+    setLines(current);
+  }, [info?.tracking, conn?.line_map]);
+  function saveLines() {
+    const payload: Record<string, { kind: string; id: number } | null> = {};
+    for (const [n, v] of Object.entries(lines)) { if (!v) { payload[n] = null; continue; } const [kind, id] = v.split(":"); payload[n] = { kind, id: Number(id) }; }
+    return run(() => request(`/crm/telephony/${conn!.id}`, "PATCH", { line_map: payload }), "Номера привязаны к каналам — новые звонки попадут в ROMI своих каналов");
+  }
   const manage = Boolean(info?.can_manage);
   const webhook = conn?.webhook_path && typeof window !== "undefined" ? `${window.location.origin}${conn.webhook_path}` : "";
   async function run(action: () => Promise<unknown>, message: string) {
@@ -223,6 +238,15 @@ function TelephonySettings({ projectId, info, onClose, onChanged }: { projectId:
             <option value="">— не сотрудник CRM —</option>{info!.members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select></label>)}
           {!conn.pbx_users?.length && <p className="crmMuted">В АТС нет сотрудников с внутренними номерами.</p>}</div>
         <button className="crmPrimary" disabled={busy} onClick={() => run(() => request(`/crm/telephony/${conn.id}`, "PATCH", { user_map: map }), "Сотрудники сохранены")}>Сохранить сотрудников</button>
+        <h3 className="crmSub">Коллтрекинг: номер → канал</h3>
+        <p className="crmModalLead">Поставьте в каждом канале свой номер Mango (Директ, Авито, сайт, листовки) и укажите здесь, чей он. Звонок нового клиента на этот номер станет заявкой из этого канала — со стоимостью и ROMI в аналитике.</p>
+        <div className="callMap">{Object.keys(lines).map(n => <label key={n}><span><b>{fmtPhone(n)}</b></span>
+          <select value={lines[n]} onChange={e => setLines(v => ({ ...v, [n]: e.target.value }))}><option value="">— не отслеживать —</option>
+            {(info?.tracking?.channels || []).map(c => <option key={`${c.kind}:${c.id}`} value={`${c.kind}:${c.id}`}>{c.kind === "ad" ? "Реклама: " : "Источник: "}{c.label}</option>)}</select></label>)}
+          {!Object.keys(lines).length && <p className="crmMuted">Номера появятся здесь после первых звонков, или добавьте вручную.</p>}</div>
+        <div className="callAddLine"><input value={newLine} onChange={e => setNewLine(e.target.value)} placeholder="+7 846 300-11-22"/>
+          <button type="button" className="crmGhost" onClick={() => { const d = newLine.replace(/\D/g, "").replace(/^8(\d{10})$/, "7$1"); if (d.length >= 10) { setLines(v => ({ ...v, [d]: v[d] || "" })); setNewLine(""); } }}>＋ Номер</button>
+          <button type="button" className="crmPrimary" disabled={busy} onClick={saveLines}>Сохранить номера</button></div>
         <h3 className="crmSub">Правила</h3>
         <label className="crmCheck"><input type="checkbox" checked={conn.create_leads} disabled={busy} onChange={e => run(() => request(`/crm/telephony/${conn.id}`, "PATCH", { create_leads: e.target.checked }), "Сохранено")}/>
           Звонок с незнакомого номера создаёт заявку в «Неразобранном»</label>

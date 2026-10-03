@@ -360,3 +360,15 @@
 .crmQualityReasons{display:flex;flex-wrap:wrap;gap:6px;width:100%;padding-top:6px}
 .crmQualityReasons button{padding:4px 9px;border:1px solid #f3c6ce;border-radius:12px;background:#fff;color:#a52a3d;font-size:11px;cursor:pointer}
 .crmQualityReasons button:hover{background:#fdecef}
+
+/* ---------------------------------------------------------------- AI assistant in chats */
+.chatAiBar{display:flex;justify-content:flex-end;padding:4px 12px 0}
+.chatSummary{margin:6px 12px 0;padding:10px 12px;border:1px solid #e3d9fb;border-radius:10px;background:#f8f5ff;font-size:12px;color:#2e2350}
+.chatSummary>div{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+.chatSummary>div button{border:0;background:none;color:#8b7fb0;font-size:16px;cursor:pointer}
+.chatSummary p{margin:0 0 6px;line-height:1.5}
+.chatSummary small{color:#7c6aa8}
+.chatAiSuggest{color:#7b4ce0!important}
+.callChannel{display:block;margin-left:28px;color:#6f829d;font-size:10px}
+.callAddLine{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 14px}.callAddLine .crmPrimary{min-height:34px;padding:0 14px;font-size:12px}
+.callAddLine input{flex:1;min-width:160px;min-height:34px;padding:0 10px;border:1px solid #dce5f2;border-radius:7px}

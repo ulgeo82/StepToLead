@@ -828,6 +828,9 @@ async def move_deal(deal_id: int, payload: StageMove, request: Request, db: Asyn
     if lead:
         if stage.analytics_type in {"QUALIFIED", "WON"} and lead.quality is None:
             lead.quality = "target"  # reaching qualification means the lead was a real client
+        if stage.analytics_type in {"QUALIFIED", "WON"}:
+            from app.services import conversions
+            await conversions.record(db, deal, "qualified")
         if stage.analytics_type == "QUALIFIED" and lead.qualified_at is None:
             lead.qualified_at = now()
             db.add(ClientLeadEvent(workspace_id=lead.workspace_id, lead_id=lead.id, actor_id=user.id,
@@ -874,6 +877,9 @@ async def create_deal_sale(deal_id: int, payload: SaleCreate, request: Request, 
             deal.stage_id = won.id
     deal.closed_at = now()
     activity(db, deal, user, "SALE_CREATED", {"amount": payload.amount})
+    from app.services import conversions
+    await conversions.record(db, deal, "qualified")
+    await conversions.record(db, deal, "sale", float(payload.amount), payload.occurred_at or now())
     db.add(ClientLeadEvent(workspace_id=lead.workspace_id, lead_id=lead.id, actor_id=user.id,
                            event_type="SALE_CREATED", description=f"Продажа {payload.amount} ₽"))
     await notify(db, deal.project_id, "new_sale", "Новая продажа", f"{deal.name} · {payload.amount:,.2f} ₽",
