@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.crm import CrmActivity, CrmInbound
-from app.models.marketing import LeadInboundReceipt, LeadInboundSource, ProjectSource
+from app.models.marketing import LeadInboundReceipt, LeadInboundSource, Project, ProjectSource
 from app.models.website import WebsiteSession
 from app.services.notifications import flush_telegram, notify
 from app.services.project_scope import default_project
@@ -72,7 +72,17 @@ async def create_inbound(db: AsyncSession, source: LeadInboundSource, payload,
                        actor_name="Система", event_type="INBOUND_CREATED", payload={"source": source.name}))
     extra = getattr(payload, "model_extra", None) or {}
     method, raw_contact = extra.get("contact_method"), extra.get("contact")
-    await notify(db, project_id, "new_lead", "Новая заявка", f"{payload.full_name} · {source.name}", details=[
+    deal = None
+    if source.auto_accept:
+        # Trusted source: the request becomes a deal at once (repeat requests join the client's open deal).
+        from app.api.routes.crm import accept_core
+        try:
+            async with db.begin_nested():
+                deal = await accept_core(db, inbound, await db.get(Project, project_id), None, merge_existing=True)
+        except HTTPException:
+            deal = None  # e.g. no usable contact: stays in «Неразобранное» for a person to decide
+    await notify(db, project_id, "new_lead", "Новая заявка" if deal is None else "Новая заявка → сделка",
+                 f"{payload.full_name} · {source.name}", assignee_id=deal.responsible_user_id if deal else None, details=[
         f"Способ связи: {method}" if method else None,
         f"Контакт: {raw_contact}" if raw_contact else None,
         f"Телефон: {phone}" if phone and not raw_contact else None,
@@ -83,4 +93,5 @@ async def create_inbound(db: AsyncSession, source: LeadInboundSource, payload,
     if commit:
         await db.commit()
         flush_telegram(db)
-    return {"ok": True, "inbound_id": inbound.id, "duplicate": False, "status": "NEW"}
+    return {"ok": True, "inbound_id": inbound.id, "duplicate": False, "status": inbound.status,
+            "deal_id": deal.id if deal else None}

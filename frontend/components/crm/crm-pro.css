@@ -349,3 +349,14 @@
 .callMap label{display:grid;grid-template-columns:1fr 220px;align-items:center;gap:10px;font-size:12px}
 .callMap select{min-height:32px}
 @media(max-width:700px){.callMap label{grid-template-columns:1fr}.callPopup{width:calc(100vw - 40px)}}
+
+/* ---------------------------------------------------------------- lead quality */
+.crmQuality{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0 0 12px;padding:8px 10px;border:1px dashed #d6e3f5;border-radius:9px;background:#fbfdff}
+.crmQuality>span{margin-right:4px;color:#6f829d;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.3px}
+.crmQuality>button{min-height:28px;padding:0 10px;border:1px solid #dce5f2;border-radius:14px;background:#fff;color:#40556f;font-size:12px;cursor:pointer}
+.crmQuality>button.active.good{border-color:#18a058;background:#e8f7ee;color:#17693d;font-weight:600}
+.crmQuality>button.active.bad{border-color:#c8344b;background:#fdecef;color:#a52a3d;font-weight:600}
+.crmQuality>small{color:#8b9cb3;font-size:11px}
+.crmQualityReasons{display:flex;flex-wrap:wrap;gap:6px;width:100%;padding-top:6px}
+.crmQualityReasons button{padding:4px 9px;border:1px solid #f3c6ce;border-radius:12px;background:#fff;color:#a52a3d;font-size:11px;cursor:pointer}
+.crmQualityReasons button:hover{background:#fdecef}

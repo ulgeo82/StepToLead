@@ -15,6 +15,7 @@ from app.services.campaign_runner import run_campaigns
 from app.services.crm_automation import run_worker as run_crm_worker
 from app.services.messaging import run_worker as run_messaging_worker
 from app.services.telephony import run_worker as run_telephony_worker
+from app.services.watchdog import run_worker as run_watchdog
 from app.services.telegram_parser import run_parser_worker
 
 
@@ -29,6 +30,7 @@ async def lifespan(_: FastAPI):
     crm_worker = asyncio.create_task(run_crm_worker())
     messaging_worker = asyncio.create_task(run_messaging_worker())
     telephony_worker = asyncio.create_task(run_telephony_worker())
+    watchdog = asyncio.create_task(run_watchdog())
     try:
         yield
     finally:
@@ -38,6 +40,7 @@ async def lifespan(_: FastAPI):
         crm_worker.cancel()
         messaging_worker.cancel()
         telephony_worker.cancel()
+        watchdog.cancel()
         with suppress(asyncio.CancelledError):
             await runner
         with suppress(asyncio.CancelledError):
@@ -50,6 +53,8 @@ async def lifespan(_: FastAPI):
             await messaging_worker
         with suppress(asyncio.CancelledError):
             await telephony_worker
+        with suppress(asyncio.CancelledError):
+            await watchdog
         await engine.dispose()
 
 

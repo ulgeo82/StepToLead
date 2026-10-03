@@ -228,6 +228,12 @@ class TildaTests(unittest.TestCase):
                     expires_at=datetime(2099, 1, 1, tzinfo=timezone.utc)))
                 await db.commit()
         asyncio.run(owner())
+        async def manual_queue():  # this test checks the manual «Неразобранное» path
+            from sqlalchemy import update
+            from app.models.marketing import LeadInboundSource
+            async with self.sessions() as db:
+                await db.execute(update(LeadInboundSource).values(auto_accept=False)); await db.commit()
+        asyncio.run(manual_queue())
         response = self.client.post(self.webhook, headers=self.headers,
             data=self.form(Contact="@test9999999", ContactMethod="Telegram"))
         self.assertEqual(response.status_code, 200, response.text)

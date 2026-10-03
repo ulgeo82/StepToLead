@@ -1,0 +1,263 @@
+"""«Запуск»: the first screen of a new client — setup checklist, the agency marketer, the agency work plan
+with statuses and monthly goals with plan-vs-fact. Agency staff edit the card and the plan in the admin;
+the client owner can adjust goals and hide the screen once everything is running."""
+import secrets
+from datetime import date, datetime, timezone
+
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.api.routes.crm import project_for
+from app.core.access import check_origin, require_admin, require_portal_user
+from app.core.permissions import effective_permissions
+from app.db import get_db
+from app.models.crm import CrmDeal, CrmPipeline
+from app.models.marketing import (AdConnection, LeadInboundSource, PortalProjectAccess, PortalUser, Project,
+                                  ProjectEconomics)
+from app.models.tilda import TildaConnection
+from app.models.website import WebsiteSite
+from app.models.messaging import MessagingChannel
+from app.models.telephony import TelephonyConnection
+
+router = APIRouter(prefix="/crm", tags=["launch"], dependencies=[Depends(require_portal_user)])
+admin_router = APIRouter(prefix="/portal/admin", tags=["launch-admin"], dependencies=[Depends(require_admin)])
+
+PLAN_TEMPLATE = ["Аудит ниши и конкурентов", "Настройка CRM и воронки", "Подключение заявок с сайта, чатов и звонков",
+                 "Запуск рекламы в Яндекс Директе", "Запуск Авито", "Первый отчёт и корректировка кампаний"]
+STATUSES = {"todo": "Запланировано", "doing": "В работе", "done": "Готово"}
+
+
+def launch_state(project: Project) -> dict:
+    data = dict((project.portal_state or {}).get("launch") or {})
+    data.setdefault("plan", [{"id": secrets.token_hex(4), "title": title, "status": "todo", "due": None}
+                             for title in PLAN_TEMPLATE] if not data.get("plan_saved") else [])
+    data.setdefault("marketer", None)
+    data.setdefault("goals", {})
+    data.setdefault("dismissed_by", [])
+    data.setdefault("weekly_note", "")
+    return data
+
+
+def save_launch(project: Project, data: dict) -> None:
+    project.portal_state = {**(project.portal_state or {}), "launch": data}
+
+
+async def checklist(db: AsyncSession, project: Project, user: PortalUser | None) -> list[dict]:
+    pid = project.id
+    count = lambda query: db.scalar(select(func.count()).select_from(query.subquery()))  # noqa: E731
+    pipeline = await count(select(CrmPipeline.id).where(CrmPipeline.project_id == pid))
+    ads = await count(select(AdConnection.id).where(AdConnection.project_id == pid, AdConnection.status == "connected"))
+    team = await count(select(PortalProjectAccess.id).join(PortalUser, PortalUser.id == PortalProjectAccess.user_id).where(
+        PortalProjectAccess.project_id == pid, PortalUser.active.is_(True), PortalUser.role != "client_owner"))
+    channels = (await count(select(MessagingChannel.id).where(MessagingChannel.project_id == pid, MessagingChannel.active.is_(True)))
+                + await count(select(TelephonyConnection.id).where(TelephonyConnection.project_id == pid, TelephonyConnection.active.is_(True))))
+    economics = await count(select(ProjectEconomics.id).where(ProjectEconomics.project_id == pid))
+    deals = await count(select(CrmDeal.id).where(CrmDeal.project_id == pid))
+    suffix = f"?project_id={pid}"
+    items = [
+        {"key": "pipeline", "label": "Воронка и этапы настроены под вашу нишу", "done": bool(pipeline), "agency": True,
+         "href": f"/crm{suffix}&tab=pipeline"},
+        {"key": "ads", "label": "Рекламные кабинеты подключены", "done": bool(ads), "agency": True, "href": f"/ads{suffix}"},
+        {"key": "telegram", "label": "Подключите Telegram — заявки будут приходить на телефон за секунды",
+         "done": bool(user and user.telegram_chat_id), "agency": False, "href": f"/settings{suffix}#telegram"},
+        {"key": "team", "label": "Пригласите менеджеров, которые обрабатывают заявки", "done": bool(team), "agency": False,
+         "href": "/team"},
+        {"key": "channels", "label": "Подключите WhatsApp, чаты и телефонию (вместе с маркетологом)", "done": bool(channels),
+         "agency": False, "href": f"/crm{suffix}&tab=chats"},
+        {"key": "economics", "label": "Укажите средний чек и маржу — без них не посчитать окупаемость", "done": bool(economics),
+         "agency": False, "href": f"/settings{suffix}#economics"},
+        {"key": "first_lead", "label": "Примите первую заявку в CRM", "done": bool(deals), "agency": False,
+         "href": f"/crm{suffix}"},
+    ]
+    if user is not None and user.role == "sales_manager":
+        items = [i for i in items if i["key"] in {"telegram", "first_lead"}]
+    return items
+
+
+async def month_fact(db: AsyncSession, project: Project) -> dict:
+    from app.services.result_analytics import result_facts
+    today = datetime.now(timezone.utc).date()
+    facts = await result_facts(db, project, today.replace(day=1), today)
+    t = facts["current"]["totals"]
+    return {"leads": t.get("leads"), "cpl": t.get("cpl"), "meetings": t.get("meetings"), "sales": t.get("sales"),
+            "spend": t.get("spend"), "target_share": t.get("target_share"), "month": today.replace(day=1)}
+
+
+async def launch_payload(db: AsyncSession, project: Project, user: PortalUser | None) -> dict:
+    data = launch_state(project)
+    items = await checklist(db, project, user)
+    done = sum(i["done"] for i in items)
+    plan = data["plan"]
+    return {"project_id": project.id, "checklist": items, "done": done, "total": len(items),
+            "complete": done == len(items) and all(p["status"] == "done" for p in plan),
+            "dismissed": bool(user and user.id in data["dismissed_by"]),
+            "marketer": data["marketer"], "plan": plan, "statuses": STATUSES, "goals": data["goals"],
+            "fact": await month_fact(db, project), "weekly_note": data["weekly_note"],
+            "can_edit_goals": bool(user and (user.role == "client_owner" or "manage_settings" in effective_permissions(user)))}
+
+
+@router.get("/projects/{project_id}/launch")
+async def get_launch(project_id: int, db: AsyncSession = Depends(get_db), user: PortalUser = Depends(require_portal_user)):
+    project = await project_for(db, user, project_id)
+    return await launch_payload(db, project, user)
+
+
+class Goals(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    leads: int | None = Field(default=None, ge=0, le=100000)
+    cpl: float | None = Field(default=None, ge=0, le=10_000_000)
+    meetings: int | None = Field(default=None, ge=0, le=100000)
+    sales: int | None = Field(default=None, ge=0, le=100000)
+
+
+@router.put("/projects/{project_id}/launch/goals")
+async def put_goals(project_id: int, payload: Goals, request: Request, db: AsyncSession = Depends(get_db),
+                    user: PortalUser = Depends(require_portal_user)):
+    check_origin(request)
+    project = await project_for(db, user, project_id)
+    if not (user.role == "client_owner" or "manage_settings" in effective_permissions(user)):
+        raise HTTPException(403, "Цели меняет владелец или руководитель")
+    data = launch_state(project)
+    data["goals"] = {k: v for k, v in payload.model_dump().items() if v is not None}
+    save_launch(project, data)
+    await db.commit()
+    return await launch_payload(db, project, user)
+
+
+@router.post("/projects/{project_id}/launch/dismiss")
+async def dismiss(project_id: int, request: Request, db: AsyncSession = Depends(get_db),
+                  user: PortalUser = Depends(require_portal_user)):
+    check_origin(request)
+    project = await project_for(db, user, project_id)
+    data = launch_state(project)
+    data["dismissed_by"] = sorted(set(data["dismissed_by"]) | {user.id})
+    save_launch(project, data)
+    await db.commit()
+    return {"ok": True}
+
+
+# --------------------------------------------------------------------------- agency side
+
+class Marketer(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=2, max_length=120)
+    role: str | None = Field(default="Ваш маркетолог", max_length=80)
+    telegram: str | None = Field(default=None, max_length=64)
+    phone: str | None = Field(default=None, max_length=40)
+    hours: str | None = Field(default=None, max_length=80)
+    photo_url: str | None = Field(default=None, max_length=500, pattern=r"^https://")
+
+
+class PlanItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str | None = Field(default=None, max_length=16)
+    title: str = Field(min_length=2, max_length=160)
+    status: str = Field(default="todo", pattern="^(todo|doing|done)$")
+    due: date | None = None
+    note: str | None = Field(default=None, max_length=300)
+
+
+class LaunchAdmin(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    marketer: Marketer | None = None
+    plan: list[PlanItem] | None = Field(default=None, max_length=30)
+    goals: Goals | None = None
+    weekly_note: str | None = Field(default=None, max_length=1000)
+
+
+@admin_router.get("/projects")
+async def admin_projects(workspace_id: int, db: AsyncSession = Depends(get_db)):
+    rows = (await db.scalars(select(Project).where(Project.workspace_id == workspace_id).order_by(Project.id))).all()
+    return [{"id": p.id, "name": p.name, "launch": await launch_payload(db, p, None)} for p in rows]
+
+
+@admin_router.put("/projects/{project_id}/launch")
+async def admin_put_launch(project_id: int, payload: LaunchAdmin, db: AsyncSession = Depends(get_db)):
+    project = await db.get(Project, project_id)
+    if not project:
+        raise HTTPException(404, "Проект не найден")
+    data = launch_state(project)
+    changes = payload.model_dump(exclude_unset=True, mode="json")
+    if "marketer" in changes:
+        data["marketer"] = changes["marketer"]
+    if "plan" in changes:
+        data["plan"] = [{**item, "id": item.get("id") or secrets.token_hex(4)} for item in changes["plan"] or []]
+        data["plan_saved"] = True
+    if "goals" in changes:
+        data["goals"] = {k: v for k, v in (changes["goals"] or {}).items() if v is not None}
+    if "weekly_note" in changes:
+        data["weekly_note"] = (changes["weekly_note"] or "").strip()
+    save_launch(project, data)
+    await db.commit()
+    return await launch_payload(db, project, None)
+
+
+# --------------------------------------------------------------------------- integrations overview
+
+PLATFORMS = {"yandex_direct": "Яндекс Директ", "vk_ads": "VK Реклама", "avito_items": "Авито · Объявления",
+             "avito_ads": "Авито Реклама", "telegram_ads": "Telegram Ads"}
+
+
+def can_manage(user: PortalUser) -> bool:
+    return bool({"manage_pipeline", "manage_integrations", "manage_settings", "manage_sources"} & effective_permissions(user))
+
+
+@router.get("/projects/{project_id}/integrations")
+async def integrations(project_id: int, db: AsyncSession = Depends(get_db), user: PortalUser = Depends(require_portal_user)):
+    """Everything connected to the project on one screen, with where to configure each part."""
+    project = await project_for(db, user, project_id)
+    pid = project.id
+    ads = (await db.scalars(select(AdConnection).where(AdConnection.project_id == pid).order_by(AdConnection.id))).all()
+    channels = (await db.scalars(select(MessagingChannel).where(MessagingChannel.project_id == pid))).all()
+    phone = (await db.scalars(select(TelephonyConnection).where(TelephonyConnection.project_id == pid))).all()
+    sites = (await db.scalars(select(WebsiteSite).where(WebsiteSite.project_id == pid))).all()
+    tilda = (await db.scalars(select(TildaConnection).where(TildaConnection.project_id == pid))).all()
+    sources = (await db.scalars(select(LeadInboundSource).where(LeadInboundSource.project_id == pid)
+                                .order_by(LeadInboundSource.id))).all()
+    suffix = f"?project_id={pid}"
+    return {
+        "can_manage": can_manage(user),
+        "groups": [
+            {"key": "ads", "title": "Реклама", "href": f"/ads{suffix}", "items": [
+                {"name": a.name, "kind": PLATFORMS.get(a.platform, a.platform), "status": a.status,
+                 "detail": f"данные за {a.last_synced_at:%d.%m %H:%M}" if a.last_synced_at else None} for a in ads]},
+            {"key": "site", "title": "Сайт и формы", "href": f"/settings{suffix}#sources", "items": [
+                *[{"name": s.name, "kind": "Трекинг сайта", "status": "connected" if s.active else "off",
+                   "detail": f"последний визит {s.last_event_at:%d.%m %H:%M}" if s.last_event_at else "визитов ещё не было"} for s in sites],
+                *[{"name": t.form_name, "kind": "Форма Tilda", "status": "connected" if t.is_active else "off",
+                   "detail": f"последняя заявка {t.last_received_at:%d.%m %H:%M}" if t.last_received_at else "заявок ещё не было"} for t in tilda]]},
+            {"key": "chats", "title": "Чаты", "href": f"/crm{suffix}&tab=chats", "items": [
+                {"name": c.name, "kind": {"avito": "Авито", "telegram_bot": "Telegram-бот", "whatsapp": "WhatsApp"}.get(c.kind, c.kind),
+                 "status": c.status if c.active else "off", "detail": c.last_error} for c in channels]},
+            {"key": "phone", "title": "Телефония", "href": f"/crm{suffix}&tab=calls", "items": [
+                {"name": t.name, "kind": "Mango Office", "status": t.status if t.active else "off",
+                 "detail": f"последний звонок {t.last_event_at:%d.%m %H:%M}" if t.last_event_at else "событий ещё не было"} for t in phone]},
+        ],
+        "sources": [{"id": s.id, "name": s.name, "active": s.active, "auto_accept": s.auto_accept,
+                     "auto_assign": s.auto_assign} for s in sources],
+    }
+
+
+class SourcePatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    auto_accept: bool | None = None
+    auto_assign: bool | None = None
+
+
+@router.patch("/inbound-sources/{source_id}")
+async def patch_source(source_id: int, payload: SourcePatch, request: Request, db: AsyncSession = Depends(get_db),
+                       user: PortalUser = Depends(require_portal_user)):
+    check_origin(request)
+    source = await db.get(LeadInboundSource, source_id)
+    if not source or source.workspace_id != user.workspace_id or not source.project_id:
+        raise HTTPException(404, "Источник не найден")
+    await project_for(db, user, source.project_id)
+    if not can_manage(user):
+        raise HTTPException(403, "Настраивать источники может руководитель или владелец")
+    for key, value in payload.model_dump(exclude_unset=True).items():
+        if value is not None:
+            setattr(source, key, value)
+    await db.commit()
+    return {"id": source.id, "auto_accept": source.auto_accept, "auto_assign": source.auto_assign}

@@ -128,7 +128,7 @@ def activity(db, deal: CrmDeal | None, user: PortalUser | None, kind: str, paylo
                        event_type=kind, payload=payload))
 
 
-async def pipeline_for(db: AsyncSession, project_id: int, pipeline_id: int | None = None):
+async def pipeline_for(db: AsyncSession, project_id: int, pipeline_id: int | None = None, commit: bool = True):
     query = select(CrmPipeline).where(CrmPipeline.project_id == project_id, CrmPipeline.archived_at.is_(None))
     if pipeline_id:
         query = query.where(CrmPipeline.id == pipeline_id)
@@ -146,7 +146,8 @@ async def pipeline_for(db: AsyncSession, project_id: int, pipeline_id: int | Non
             db.add(CrmStage(pipeline_id=pipeline.id, name=name, analytics_type=kind, color=color,
                             position=position, required_fields=[]))
         await db.flush()
-        await db.commit()
+        if commit:  # GET screens persist the default pipeline; write paths commit themselves
+            await db.commit()
     if not pipeline:
         raise HTTPException(404, "Воронка не найдена")
     return pipeline
@@ -711,6 +712,7 @@ async def deal_detail(deal_id: int, db: AsyncSession = Depends(get_db), user: Po
     legacy_events = (await db.scalars(select(ClientLeadEvent).where(ClientLeadEvent.lead_id == deal.lead_id)
                                       .order_by(ClientLeadEvent.created_at.desc()).limit(100))).all() if deal.lead_id else []
     inbound = await db.get(CrmInbound, deal.inbound_id) if deal.inbound_id else None
+    lead = await db.get(ClientLead, deal.lead_id) if deal.lead_id else None
     sales = (await db.scalars(select(ClientSale).where(ClientSale.deal_id == deal.id)
                               .order_by(ClientSale.occurred_at.desc()))).all()
     return {**deal_json(deal, contact, stage, next((t for t in tasks if t.status == "OPEN"), None),
@@ -723,6 +725,7 @@ async def deal_detail(deal_id: int, db: AsyncSession = Depends(get_db), user: Po
                   "payload": {"text": e.description}, "created_at": e.created_at} for e in legacy_events],
                 key=lambda item: item["created_at"], reverse=True),
             "form_data": inbound.raw_payload if inbound else None,
+            "quality": lead.quality if lead else None, "quality_reason": lead.quality_reason if lead else None,
             "contact": contact_json(contact, inbound.raw_payload if inbound else None),
             "sales": [{"id": s.id, "amount": float(s.amount) if s.amount is not None else None,
                        "occurred_at": s.occurred_at} for s in sales]}
@@ -823,6 +826,8 @@ async def move_deal(deal_id: int, payload: StageMove, request: Request, db: Asyn
                                             "analytics_type": stage.analytics_type})
     lead = await db.get(ClientLead, deal.lead_id) if deal.lead_id else None
     if lead:
+        if stage.analytics_type in {"QUALIFIED", "WON"} and lead.quality is None:
+            lead.quality = "target"  # reaching qualification means the lead was a real client
         if stage.analytics_type == "QUALIFIED" and lead.qualified_at is None:
             lead.qualified_at = now()
             db.add(ClientLeadEvent(workspace_id=lead.workspace_id, lead_id=lead.id, actor_id=user.id,
@@ -860,6 +865,7 @@ async def create_deal_sale(deal_id: int, payload: SaleCreate, request: Request, 
     lead = await db.get(ClientLead, deal.lead_id)
     lead.status = "won"
     if not lead.qualified_at: lead.qualified_at = now()
+    lead.quality, lead.quality_reason = "target", None
     if stage.analytics_type != "WON":
         won = await db.scalar(select(CrmStage).where(CrmStage.pipeline_id == deal.pipeline_id,
                         CrmStage.analytics_type == "WON", CrmStage.archived_at.is_(None)).limit(1))
@@ -875,6 +881,40 @@ async def create_deal_sale(deal_id: int, payload: SaleCreate, request: Request, 
     await db.commit(); await db.refresh(sale)
     flush_telegram(db)
     return {"id": sale.id, "deal_id": deal.id}
+
+
+QUALITY_REASONS = ["Спам или ошибка", "Не та услуга", "Не наш регион", "Нет бюджета", "Дубль", "Не выходит на связь", "Другое"]
+
+
+class QualityIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    quality: str | None = Field(default=None, pattern="^(target|non_target)$")
+    reason: str | None = Field(default=None, max_length=120)
+
+
+@router.post("/deals/{deal_id}/quality")
+async def set_quality(deal_id: int, payload: QualityIn, request: Request, db: AsyncSession = Depends(get_db),
+                      user: PortalUser = Depends(require_portal_user)):
+    """Целевой / нецелевой: feedback from sales to the marketer, counted per campaign in analytics."""
+    check_origin(request); require_permission(user, "edit_deal")
+    deal = await deal_for(db, user, deal_id)
+    lead = await db.get(ClientLead, deal.lead_id) if deal.lead_id else None
+    if lead is None:
+        raise HTTPException(422, "У сделки нет лида для аналитики")
+    if payload.quality == "non_target" and not (payload.reason or "").strip():
+        raise HTTPException(422, "Укажите, почему заявка нецелевая — это увидит маркетолог")
+    lead.quality = payload.quality
+    lead.quality_reason = ((payload.reason or "").strip()[:120] or None) if payload.quality == "non_target" else None
+    text = {"target": "Заявка отмечена как целевая", "non_target": f"Заявка нецелевая: {lead.quality_reason}",
+            None: "Отметка качества снята"}[payload.quality]
+    activity(db, deal, user, "QUALITY_CHANGED", {"quality": payload.quality, "reason": lead.quality_reason, "text": text})
+    await db.commit()
+    return {"quality": lead.quality, "quality_reason": lead.quality_reason}
+
+
+@router.get("/quality-reasons")
+async def quality_reasons():
+    return QUALITY_REASONS
 
 
 @router.post("/deals/{deal_id}/comments", status_code=201)
@@ -925,6 +965,82 @@ async def inbound_list(project_id: int, page: int = Query(1, ge=1), limit: int =
                       for item in rows], "page": page}
 
 
+async def round_robin_owner(db: AsyncSession, project: Project, inbound: CrmInbound) -> int | None:
+    if not inbound.inbound_source_id:
+        return None
+    inbound_source = await db.get(LeadInboundSource, inbound.inbound_source_id)
+    if not inbound_source or not inbound_source.auto_assign:
+        return None
+    managers = (await db.scalars(select(PortalUser).where(
+        PortalUser.workspace_id == project.workspace_id, PortalUser.active.is_(True),
+        PortalUser.role == "sales_manager",
+        or_(PortalUser.id.in_(select(PortalProjectAccess.user_id).where(
+            PortalProjectAccess.project_id == project.id)), PortalUser.role == "client_owner"))
+        .order_by(PortalUser.id))).all()
+    if not managers:
+        managers = (await db.scalars(select(PortalUser).where(
+            PortalUser.workspace_id == project.workspace_id, PortalUser.active.is_(True),
+            PortalUser.role.in_(["sales_head", "client_owner"]),
+            or_(PortalUser.role == "client_owner", PortalUser.id.in_(select(PortalProjectAccess.user_id).where(
+                PortalProjectAccess.project_id == project.id))))
+            .order_by(PortalUser.id))).all()
+    if not managers:
+        return None
+    last = next((index for index, member in enumerate(managers)
+                 if member.id == inbound_source.last_assigned_to_id), -1)
+    owner_id = managers[(last + 1) % len(managers)].id
+    inbound_source.last_assigned_to_id = owner_id
+    return owner_id
+
+
+async def accept_core(db: AsyncSession, inbound: CrmInbound, project: Project, actor: PortalUser | None, *,
+                      contact_id: int | None = None, responsible_user_id: int | None = None,
+                      deal_name: str | None = None, merge_existing: bool = False) -> CrmDeal:
+    """Turn a request into a deal (manual accept or a trusted source). Does not commit.
+
+    merge_existing (automatic path): a known phone reuses its contact, and a repeat request from a client
+    with an open deal is attached to that deal instead of creating a duplicate."""
+    contact = None
+    if contact_id:
+        contact = await contact_for(db, project.id, contact_id)
+    elif merge_existing and norm_phone(inbound.phone):
+        contact = await db.scalar(select(CrmContact).where(CrmContact.project_id == project.id,
+                                                           CrmContact.phone_normalized == norm_phone(inbound.phone)).limit(1))
+    if contact is None:
+        contact = CrmContact(workspace_id=project.workspace_id, project_id=project.id,
+                             name=inbound.name or "Без имени", phones=[inbound.phone] if inbound.phone else [],
+                             emails=[inbound.email] if inbound.email else [],
+                             phone_normalized=norm_phone(inbound.phone) or None,
+                             email_normalized=inbound.email.lower() if inbound.email else None,
+                             telegram=inbound_telegram(inbound.raw_payload))
+        db.add(contact); await db.flush()
+    deal = None
+    if merge_existing:
+        deal = await db.scalar(select(CrmDeal).where(CrmDeal.contact_id == contact.id, CrmDeal.archived_at.is_(None),
+                                                     CrmDeal.closed_at.is_(None)).order_by(CrmDeal.created_at.desc()).limit(1))
+        if deal:
+            activity(db, deal, None, "INBOUND_REPEAT", {"inbound_id": inbound.id, "text": "Повторное обращение клиента",
+                                                        "source": (inbound.raw_payload or {}).get("source")}, inbound, touch=False)
+    if deal is None:
+        pipeline = await pipeline_for(db, project.id, commit=False)
+        stage = await db.scalar(select(CrmStage).where(CrmStage.pipeline_id == pipeline.id,
+                        CrmStage.analytics_type == "LEAD", CrmStage.archived_at.is_(None))
+                        .order_by(CrmStage.position).limit(1))
+        owner_id = responsible_user_id or await round_robin_owner(db, project, inbound)
+        deal = await create_deal_fact(db, project, contact, pipeline, stage,
+                                       deal_name or f"Заявка — {contact.name}", owner_id,
+                                       inbound.raw_payload.get("value"), inbound.source_id, inbound.origin,
+                                       inbound=inbound, actor=actor)
+    inbound.status = "ACCEPTED"; inbound.contact_id = contact.id; inbound.deal_id = deal.id; inbound.processed_at = now()
+    activity(db, deal, actor, "INBOUND_ACCEPTED", {"inbound_id": inbound.id, "auto": actor is None}, inbound,
+             touch=actor is not None)
+    from app.services.messaging import link_inbound
+    await link_inbound(db, inbound, contact.id, deal)
+    from app.services.telephony import link_inbound as link_inbound_calls
+    await link_inbound_calls(db, inbound, contact.id, deal)
+    return deal
+
+
 @router.post("/inbound/{inbound_id}/accept")
 async def accept_inbound(inbound_id: int, payload: InboundAction, request: Request,
                          db: AsyncSession = Depends(get_db), user: PortalUser = Depends(require_portal_user)):
@@ -936,55 +1052,11 @@ async def accept_inbound(inbound_id: int, payload: InboundAction, request: Reque
     if inbound.status != "NEW":
         raise HTTPException(409, "Заявка уже обработана")
     await validate_owner(db, project.id, project.workspace_id, payload.responsible_user_id)
-    if payload.contact_id:
-        contact = await contact_for(db, project.id, payload.contact_id)
-    else:
-        contact = CrmContact(workspace_id=project.workspace_id, project_id=project.id,
-                             name=inbound.name or "Без имени", phones=[inbound.phone] if inbound.phone else [],
-                             emails=[inbound.email] if inbound.email else [],
-                             phone_normalized=norm_phone(inbound.phone) or None,
-                             email_normalized=inbound.email.lower() if inbound.email else None,
-                             telegram=inbound_telegram(inbound.raw_payload))
-        db.add(contact); await db.flush()
-    pipeline = await pipeline_for(db, project.id)
-    stage = await db.scalar(select(CrmStage).where(CrmStage.pipeline_id == pipeline.id,
-                    CrmStage.analytics_type == "LEAD", CrmStage.archived_at.is_(None))
-                    .order_by(CrmStage.position).limit(1))
-    owner_id = payload.responsible_user_id
-    if owner_id is None and inbound.inbound_source_id:
-        inbound_source = await db.get(LeadInboundSource, inbound.inbound_source_id)
-        if inbound_source and inbound_source.auto_assign:
-            managers = (await db.scalars(select(PortalUser).where(
-                PortalUser.workspace_id == project.workspace_id, PortalUser.active.is_(True),
-                PortalUser.role == "sales_manager",
-                or_(PortalUser.id.in_(select(PortalProjectAccess.user_id).where(
-                    PortalProjectAccess.project_id == project.id)), PortalUser.role == "client_owner"))
-                .order_by(PortalUser.id))).all()
-            if not managers:
-                managers = (await db.scalars(select(PortalUser).where(
-                    PortalUser.workspace_id == project.workspace_id, PortalUser.active.is_(True),
-                    PortalUser.role.in_(["sales_head", "client_owner"]),
-                    or_(PortalUser.role == "client_owner", PortalUser.id.in_(select(PortalProjectAccess.user_id).where(
-                        PortalProjectAccess.project_id == project.id))))
-                    .order_by(PortalUser.id))).all()
-            if managers:
-                last = next((index for index, member in enumerate(managers)
-                             if member.id == inbound_source.last_assigned_to_id), -1)
-                owner_id = managers[(last + 1) % len(managers)].id
-                inbound_source.last_assigned_to_id = owner_id
-    deal = await create_deal_fact(db, project, contact, pipeline, stage,
-                                   payload.deal_name or f"Заявка — {contact.name}", owner_id,
-                                   inbound.raw_payload.get("value"), inbound.source_id, inbound.origin,
-                                   inbound=inbound, actor=user)
-    inbound.status = "ACCEPTED"; inbound.contact_id = contact.id; inbound.deal_id = deal.id; inbound.processed_at = now()
-    activity(db, deal, user, "INBOUND_ACCEPTED", {"inbound_id": inbound.id}, inbound)
-    from app.services.messaging import link_inbound
-    await link_inbound(db, inbound, contact.id, deal)
-    from app.services.telephony import link_inbound as link_inbound_calls
-    await link_inbound_calls(db, inbound, contact.id, deal)
+    deal = await accept_core(db, inbound, project, user, contact_id=payload.contact_id,
+                             responsible_user_id=payload.responsible_user_id, deal_name=payload.deal_name)
     await db.commit()
     flush_telegram(db)
-    return {"deal_id": deal.id, "contact_id": contact.id, "lead_id": deal.lead_id}
+    return {"deal_id": deal.id, "contact_id": deal.contact_id, "lead_id": deal.lead_id}
 
 
 @router.post("/inbound/{inbound_id}/reject")

@@ -78,7 +78,7 @@ async def create_connection(payload: ConnectTilda, request: Request, db: AsyncSe
     source_token = secrets.token_urlsafe(48)
     source = LeadInboundSource(workspace_id=project.workspace_id, project_id=project.id,
         name=f"Tilda: {site.name}"[:180], token_hash=token_digest(source_token),
-        token_prefix=source_token[:12], active=True, auto_assign=True)
+        token_prefix=source_token[:12], active=True, auto_assign=True, auto_accept=True)
     db.add(source)
     await db.flush()
     row = TildaConnection(public_id=secrets.token_urlsafe(24), secret_hash=token_digest(secret),

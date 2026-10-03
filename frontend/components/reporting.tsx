@@ -26,10 +26,11 @@ export function ProjectSidebar({ project, projectId, active, role }: {
       {allowed("view_result") && <Link className={active === "result" ? "active" : ""} href={`/result${suffix}`}><b>01</b> Результат</Link>}
       {allowed("view_analytics") && <Link className={active === "analytics" ? "active" : ""} href={`/analytics${suffix}`}><b>02</b> Аналитика</Link>}
       <small>ПРОДАЖИ</small>{allowed("view_crm") && <Link className={active === "crm" || active === "leads" ? "active" : ""} href={`/crm${suffix}`}><b>03</b> CRM</Link>}
-      {allowed("view_sales") && <Link className={active === "sales" ? "active" : ""} href={`/sales${suffix}`}><b>04</b> Продажи</Link>}<small>МАРКЕТИНГ</small>
-      {allowed("view_ads") && <Link className={active === "ads" ? "active" : ""} href={`/ads${suffix}`}><b>05</b> Реклама</Link>}{allowed("view_campaigns") && <Link href={`/campaigns${suffix}`}><b>06</b> Кампании</Link>}
-      <small>УПРАВЛЕНИЕ</small>{permissions?.includes("manage_team") && <Link className={active === "team" ? "active" : ""} href="/team" title="Команда клиентской организации"><b>07</b> Команда</Link>}{(permissions?.includes("manage_settings") || permissions?.includes("manage_sources")) && <Link className={active === "settings" ? "active" : ""} href={`/settings${suffix}`} title="Настройки клиентской организации"><b>08</b> Настройки</Link>}
-    </nav><div className="resultSidebarFoot"><span>●</span> Данные вашего проекта · <Link href={role === "admin" ? "/admin" : "/portal"}>В кабинет</Link></div>
+      <small>МАРКЕТИНГ</small>
+      {allowed("view_ads") && <Link className={active === "ads" ? "active" : ""} href={`/ads${suffix}`}><b>04</b> Реклама</Link>}
+      <small>УПРАВЛЕНИЕ</small>{permissions?.includes("manage_team") && <Link className={active === "team" ? "active" : ""} href="/team" title="Команда клиентской организации"><b>05</b> Команда</Link>}{(permissions?.includes("manage_settings") || permissions?.includes("manage_sources")) && <Link className={active === "settings" ? "active" : ""} href={`/settings${suffix}`} title="Настройки клиентской организации"><b>06</b> Настройки</Link>}
+    </nav><div className="resultSidebarFoot"><span>●</span> Данные вашего проекта · {role === "admin" ? <Link href="/admin">В админку</Link>
+      : <button type="button" onClick={async () => { await api("/portal/auth/logout", { method: "POST" }).catch(() => undefined); location.assign("/portal/login"); }}>Выйти</button>}</div>
   </aside>;
 }
 

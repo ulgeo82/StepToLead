@@ -4,6 +4,7 @@ import Link from "next/link";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { count, dateInput, MetricChart, money, percent, PeriodControls, ProjectSidebar } from "@/components/reporting";
+import { LaunchPanel } from "@/components/launch-panel";
 import "./result.css";
 
 type Metric = "spend" | "leads" | "qualified" | "sales" | "revenue" | "romi";
@@ -149,6 +150,7 @@ export default function ResultPage() {
       {error && <div className="resultError" role="alert">{error}{!projects.length && <div><Link href="/portal/login?next=/result">Войти в кабинет</Link> · <Link href="/login?next=/result">Войти как администратор</Link></div>}</div>}
       {loading && !data && <div className="resultLoading">Загружаем результат…</div>}
       {!loading && !data && !error && <div className="resultLoading">Проекты пока не созданы.</div>}
+      {data && data.viewer.role !== "admin" && <LaunchPanel projectId={projectId}/>}
       {data && <>
         <section className="resultKpis" aria-label="Главные показатели">{METRICS.map(({ key, label, icon, note }) => {
           const change = current?.[`${key}_change` as keyof Totals] as number | null | undefined;

@@ -126,8 +126,9 @@ class TelephonyTests(unittest.TestCase):
         self.assertEqual(len(inbound), 1)
         self.assertEqual(inbound[0].phone, "+79001234567")
         tasks = self.read(lambda db: db.scalars(select(CrmTask))).all()
-        self.assertEqual([(t.title, t.priority, t.responsible_user_id, t.status) for t in tasks],
-                         [("Перезвонить +7 900 123-45-67", "HIGH", 2, "OPEN")])
+        self.assertEqual([(t.title, t.priority, t.status) for t in tasks],
+                         [("Перезвонить +7 900 123-45-67", "HIGH", "OPEN")])
+        self.assertEqual(tasks[0].deal_id, inbound[0].deal_id)
         log = self.client.get("/api/crm/projects/1/calls").json()
         self.assertEqual(log["stats"]["total"]["missed_in"], 2)
         self.assertEqual(log["stats"]["open_callbacks"], 1)
@@ -136,10 +137,9 @@ class TelephonyTests(unittest.TestCase):
         self.event(conn, "summary", summary("e3", direction=2, talk=10, end_offset=130))
         task = self.read(lambda db: db.scalar(select(CrmTask)))
         self.assertEqual(task.status, "COMPLETED")
-        # Accepting the request moves all its calls into the deal timeline.
-        accepted = self.client.post(f"/api/crm/inbound/{inbound[0].id}/accept", headers=ORIGIN, json={})
-        self.assertEqual(accepted.status_code, 200, accepted.text)
-        deal_id = accepted.json()["deal_id"]
+        # Calls are a trusted source: the first call already became a deal with the whole call history.
+        self.assertEqual(inbound[0].status, "ACCEPTED")
+        deal_id = inbound[0].deal_id
         calls = self.client.get(f"/api/crm/deals/{deal_id}/calls").json()
         self.assertEqual(len(calls), 3)
         self.assertEqual(sorted(c["duration_sec"] for c in calls), [0, 0, 120])

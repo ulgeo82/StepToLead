@@ -177,6 +177,10 @@ async def result_facts(db: AsyncSession, project: Project, start: date, end: dat
                     presence[key][field].add(row.date)
 
         keys = set(sources) | {key for date_rows in day_rows.values() for key in date_rows}
+        quality = defaultdict(lambda: {"target": 0, "non_target": 0})
+        for lead, _ in lead_rows:
+            if lead.quality in {"target", "non_target"} and first <= _dt_date(lead.created_at) <= last:
+                quality[lead_source[lead.id]][lead.quality] += 1
         by_source = []
         for key in sorted(keys):
             rows = [date_rows[key] for date_rows in day_rows.values() if key in date_rows]
@@ -195,6 +199,7 @@ async def result_facts(db: AsyncSession, project: Project, start: date, end: dat
                                             "platform": None, "status": None}), **values,
                      "data_mode": "aggregated/manual" if key in aggregated else "individual"}
             entry.update(_derived(values, margin))
+            entry.update(quality_fields(quality[key]["target"], quality[key]["non_target"], values["spend"]))
             by_source.append(entry)
 
         totals = {}
@@ -209,6 +214,8 @@ async def result_facts(db: AsyncSession, project: Project, start: date, end: dat
             if totals["sales"] == 0 and totals["revenue"] is None:
                 totals["revenue"] = 0
         totals.update(_derived(totals, margin))
+        totals.update(quality_fields(sum(q["target"] for q in quality.values()),
+                                     sum(q["non_target"] for q in quality.values()), totals["spend"]))
 
         days = [first + timedelta(days=i) for i in range((last - first).days + 1)]
         buckets = {}
@@ -280,6 +287,14 @@ async def result_facts(db: AsyncSession, project: Project, start: date, end: dat
             "period": {"start": start, "end": end, "previous_start": prior_start, "previous_end": prior_end},
             "current": current, "previous": previous, "funnel": funnel, "economics": economics,
             "recent_leads": recent_leads, "alerts": alerts}
+
+
+def quality_fields(target: int, non_target: int, spend) -> dict:
+    """Lead quality marked by sales: share of target leads among marked ones and cost per target lead."""
+    marked = target + non_target
+    return {"target": target, "non_target": non_target,
+            "target_share": target / marked * 100 if marked else None,
+            "cost_per_target": _ratio(spend, target) if target else None}
 
 
 def _derived(values, margin):

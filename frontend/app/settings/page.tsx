@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
+import { IntegrationsCard } from "@/components/integrations-card";
 import { api } from "@/lib/api";
 import { money, ProjectSidebar } from "@/components/reporting";
 import "../result/result.css";
@@ -29,11 +30,11 @@ type Settings = { company: Company; project: Project; economics: { name: string;
   average_check: number | null; margin: number | null; allowable_cac: number | null } | null;
   reasons: Reason[]; sources: Source[]; notifications: Rule[]; permissions: string[];
   members: Member[]; telegram_bot_configured: boolean };
-type Tab = "company" | "project" | "funnel" | "sources" | "notifications";
+type Tab = "company" | "project" | "funnel" | "sources" | "integrations" | "notifications";
 const tabs: { key: Tab; label: string; icon: string }[] = [
   { key: "company", label: "Компания", icon: "▣" }, { key: "project", label: "Проект", icon: "◇" },
   { key: "funnel", label: "Воронка", icon: "▽" }, { key: "sources", label: "Источники", icon: "♧" },
-  { key: "notifications", label: "Уведомления", icon: "♧" },
+  { key: "integrations", label: "Подключения", icon: "⇄" }, { key: "notifications", label: "Уведомления", icon: "♧" },
 ];
 const sourceKind: Record<string, string> = { INTEGRATION: "Интеграция", INTERNAL: "Внутренний", CUSTOM: "Кастомный", MANUAL: "Ручной" };
 const dateTime = (value: string) => new Date(value).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -56,6 +57,10 @@ export default function SettingsPage() {
   useEffect(() => { api<ProjectOption[]>("/result/projects").then(rows => {
     setProjects(rows); const desired = Number(new URLSearchParams(window.location.search).get("project_id"));
     setProjectId(rows.find(item => item.id === desired)?.id || rows[0]?.id || null);
+    const anchor = window.location.hash.slice(1);
+    const fromHash: Record<string, Tab> = { telegram: "notifications", notifications: "notifications", economics: "project",
+      sources: "sources", integrations: "integrations", funnel: "funnel" };
+    if (fromHash[anchor]) setTab(fromHash[anchor]);
   }).catch(e => setError(e.message)); }, []);
   useEffect(() => { if (!projectId) return;
     let active = true; setError("");
@@ -130,6 +135,7 @@ export default function SettingsPage() {
         {tab === "project" && <div className="settingsTwoColumns"><ProjectCard project={project} setProject={setProject} dirty={dirtyProject} saving={saving} canSettings={canSettings} onSave={() => save("/project", project, "Проект сохранён.")}/><EconomicsCard data={data.economics} projectId={projectId}/></div>}
         {tab === "funnel" && <div className="settingsTwoColumns"><section className="resultPanel settingsCard"><h2>Воронка продаж</h2><p>Основные этапы влияют на аналитику и не удаляются.</p><div className="settingsStage"><strong>01</strong><span>Лид</span><small>Системный</small></div><div className="settingsStage"><strong>02</strong><span>Квалифицирован</span><small>Системный</small></div><label className="settingsStage"><strong>03</strong><span>Встреча</span><input type="checkbox" checked={project.meeting_enabled} disabled={!canSettings || !!saving} onChange={event => save("/funnel", { meeting_enabled: event.target.checked }, "Настройка встречи сохранена.")}/><small>Опционально</small></label><div className="settingsStage"><strong>04</strong><span>Продажа</span><small>Системный</small></div><p className="settingsHint">Встреча учитывается только когда менеджер отмечает её в карточке лида. Без событий в аналитике будет «—».</p></section><section className="resultPanel settingsCard"><div className="settingsCardHead"><div><h2>Причины потери</h2><p>Архивирование не удаляет историю лидов.</p></div>{canSettings && <button className="settingsOutline" onClick={() => setReasonModal(true)}>＋ Причина</button>}</div><div className="settingsReasonList">{data.reasons.map((reason,index) => <div key={reason.id} className={reason.status === "archived" ? "archived" : ""}><span>{reason.label}</span><small>{reason.status === "archived" ? "Архив" : reason.is_system ? "Системная" : "Пользовательская"}</small>{canSettings && <span className="settingsRowActions"><button onClick={() => moveReason(reason,-1)} disabled={index === 0 || !!saving} title="Выше">↑</button><button onClick={() => moveReason(reason,1)} disabled={index === data.reasons.length-1 || !!saving} title="Ниже">↓</button>{!reason.is_system && <button onClick={() => reasonAction(reason,"rename")} title="Переименовать">✎</button>}<button onClick={() => reasonAction(reason,reason.status === "archived" ? "restore" : "archive")} title={reason.status === "archived" ? "Восстановить" : "Архивировать"}>{reason.status === "archived" ? "↺" : "⊘"}</button></span>}</div>)}</div></section></div>}
         {tab === "sources" && <section className="resultPanel settingsCard"><div className="settingsCardHead"><div><h2>Источники</h2><p>Универсальные источники проекта. Рекламные кабинеты подключаются в разделе «Реклама».</p></div>{canSources && <button className="settingsPrimary" onClick={() => setSourceModal(true)}>＋ Источник</button>}</div><div className="settingsTableScroll"><table><thead><tr><th>Название</th><th>Категория</th><th>Тип</th><th>Способ данных</th><th>Статус</th><th>Действия</th></tr></thead><tbody>{sourceList.map(source => <tr key={source.id}><td><strong>{source.name}</strong></td><td>{source.category || "—"}</td><td>{sourceKind[source.kind] || source.kind}</td><td>{source.method}</td><td><span className={`settingsBadge ${source.status}`}>{source.status === "active" ? "Активен" : source.status === "archived" ? "Архив" : "Ошибка"}</span></td><td>{source.connection_id ? <Link href={`/ads?project_id=${projectId}`}>Управлять в рекламе →</Link> : canSources ? <button className="settingsTextButton" onClick={() => save(`/sources/${source.id.split(":")[1]}`, { status: source.status === "archived" ? "active" : "archived" }, source.status === "archived" ? "Источник восстановлен." : "Источник архивирован; история сохранена.")}>{source.status === "archived" ? "Восстановить" : "Архивировать"}</button> : "—"}</td></tr>)}</tbody></table>{!sourceList.length && <p className="resultTableEmpty">Источники проекта ещё не добавлены.</p>}</div></section>}
+        {tab === "integrations" && projectId && <IntegrationsCard projectId={projectId}/>}
         {tab === "notifications" && <><TelegramCard configured={data.telegram_bot_configured} onChanged={() => setRevision(value => value + 1)}/><section className="resultPanel settingsCard"><h2>Уведомления</h2><p>Событие → кому → канал доставки. Для новых лидов и продаж можно выбрать участников проекта; доставка — в кабинет StepToLead и в Telegram.</p><div className="settingsRules">{data.notifications.map(rule => <RuleRow key={rule.key} rule={rule} members={data.members} botConfigured={data.telegram_bot_configured} canSettings={canSettings} saving={saving} onSave={value => save(`/notifications/${rule.key}`, value, "Правило сохранено.")}/>)}</div><div className="settingsChannels"><span><i className="on"/> Внутри StepToLead</span><span><i className={data.telegram_bot_configured ? "on" : ""}/> Telegram — {data.telegram_bot_configured ? "бот подключён" : "бот не настроен на сервере"}</span><span><i/> Email — не подключён</span></div></section></>}
       </div>}
       {reasonModal && <div className="resultModalBackdrop" onMouseDown={event => { if (event.target === event.currentTarget) setReasonModal(false); }}><form className="resultModal" onSubmit={submitReason}><header><h2>Добавить причину потери</h2><button type="button" onClick={() => setReasonModal(false)}>×</button></header><label>Название<input name="label" minLength={2} maxLength={160} required/></label><button className="resultPrimary" disabled={!!saving}>Сохранить</button></form></div>}

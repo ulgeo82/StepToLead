@@ -4,3 +4,24 @@
 .settingsRuleBlock{border:1px solid #e6edf7;border-radius:8px;background:#fff}.settingsRuleBlock>.settingsRule{border:0}.settingsRecipients{display:grid;gap:10px;padding:2px 11px 12px;border-top:1px dashed #e3ebf6}.settingsRecipientMode{display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;padding-top:10px;color:#455a75;font-size:10px}.settingsRecipientMode>span{font-weight:650;color:#1b2b43}.settingsRecipientMode label,.settingsAssignee{display:flex;align-items:center;gap:6px;color:#455a75;font-size:10px}.settingsRecipients input{accent-color:#006bfd}.settingsMemberList{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:7px}.settingsMemberList label{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid #e3eaf5;border-radius:7px;cursor:pointer;font-size:11px;color:#1b2b43}.settingsMemberList label.on{border-color:#9cc4ff;background:#f1f7ff}.settingsMemberList span{display:flex;flex-direction:column;gap:2px;min-width:0}.settingsMemberList small{color:#7a8ca5;font-size:9px}.settingsCard p.settingsWarn{margin:0;padding:8px 10px;border-radius:7px;background:#fff5e8;color:#9a5a0c;font-size:10px}.settingsTelegram{min-height:0}.settingsTelegramActions{display:flex;gap:8px;flex-wrap:wrap}
 @media(max-width:700px){.settingsTelegram .settingsCardHead{flex-direction:column}.settingsMemberList{grid-template-columns:1fr}}
 
+
+/* Подключения */
+.integrationGroups{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:12px}
+.integrationGroup{padding:12px;border:1px solid #e3e9f2;border-radius:10px}
+.integrationGroupHead{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px}
+.integrationGroupHead b{color:#0f2140;font-size:13px}
+.integrationGroupHead a{color:#006bfd;font-size:12px;text-decoration:none}
+.integrationItem{display:grid;grid-template-columns:10px 1fr auto;gap:10px;align-items:center;padding:6px 0;border-top:1px solid #f0f3f8}
+.integrationItem b{display:block;color:#1f3b5c;font-size:12px}
+.integrationItem small{color:#8b9cb3;font-size:11px}
+.integrationItem em{color:#6f829d;font-size:11px;font-style:normal}
+.integrationDot{width:9px;height:9px;border-radius:50%;background:#c3cfdf}
+.integrationDot.connected{background:#18a058}
+.integrationDot.error{background:#c8344b}
+.integrationEmpty{margin:4px 0;color:#8b9cb3;font-size:12px}
+.integrationSources{display:flex;flex-direction:column;margin-top:10px}
+.integrationSources>div{display:grid;grid-template-columns:1fr auto auto;gap:18px;align-items:center;padding:10px 0;border-top:1px solid #f0f3f8;font-size:12px}
+.integrationSources>div.off{opacity:.55}
+.integrationSources b{color:#1f3b5c}
+.integrationSources label{display:flex;gap:6px;align-items:center;color:#40556f;white-space:nowrap}
+@media(max-width:900px){.integrationGroups{grid-template-columns:1fr}.integrationSources>div{grid-template-columns:1fr}}

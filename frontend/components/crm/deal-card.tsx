@@ -5,7 +5,7 @@ import { money } from "@/components/reporting";
 import { DealChats } from "./inbox";
 import { CallButton, DealCalls } from "./telephony";
 import { CompleteTaskModal, NewTaskModal } from "./task-modals";
-import { contactLinks, CustomField, Deal, day, days, describeActivity, Pipeline, priorityLabels, request,
+import { contactLinks, CustomField, Deal, day, days, describeActivity, Pipeline, priorityLabels, qualityReasons, request,
   Source, stateLabels, Task, Team, typeLabels, when } from "./shared";
 
 type Reason = { id: number; label: string };
@@ -46,6 +46,7 @@ export function DealCard({ dealId, projectId, pipelines, team, sources, fields, 
   const [composer, setComposer] = useState<Composer>("COMMENT");
   const [text, setText] = useState("");
   const [tag, setTag] = useState("");
+  const [pickReason, setPickReason] = useState(false);
   const load = useCallback(() => request<Deal>(`/crm/deals/${dealId}`, "GET").then(setDeal).catch(e => setError(e.message)), [dealId]);
   useEffect(() => { setDeal(null); setError(""); setNotice(""); load(); }, [load]);
   useEffect(() => { const esc = (e: KeyboardEvent) => { if (e.key === "Escape" && !modal && !completing) onClose(); };
@@ -138,7 +139,18 @@ export function DealCard({ dealId, projectId, pipelines, team, sources, fields, 
           {deal.contact.emails.map(e => <p key={e}><a href={`mailto:${e}`}>{e}</a></p>)}
           {deal.contact.telegram && <p>Telegram: {deal.contact.telegram}</p>}</div>
 
-        <div className="crmBlock"><h3>Сделка</h3><div className="crmFieldGrid">
+        <div className="crmBlock"><h3>Сделка</h3>
+          {deal.lead_id && <div className="crmQuality"><span>Заявка</span>
+            <button disabled={!can("edit_deal") || busy} className={deal.quality === "target" ? "active good" : ""} title="Подходящий клиент — маркетолог увидит, какие кампании дают таких"
+              onClick={() => run(() => request(`/crm/deals/${dealId}/quality`, "POST", { quality: deal.quality === "target" ? null : "target" }))}>✓ Целевая</button>
+            <button disabled={!can("edit_deal") || busy} className={deal.quality === "non_target" ? "active bad" : ""} title="Заявка не по адресу — укажите причину"
+              onClick={() => deal.quality === "non_target" ? run(() => request(`/crm/deals/${dealId}/quality`, "POST", { quality: null })) : setPickReason(v => !v)}>✕ Нецелевая</button>
+            {deal.quality === "non_target" && deal.quality_reason && <small>{deal.quality_reason}</small>}
+            {!deal.quality && <small>не отмечено</small>}
+            {pickReason && <div className="crmQualityReasons">{qualityReasons.map(reason => <button key={reason} disabled={busy}
+              onClick={async () => { setPickReason(false); await run(() => request(`/crm/deals/${dealId}/quality`, "POST", { quality: "non_target", reason })); }}>{reason}</button>)}</div>}
+          </div>}
+          <div className="crmFieldGrid">
           <label>Ответственный<select disabled={!can("edit_deal")} value={deal.responsible_user_id || ""} onChange={e => patch({ responsible_user_id: Number(e.target.value) || null }, "Ответственный изменён")}><option value="">Не назначен</option>{team.map(m => <option key={m.id} value={m.id}>{m.display_name}</option>)}</select></label>
           <label>Бюджет, ₽<input type="number" min="0" disabled={!can("edit_deal")} defaultValue={deal.amount ?? ""} key={`a${deal.amount}`} onBlur={e => { const v = e.target.value ? Number(e.target.value) : null; if (v !== deal.amount) patch({ amount: v }); }}/></label>
           <label>Источник<select disabled={!can("change_attribution")} value={deal.source_id || ""} onChange={e => patch({ source_id: Number(e.target.value) || null }, "Источник скорректирован")}><option value="">Не определено</option>{sources.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>

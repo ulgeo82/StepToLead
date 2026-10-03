@@ -51,6 +51,7 @@ class CrmInbound(Base):
     deal_id: Mapped[int | None] = mapped_column(ForeignKey("crm_deals.id"))
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    escalated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # 15-minute SLA alert sent
 
 
 class CrmPipeline(Base):

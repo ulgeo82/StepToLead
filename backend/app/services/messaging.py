@@ -361,6 +361,10 @@ async def _new_lead(db: AsyncSession, channel: MessagingChannel, conversation: C
         "contact": contact, "notes": first_text[:3000], "conversation_id": conversation.id, "contact_consent": False})
     result = await create_inbound(db, source, payload, commit=False, allow_raw_contact=True)
     conversation.inbound_id = result.get("inbound_id")
+    if result.get("deal_id"):  # trusted channel: already a deal
+        deal = await db.get(CrmDeal, result["deal_id"])
+        conversation.deal_id, conversation.contact_id = deal.id, deal.contact_id
+        conversation.assigned_user_id = conversation.assigned_user_id or deal.responsible_user_id
 
 
 async def ingest(db: AsyncSession, channel: MessagingChannel, item: Incoming) -> Message | None:

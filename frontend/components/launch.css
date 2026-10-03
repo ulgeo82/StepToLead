@@ -1,0 +1,67 @@
+.startPanel{margin:0 0 18px;padding:18px;border:1px solid #d9e6fb;border-radius:16px;background:linear-gradient(180deg,#f5f9ff 0,#fff 120px)}
+.startPanel>header{display:flex;align-items:center;gap:18px;margin-bottom:14px}
+.startPanel>header h2{margin:0;color:#0f2140;font-size:18px}
+.startPanel>header p{margin:3px 0 0;color:#6f829d;font-size:12px}
+.startPanel>header>div:first-child{flex:1}
+.launchProgress{display:flex;flex-direction:column;gap:5px;width:180px}
+.launchProgress b{color:#0f2140;font-size:12px}
+.launchProgress i,.launchGoal i{display:block;height:6px;border-radius:4px;background:#e6edf7;overflow:hidden}
+.launchProgress em,.launchGoal em{display:block;height:100%;border-radius:4px;background:#006bfd}
+.launchGoal em.ok{background:#18a058}
+.launchLink{border:0;background:none;color:#006bfd;font-size:12px;cursor:pointer}
+.launchGrid{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1.1fr) minmax(0,.9fr);gap:12px}
+.launchSide{display:flex;flex-direction:column;gap:12px}
+.launchCard{padding:14px;border:1px solid #e3e9f2;border-radius:12px;background:#fff}
+.launchCard h3{margin:0 0 10px;color:#0f2140;font-size:13px}
+.launchCardHead{display:flex;justify-content:space-between;align-items:baseline}
+.launchChecklist,.launchPlan{display:flex;flex-direction:column;gap:8px;margin:0;padding:0;list-style:none}
+.launchChecklist li{display:grid;grid-template-columns:20px 1fr auto;gap:8px;align-items:start;font-size:12px;color:#1f3b5c}
+.launchChecklist li a{color:#006bfd;text-decoration:none}
+.launchChecklist li a:hover{text-decoration:underline}
+.launchChecklist li.done span:nth-child(2){color:#8b9cb3;text-decoration:line-through}
+.launchChecklist small{padding:1px 6px;border-radius:8px;background:#f0f4fa;color:#8b9cb3;font-size:10px}
+.launchTick{display:grid;place-items:center;width:18px;height:18px;border:1.5px solid #c3cfdf;border-radius:50%;color:#fff;font-size:11px}
+.launchChecklist li.done .launchTick{border-color:#18a058;background:#18a058}
+.launchPlan li{display:grid;grid-template-columns:10px 1fr auto;gap:10px;align-items:center;font-size:12px}
+.launchPlan li i{width:10px;height:10px;border-radius:50%;background:#c3cfdf}
+.launchPlan li.doing i{background:#006bfd;box-shadow:0 0 0 3px #d9e8ff}
+.launchPlan li.done i{background:#18a058}
+.launchPlan li b{display:block;color:#1f3b5c;font-weight:600}
+.launchPlan li.done b{color:#8b9cb3}
+.launchPlan li small{color:#8b9cb3;font-size:11px}
+.launchStatus{padding:2px 8px;border-radius:10px;background:#f0f4fa;color:#6f829d;font-size:10px;white-space:nowrap}
+.launchStatus.doing{background:#eaf2ff;color:#006bfd}
+.launchStatus.done{background:#e8f7ee;color:#17693d}
+.launchNote{margin:12px 0 0;padding:8px 10px;border-radius:8px;background:#fff8e6;color:#6b5000;font-size:12px}
+.launchMarketer{display:grid;grid-template-columns:44px 1fr;gap:10px;align-items:center}
+.launchMarketer img,.launchAvatar{width:44px;height:44px;border-radius:50%;object-fit:cover}
+.launchAvatar{display:grid;place-items:center;background:#006bfd;color:#fff;font-weight:700;font-size:18px}
+.launchMarketer small{display:block;color:#8b9cb3;font-size:11px}
+.launchMarketer b{color:#0f2140;font-size:14px}
+.launchContacts{grid-column:1/-1;display:flex;gap:8px}
+.launchContacts a{padding:5px 10px;border:1px solid #dce5f2;border-radius:7px;color:#1f3b5c;font-size:12px;text-decoration:none}
+.launchContacts a:hover{border-color:#006bfd;color:#006bfd}
+.launchGoal{display:flex;flex-direction:column;gap:5px;margin-bottom:10px}
+.launchGoal>div{display:flex;justify-content:space-between;font-size:12px;color:#40556f}
+.launchGoal b{color:#0f2140}
+.launchGoal b small{color:#8b9cb3;font-weight:400}
+.launchGoalForm{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.launchGoalForm label{display:flex;flex-direction:column;gap:4px;color:#6f829d;font-size:11px}
+.launchGoalForm input{min-height:32px;padding:0 8px;border:1px solid #dce5f2;border-radius:7px;font-size:13px}
+.launchPrimary{grid-column:1/-1;min-height:34px;border:0;border-radius:8px;background:#006bfd;color:#fff;font-weight:600;cursor:pointer}
+.launchMuted{margin:0;color:#8b9cb3;font-size:12px;line-height:1.5}
+.launchError{grid-column:1/-1;color:#c8344b;font-size:12px}
+.launchStrip{margin:0 0 18px}
+.launchStrip .launchGoals{max-width:460px}
+@media(max-width:1100px){.launchGrid{grid-template-columns:1fr}.startPanel>header{flex-wrap:wrap}}
+.launchEditor form{display:flex;flex-direction:column;gap:14px}
+.launchEditorProgress{color:#6f829d;font-size:12px}
+.launchEditorGrid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.launchEditor fieldset{display:flex;flex-direction:column;gap:8px;margin:0;padding:12px;border:1px solid #e3e9f2;border-radius:10px}
+.launchEditor legend{padding:0 6px;color:#0f2140;font-weight:600;font-size:13px}
+.launchEditor label{display:flex;flex-direction:column;gap:4px;color:#6f829d;font-size:12px}
+.launchEditor input,.launchEditor select,.launchEditor textarea{min-height:34px;padding:0 9px;border:1px solid #dce5f2;border-radius:7px;font:inherit;font-size:13px}
+.launchEditor textarea{min-height:64px;padding:8px}
+.launchEditorStep{display:grid;grid-template-columns:minmax(0,2fr) 140px 150px minmax(0,2fr) 32px;gap:8px}
+.launchEditorStep button{border:1px solid #dce5f2;border-radius:7px;background:#fff;color:#8b9cb3;cursor:pointer}
+@media(max-width:900px){.launchEditorGrid{grid-template-columns:1fr}.launchEditorStep{grid-template-columns:1fr 1fr}}

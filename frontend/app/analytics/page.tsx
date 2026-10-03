@@ -10,7 +10,8 @@ import "./analytics.css";
 
 type Metric = "spend" | "leads" | "qualified" | "sales" | "revenue" | "romi";
 type Totals = Record<Metric, number | null> & { meetings: number | null; cpl: number | null; cpql: number | null;
-  cac: number | null; average_check: number | null; gross_profit: number | null };
+  cac: number | null; average_check: number | null; gross_profit: number | null;
+  target?: number; non_target?: number; target_share?: number | null; cost_per_target?: number | null };
 type Source = Totals & {
   id: string; name: string; kind: string; method: string | null; platform: string | null;
   impressions: number | null; clicks: number | null; cpc: number | null; ctr: number | null;
@@ -32,9 +33,13 @@ type Analytics = {
     sales_cycle_days: number | null;
     connections: { id: number; name: string; platform: string; status: string; last_synced_at: string | null }[];
     hypotheses: { id: number; name: string; status: string }[]; campaigns: Campaign[];
-    lost_reasons: { label: string; count: number }[] };
+    lost_reasons: { label: string; count: number }[]; non_target_reasons?: { label: string; count: number }[] };
   viewer: { role: string };
 };
+
+/** Share of target leads among the ones sales marked; "—" until someone marks. */
+const quality = (row: { target?: number; non_target?: number; target_share?: number | null }) =>
+  row.target_share == null ? "—" : `${Math.round(row.target_share)}% (${row.target}/${(row.target || 0) + (row.non_target || 0)})`;
 
 type Tab = "overview" | "marketing" | "sales" | "accounts" | "hypotheses" | "campaigns" | "website";
 const TABS: { key: Tab; label: string }[] = [
@@ -146,7 +151,7 @@ export default function AnalyticsPage() {
         <select aria-label="Рекламный кабинет" value={filterAccount} onChange={event => setFilterAccount(event.target.value)}><option value="">Все кабинеты</option>{data?.analysis.connections.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select>
         <select aria-label="Гипотеза" value={filterHypothesis} onChange={event => setFilterHypothesis(event.target.value)}><option value="">Все гипотезы</option><option value="none">Без гипотезы</option>{data?.analysis.hypotheses.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select>
         <input aria-label="Поиск кампании" value={search} onChange={event => setSearch(event.target.value)} placeholder="Поиск по кампании…" /></div>
-      <div className="resultTableScroll"><table><thead><tr>{["Кампания", "Канал", "Гипотеза", "Расходы", "Клики", "CPC", "Лиды", "Квал.", "Продажи", "Выручка", "CPL", "CPQL", "CAC", "ROMI", "Статус"].map(label => <th key={label}>{label}</th>)}</tr></thead><tbody>{filteredCampaigns.map(row => <tr key={row.id} className="analyticsClickableRow" onClick={() => setSelectedCampaign(row)} tabIndex={0} onKeyDown={event => { if (event.key === "Enter") setSelectedCampaign(row); }}><td><strong>{row.name}</strong><small>ID {row.external_campaign_id} · {row.connection_name}</small></td><td>{row.platform}</td><td>{row.hypothesis_name || "—"}</td><td>{money(row.spend)}</td><td>{count(row.clicks)}</td><td>{money(row.cpc)}</td><td>{count(row.leads)}</td><td>{count(row.qualified)}</td><td>{count(row.sales)}</td><td>{money(row.revenue)}</td><td>{money(row.cpl)}</td><td>{money(row.cpql)}</td><td>{money(row.cac)}</td><td>{percent(row.romi)}</td><td>{row.status || "—"}</td></tr>)}</tbody></table>{!filteredCampaigns.length && <p className="resultTableEmpty">Нет кампаний с данными или подтверждённой атрибуцией за этот период.</p>}</div>
+      <div className="resultTableScroll"><table><thead><tr>{["Кампания", "Канал", "Гипотеза", "Расходы", "Клики", "CPC", "Лиды", "Целевые", "Квал.", "Продажи", "Выручка", "CPL", "CPQL", "CAC", "ROMI", "Статус"].map(label => <th key={label}>{label}</th>)}</tr></thead><tbody>{filteredCampaigns.map(row => <tr key={row.id} className="analyticsClickableRow" onClick={() => setSelectedCampaign(row)} tabIndex={0} onKeyDown={event => { if (event.key === "Enter") setSelectedCampaign(row); }}><td><strong>{row.name}</strong><small>ID {row.external_campaign_id} · {row.connection_name}</small></td><td>{row.platform}</td><td>{row.hypothesis_name || "—"}</td><td>{money(row.spend)}</td><td>{count(row.clicks)}</td><td>{money(row.cpc)}</td><td>{count(row.leads)}</td><td title="Отметки отдела продаж: целевые / всего отмеченных">{quality(row)}</td><td>{count(row.qualified)}</td><td>{count(row.sales)}</td><td>{money(row.revenue)}</td><td>{money(row.cpl)}</td><td>{money(row.cpql)}</td><td>{money(row.cac)}</td><td>{percent(row.romi)}</td><td>{row.status || "—"}</td></tr>)}</tbody></table>{!filteredCampaigns.length && <p className="resultTableEmpty">Нет кампаний с данными или подтверждённой атрибуцией за этот период.</p>}</div>
     </section>;
   }
 
@@ -154,7 +159,7 @@ export default function AnalyticsPage() {
     return <div className="analyticsSourceGrid"><section className="resultPanel analyticsSources"><div className="resultPanelHead"><h2>Источники лидов</h2></div><div className="resultTabs analyticsTabs">{SOURCE_METRICS.map(item => <button key={item.key} className={sourceMetric === item.key ? "active" : ""} onClick={() => setSourceMetric(item.key)}>{item.label}</button>)}</div>
       {sourceValues.length ? <div className="analyticsDistribution"><div className="analyticsDonut" style={{ background: distribution ? `conic-gradient(${distribution})` : "#eaf0f8" }}><div><strong>{sourceMetric === "romi" ? "ROMI" : metricText(sourceMetric, sourceTotal)}</strong><span>за период</span></div></div><div className="analyticsDistributionRows">{sourceValues.map((source, index) => <div key={source.id}><i style={{ background: COLORS[index % COLORS.length] }}/><span>{source.name}</span><strong>{metricText(sourceMetric, source[sourceMetric])}</strong><small>{sourceTotal && sourceMetric !== "romi" ? `${(Number(source[sourceMetric]) / sourceTotal * 100).toFixed(1)}%` : "—"}</small></div>)}</div></div> : <p className="resultTableEmpty">Для этой метрики пока нет данных по источникам.</p>}
     </section><section className="resultPanel analyticsCosts"><div className="resultPanelHead"><h2>Стоимость этапов</h2><span className="analyticsLegend"><i className="cpl"/> CPL <i className="cpql"/> CPQL <i className="cac"/> CAC</span></div>{costSources.length ? <div className="analyticsCostRows">{costSources.map(source => { return <div className="analyticsCostRow" key={source.id}><strong>{source.name}</strong><div><div title={`CPL: ${money(source.cpl)}`}><i className="cpl" style={{ width: `${(source.cpl || 0) / maxCost * 100}%` }}/><span>{money(source.cpl)}</span></div><div title={`CPQL: ${money(source.cpql)}`}><i className="cpql" style={{ width: `${(source.cpql || 0) / maxCost * 100}%` }}/><span>{money(source.cpql)}</span></div><div title={`CAC: ${money(source.cac)}`}><i className="cac" style={{ width: `${(source.cac || 0) / maxCost * 100}%` }}/><span>{money(source.cac)}</span></div></div></div>; })}</div> : <p className="resultTableEmpty">Для сравнения пока нет расходов и подтверждённых этапов.</p>}</section>
-      <section className="resultPanel analyticsConversions"><div className="resultPanelHead"><h2>Конверсии по каналам</h2></div><div className="resultTableScroll"><table><thead><tr><th>Канал</th><th>Клик → Лид</th><th>Лид → Квал.</th><th>Квал. → Прод.</th></tr></thead><tbody>{sources.map(source => <tr key={source.id}><td><strong>{source.name}</strong></td><td>{percent(source.click_to_lead)}</td><td>{percent(source.lead_to_qualified)}</td><td>{percent(source.qualified_to_sale)}</td></tr>)}</tbody></table>{!sources.length && <p className="resultTableEmpty">Источников за выбранный период нет.</p>}</div></section></div>;
+      <section className="resultPanel analyticsConversions"><div className="resultPanelHead"><h2>Конверсии по каналам</h2></div><div className="resultTableScroll"><table><thead><tr><th>Канал</th><th>Клик → Лид</th><th>Целевые</th><th>Лид → Квал.</th><th>Квал. → Прод.</th></tr></thead><tbody>{sources.map(source => <tr key={source.id}><td><strong>{source.name}</strong></td><td>{percent(source.click_to_lead)}</td><td>{quality(source)}</td><td>{percent(source.lead_to_qualified)}</td><td>{percent(source.qualified_to_sale)}</td></tr>)}</tbody></table>{!sources.length && <p className="resultTableEmpty">Источников за выбранный период нет.</p>}</div></section></div>;
   }
 
   return <div className="resultShell analyticsShell"><ProjectSidebar project={selectedProject} projectId={projectId} active="analytics" role={data?.viewer.role}/><main className="resultMain"><div className="resultBreadcrumb">StepToLead <span>/</span> Аналитика</div>
@@ -168,7 +173,7 @@ export default function AnalyticsPage() {
         <section className="resultKpis analyticsKpis" aria-label="Ключевые показатели">
           <KpiCard label="Расходы" icon="▣" value={current?.spend ?? null} prior={previous?.spend ?? null} display={money} inverse/>
           <KpiCard label="Клики" icon="↗" value={exposure?.clicks ?? null} prior={priorExposure?.clicks ?? null} note={`CPC: ${money(exposure?.cpc)}`}/>
-          <KpiCard label="Лиды" icon="♧" value={current?.leads ?? null} prior={previous?.leads ?? null} note={`CPL: ${money(current?.cpl)}`}/>
+          <KpiCard label="Лиды" icon="♧" value={current?.leads ?? null} prior={previous?.leads ?? null} note={`CPL: ${money(current?.cpl)}${current?.target_share != null ? ` · целевых ${Math.round(current.target_share)}%` : ""}`}/>
           <KpiCard label="Квал. лиды" icon="✓" value={current?.qualified ?? null} prior={previous?.qualified ?? null} note={`CPQL: ${money(current?.cpql)}`}/>
           <KpiCard label="Продажи" icon="▣" value={current?.sales ?? null} prior={previous?.sales ?? null} note={`CAC: ${money(current?.cac)}`}/>
           <KpiCard label="Выручка" icon="◉" value={current?.revenue ?? null} prior={previous?.revenue ?? null} display={money} note={`Средний чек: ${money(current?.average_check)}`}/>
@@ -194,6 +199,11 @@ export default function AnalyticsPage() {
             <div key={reason.label}><span>{reason.label}</span><strong>{count(reason.count)}</strong></div>)}</div>
             : <p className="resultTableEmpty">За выбранный период событий потери лидов нет.</p>}
           <p>По событиям потери. Архивирование причины не меняет историю.</p></section>
+        <section className="resultPanel analyticsLostReasons"><div className="resultPanelHead"><h2>Почему заявки нецелевые</h2></div>
+          {data.analysis.non_target_reasons?.length ? <div className="analyticsLostList">{data.analysis.non_target_reasons.map(reason =>
+            <div key={reason.label}><span>{reason.label}</span><strong>{count(reason.count)}</strong></div>)}</div>
+            : <p className="resultTableEmpty">За период нет заявок, отмеченных как нецелевые.</p>}
+          <p>Отметку ставит менеджер в карточке сделки — по ней маркетолог отключает неработающие кампании и ключи.</p></section>
       </>}
       {tab === "accounts" && <section className="resultPanel analyticsListPanel"><div className="resultPanelHead"><h2>Рекламные кабинеты</h2></div>{data.analysis.connections.length ? <div className="analyticsEntityGrid">{data.analysis.connections.map(account => <article key={account.id}><span>{account.platform}</span><strong>{account.name}</strong><small>Статус: {account.status} · синхронизация: {account.last_synced_at ? new Date(account.last_synced_at).toLocaleDateString("ru-RU") : "—"}</small>{data.viewer.role === "admin" && <Link href={`/admin/advertising/${data.project.workspace_id}`}>Открыть рекламную аналитику →</Link>}</article>)}</div> : <p className="resultTableEmpty">Рекламные кабинеты для проекта не подключены.</p>}</section>}
       {tab === "hypotheses" && <section className="resultPanel analyticsListPanel"><div className="resultPanelHead"><h2>Гипотезы проекта</h2></div>{data.analysis.hypotheses.length ? <div className="analyticsEntityGrid">{data.analysis.hypotheses.map(hypothesis => <article key={hypothesis.id}><span>Гипотеза #{hypothesis.id}</span><strong>{hypothesis.name}</strong><small>Статус: {hypothesis.status}</small><button onClick={() => { setFilterHypothesis(String(hypothesis.id)); setTab("campaigns"); }}>Кампании: {data.analysis.campaigns.filter(campaign => campaign.hypothesis_id === hypothesis.id).length} →</button></article>)}</div> : <p className="resultTableEmpty">Гипотезы для проекта пока не созданы.</p>}</section>}

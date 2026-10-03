@@ -342,7 +342,7 @@ async def ensure_source(db: AsyncSession, conn: TelephonyConnection) -> LeadInbo
     token = secrets.token_urlsafe(48)
     source = LeadInboundSource(workspace_id=conn.workspace_id, project_id=conn.project_id,
                                name=f"Звонки: {conn.name}"[:180], token_hash=token_digest(token),
-                               token_prefix=token[:12], active=True, auto_assign=True)
+                               token_prefix=token[:12], active=True, auto_assign=True, auto_accept=True)
     db.add(source); await db.flush()
     conn.inbound_source_id = source.id
     return source
@@ -379,6 +379,9 @@ async def link_crm(db: AsyncSession, conn: TelephonyConnection, call: Call) -> N
                 "contact": phone, "notes": note, "call_id": call.id, "line_number": call.line_number, "contact_consent": False})
             result = await create_inbound(db, await ensure_source(db, conn), payload, commit=False, allow_raw_contact=True)
             inbound = await db.get(CrmInbound, result.get("inbound_id")) if result.get("inbound_id") else None
+            if result.get("deal_id"):  # calls are a trusted source: the request is already a deal
+                deal_row = await db.get(CrmDeal, result["deal_id"])
+                call.deal_id, call.contact_id = deal_row.id, deal_row.contact_id
         call.inbound_id = inbound.id if inbound else None
     deal = await db.get(CrmDeal, call.deal_id) if call.deal_id else None
     user = await db.get(PortalUser, call.user_id) if call.user_id else None

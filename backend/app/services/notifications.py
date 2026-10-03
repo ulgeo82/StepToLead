@@ -21,9 +21,14 @@ logger = logging.getLogger("uvicorn.error.notifications")
 EVENTS = {
     "new_lead": {"label": "Новый лид", "active": True, "default": True, "recipients": True},
     "new_sale": {"label": "Новая продажа", "active": True, "default": True, "recipients": True},
+    "lead_sla": {"label": "Заявка без ответа 15 минут", "active": True, "default": True, "recipients": True,
+                 "telegram_default": True},
+    "weekly_report": {"label": "Еженедельный отчёт (понедельник, 9:00)", "active": True, "default": True,
+                      "recipients": True, "telegram_default": True},
     "lead_idle": {"label": "Лид без обработки", "active": False, "unit": "часов"},
     "cac_limit": {"label": "CAC превысил допустимый", "active": False},
-    "cpl_growth": {"label": "CPL вырос", "active": False, "unit": "%"},
+    "cpl_growth": {"label": "Цена заявки выросла за неделю", "active": True, "default": True, "unit": "%",
+                   "default_threshold": 30, "recipients": True, "telegram_default": True},
     "ad_budget": {"label": "Рекламный бюджет заканчивается", "active": False, "unit": "%"},
     "ad_sync_error": {"label": "Ошибка синхронизации рекламы", "active": False},
 }
@@ -54,7 +59,7 @@ def rule_state(event_key: str, row: ProjectNotificationRule | None) -> dict:
     config = EVENTS[event_key]
     return {"enabled": row.enabled if row else config.get("default", False),
             "in_app": row.in_app if row else True,
-            "telegram": bool(row.telegram) if row else False,
+            "telegram": bool(row.telegram) if row else bool(config.get("telegram_default")),
             "recipient_user_ids": list(row.recipient_user_ids) if row and row.recipient_user_ids is not None else None,
             "notify_assignee": row.notify_assignee if row and row.notify_assignee is not None else True}
 

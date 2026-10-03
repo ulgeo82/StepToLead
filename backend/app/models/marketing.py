@@ -34,6 +34,9 @@ class Project(Base):
     status: Mapped[str] = mapped_column(String(24), default="active")
     timezone: Mapped[str | None] = mapped_column(String(80))
     meeting_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Client launch screen (marketer card, agency work plan, monthly goals) and worker bookkeeping
+    # (weekly report / alert send marks): {"launch": {...}, "sent": {...}}
+    portal_state: Mapped[dict | None] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -189,6 +192,9 @@ class ClientLead(Base):
     notes: Mapped[str | None] = mapped_column(Text)
     lost_reason: Mapped[str | None] = mapped_column(Text)
     next_action_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    # Lead quality marked by sales: target | non_target (None = not marked yet). Drives "доля целевых".
+    quality: Mapped[str | None] = mapped_column(String(16), index=True)
+    quality_reason: Mapped[str | None] = mapped_column(String(120))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -216,6 +222,8 @@ class LeadInboundSource(Base):
     token_prefix: Mapped[str] = mapped_column(String(12))
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     auto_assign: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Trusted source (site form, calls): requests become deals right away, skipping «Неразобранное».
+    auto_accept: Mapped[bool] = mapped_column(Boolean, default=False)
     last_assigned_to_id: Mapped[int | None] = mapped_column(ForeignKey("portal_users.id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

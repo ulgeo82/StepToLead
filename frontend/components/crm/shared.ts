@@ -15,6 +15,7 @@ export type Deal = { id: number; name: string; amount: number | null; contact: C
   days_in_stage: number | null; idle_days: number | null; first_response_at?: string | null;
   lost_reason_id?: number | null; lost_comment?: string | null; closed_at?: string | null;
   form_data?: Record<string, unknown> | null; tasks?: Task[]; activities?: Activity[];
+  quality?: "target" | "non_target" | null; quality_reason?: string | null;
   sales?: { id: number; amount: number | null; occurred_at: string }[] };
 export type Stage = { id: number; name: string; analytics_type: string; color: string; position?: number; required_fields: string[] };
 export type Pipeline = { id: number; name: string; is_default?: boolean; stages: Stage[] };
@@ -32,6 +33,7 @@ export const stateLabels: Record<string, string> = { OVERDUE: "Просроче�
 export const typeLabels: Record<string, string> = { CALL: "Позвонить", MEETING: "Встреча", MESSAGE: "Написать",
   SEND: "Отправить КП / документы", FOLLOW_UP: "Связаться повторно", OTHER: "Другое" };
 export const priorityLabels: Record<string, string> = { HIGH: "Высокий", NORMAL: "Обычный", LOW: "Низкий" };
+export const qualityReasons = ["Спам или ошибка", "Не та услуга", "Не наш регион", "Нет бюджета", "Дубль", "Не выходит на связь", "Другое"];
 export const rejectReasons: Record<string, string> = { SPAM: "Спам", DUPLICATE: "Дубль", TEST: "Тестовая заявка",
   INVALID: "Некорректные данные", NOT_TARGET: "Нецелевой клиент", OTHER: "Другое" };
 
@@ -84,6 +86,8 @@ export function describeActivity(a: Activity): { icon: string; text: string; ton
     case "TASK_CREATED": return { icon: "◷", text: `Поставлена задача «${s("title")}»` };
     case "TASK_COMPLETED": return { icon: "☑", text: `Выполнена задача${s("title") ? ` «${s("title")}»` : ""}: ${s("result")}`, tone: "task" };
     case "TASK_UPDATED": return { icon: "◷", text: "Задача изменена" };
+    case "QUALITY_CHANGED": return { icon: p.quality === "non_target" ? "⊘" : "◎", text: s("text"), tone: p.quality === "non_target" ? "lost" : "stage" };
+    case "INBOUND_REPEAT": return { icon: "↻", text: `Повторное обращение${s("source") ? ` · ${s("source")}` : ""}`, tone: "touch" };
     case "COMMENT_ADDED": return { icon: "💬", text: s("text"), tone: "comment" };
     case "CALL_LOGGED": return { icon: "📞", text: `Звонок${s("text") ? `: ${s("text")}` : ""}`, tone: "touch" };
     case "MESSAGE_SENT": return { icon: "✉", text: `Сообщение клиенту${s("text") ? `: ${s("text")}` : ""}`, tone: "touch" };

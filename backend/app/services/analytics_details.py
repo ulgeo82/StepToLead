@@ -9,7 +9,14 @@ from app.models.marketing import (AdCampaignMetricDaily, AdConnection, AdHypothe
                                   AdHypothesisCampaign, AdMetricDaily, ClientLead,
                                   ClientLeadAttribution, ClientLeadEvent, ClientSale, Project,
                                   SourceMetricDaily)
-from app.services.result_analytics import _derived, _ratio, _sum
+from app.services.result_analytics import _derived, _ratio, _sum, quality_fields
+
+
+def defaultdict_count(values) -> dict:
+    counts = defaultdict(int)
+    for value in values:
+        counts[value] += 1
+    return counts
 
 
 def _pct(numerator, denominator):
@@ -166,6 +173,9 @@ async def analytics_details(db: AsyncSession, project: Project, start: date, end
                   "qualified": qualified_count if qualified_count else (0 if lead_count else None),
                   "sales": sale_count if sale_count else (0 if lead_count else None), "revenue": revenue}
         values.update(_derived(values, result["economics"]["margin"]))
+        period_leads = [lead for lead in leads if start <= lead.created_at.date() <= end]
+        values.update(quality_fields(sum(lead.quality == "target" for lead in period_leads),
+                                     sum(lead.quality == "non_target" for lead in period_leads), spend))
         hypothesis_id = assignments.get(key)
         connection = connection_map[connection_id]
         campaigns.append({"id": f"{connection_id}:{external_id}", "external_campaign_id": external_id,
@@ -180,6 +190,10 @@ async def analytics_details(db: AsyncSession, project: Project, start: date, end
             "sales_cycle_days": sum(cycle_days) / len(cycle_days) if cycle_days else None,
             "lost_reasons": [{"label": label, "count": amount} for label, amount in
                              sorted(lost_counts.items(), key=lambda item: (-item[1], item[0]))],
+            "non_target_reasons": [{"label": label, "count": amount} for label, amount in sorted(
+                defaultdict_count(lead.quality_reason or "Без причины" for lead, _ in lead_rows
+                                  if lead.quality == "non_target" and start <= lead.created_at.date() <= end).items(),
+                key=lambda item: (-item[1], item[0]))],
             "connections": [{"id": row.id, "name": row.name, "platform": row.platform,
                              "status": row.status, "last_synced_at": row.last_synced_at} for row in connections],
             "hypotheses": [{"id": row.id, "name": row.name, "status": row.status}
