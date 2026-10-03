@@ -377,7 +377,8 @@ async def start_conversation(deal_id: int, payload: StartChat, request: Request,
 
 def ai_settings(project) -> dict:
     data = dict((project.portal_state or {}).get("ai") or {})
-    return {"knowledge": data.get("knowledge") or "", "tone": data.get("tone") or "", "goal": data.get("goal") or ""}
+    return {"knowledge": data.get("knowledge") or "", "tone": data.get("tone") or "", "goal": data.get("goal") or "",
+            "calls": data.get("calls", True) is not False, "call_checklist": data.get("call_checklist") or ""}
 
 
 async def ai_context(db: AsyncSession, row: Conversation):
@@ -446,7 +447,9 @@ async def ai_summary(conversation_id: int, payload: SummaryIn, request: Request,
 async def get_ai_settings(project_id: int, db: AsyncSession = Depends(get_db), user: PortalUser = Depends(require_portal_user)):
     require_permission(user, "view_crm")
     project = await project_for(db, user, project_id)
+    from app.services import call_ai
     return {**ai_settings(project), "configured": ai.configured(), "provider": ai.provider_name(),
+            "calls_available": call_ai.available(), "default_checklist": "\n".join(call_ai.DEFAULT_CHECKLIST),
             "can_manage": can_manage_channels(user)}
 
 
@@ -455,6 +458,8 @@ class AISettingsIn(BaseModel):
     knowledge: str = Field(default="", max_length=8000)
     tone: str = Field(default="", max_length=300)
     goal: str = Field(default="", max_length=300)
+    calls: bool = True
+    call_checklist: str = Field(default="", max_length=2000)
 
 
 @router.put("/projects/{project_id}/ai-settings")
@@ -464,6 +469,7 @@ async def put_ai_settings(project_id: int, payload: AISettingsIn, request: Reque
     project = await project_for(db, user, project_id)
     if not can_manage_channels(user):
         raise HTTPException(403, "Базу знаний меняет руководитель или владелец")
-    project.portal_state = {**(project.portal_state or {}), "ai": {k: v.strip() for k, v in payload.model_dump().items()}}
+    project.portal_state = {**(project.portal_state or {}), "ai": {
+        k: v.strip() if isinstance(v, str) else v for k, v in payload.model_dump().items()}}
     await db.commit()
     return await get_ai_settings(project_id, db, user)

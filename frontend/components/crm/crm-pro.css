@@ -372,3 +372,57 @@
 .callChannel{display:block;margin-left:28px;color:#6f829d;font-size:10px}
 .callAddLine{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 14px}.callAddLine .crmPrimary{min-height:34px;padding:0 14px;font-size:12px}
 .callAddLine input{flex:1;min-width:160px;min-height:34px;padding:0 10px;border:1px solid #dce5f2;border-radius:7px}
+/* AI call analysis */
+.callRow{grid-template-columns:24px minmax(0,1fr) auto}
+.callRowActions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.callAiSummary{margin:4px 0 0;font-size:12px;line-height:1.4;color:#40536f}
+.callAi{display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:999px;font-size:12px;font-weight:600;border:0;background:#eef3fb;color:#40536f;white-space:nowrap}
+.callAi.pending{background:#f3efff;color:#6b4bd8}
+button.callAi{cursor:pointer}
+.callAi.good{background:#e6f6ec;color:#16803c}
+.callAi.warn{background:#fff4dc;color:#a05f00}
+.callAi.bad{background:#fdeaee;color:#c8344b}
+.callStats td.good{color:#16803c;font-weight:600}
+.callStats td.warn{color:#a05f00;font-weight:600}
+.callAiModal{max-width:640px}
+.callAiModal section{margin-top:12px}
+.callAiModal h3{margin:0 0 4px;font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:#7a8ca5}
+.callAiModal p{margin:0;font-size:14px;line-height:1.5;color:#0f2140}
+.callAiModal ul{margin:0;padding-left:18px;font-size:14px;line-height:1.5}
+.callAiScore{display:flex;align-items:baseline;gap:10px;padding:12px 14px;border-radius:12px;background:#eef3fb;margin-top:6px}
+.callAiScore strong{font-size:32px;line-height:1}
+.callAiScore span{color:#5d6f8a;font-size:13px}
+.callAiScore.good strong{color:#16803c}.callAiScore.warn strong{color:#a05f00}.callAiScore.bad strong{color:#c8344b}
+.callAiModal ul.callAiChecklist{list-style:none;padding:0;display:flex;flex-direction:column;gap:6px}
+.callAiChecklist li{display:grid;grid-template-columns:22px 1fr;gap:6px;align-items:start}
+.callAiChecklist i{font-style:normal;font-weight:700;text-align:center;border-radius:6px;line-height:20px}
+.callAiChecklist li.ok i{color:#16803c;background:#e6f6ec}
+.callAiChecklist li.no i{color:#c8344b;background:#fdeaee}
+.callAiChecklist b{display:block;font-size:13px;font-weight:600}
+.callAiChecklist small{display:block;color:#6f829d;font-size:12px}
+.callAiAdvice{padding:10px 12px;border-radius:10px;background:#fff8e6}
+.callAiTranscript{white-space:pre-wrap;max-height:280px;overflow:auto;background:#f6f8fc;border-radius:10px;padding:10px;font:12px/1.5 inherit;margin-top:6px}
+.callAiModal .callAudio{width:100%;margin-top:12px}
+/* Offers and invoices */
+.docAdd{display:flex;gap:12px}
+.docRow{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:9px 0;border-top:1px solid #eef2f7}
+.docRow:first-of-type{border-top:0}
+.docRow b{display:block;font-size:13px;color:#0f2140}.docRow small{display:block;font-size:12px;color:#6f829d}
+.docRow.canceled b{color:#9aa8bb;text-decoration:line-through}
+.docStatus{font-weight:600}.docStatus.viewed{color:#6b4bd8}.docStatus.paid{color:#16803c}.docStatus.sent{color:#006bfd}
+.docActions{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:center}
+.docActions a.crmLinkButton{text-decoration:none}
+.docActions .muted{color:#8a99ad}
+.docEditor{max-width:760px}
+.docItems{display:flex;flex-direction:column;gap:6px;margin:4px 0 6px}
+.docItemsHead,.docItem{display:grid;grid-template-columns:minmax(0,1fr) 64px 56px 96px 70px 96px 26px;gap:6px;align-items:center}
+.docItemsHead span{font-size:11px;color:#7a8ca5;text-transform:uppercase;letter-spacing:.03em}
+.docItem input{min-width:0;min-height:34px;padding:0 8px;border:1px solid #dce5f2;border-radius:7px;font:inherit;font-size:13px}
+.docItem b{font-size:13px;text-align:right;white-space:nowrap}
+.docItem button{width:26px;height:26px;border:0;border-radius:6px;background:#f3f6fb;color:#7a8ca5;cursor:pointer}
+.docItem button:disabled{opacity:.4;cursor:default}
+.docItemsFoot{display:flex;justify-content:space-between;align-items:center;font-size:14px}
+.docItemsFoot b{font-size:16px}
+@media(max-width:640px){.docItemsHead{display:none}
+  .docItem{grid-template-columns:1fr 1fr 1fr 26px;padding:8px;border:1px solid #e3e9f2;border-radius:10px}
+  .docItem input:first-child{grid-column:1/-1}.docItem b{grid-column:1/4;text-align:left}}

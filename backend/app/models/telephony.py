@@ -61,7 +61,8 @@ class Call(Base):
     inbound_id: Mapped[int | None] = mapped_column(ForeignKey("crm_inbound.id", ondelete="SET NULL"), index=True)
     task_id: Mapped[int | None] = mapped_column(ForeignKey("crm_tasks.id", ondelete="SET NULL"))
     processed: Mapped[bool] = mapped_column(Boolean, default=False)  # summary handled: CRM links, task, timeline
-    # Future AI: transcript, summary, script score.
+    # AI analysis: None (not yet) | queued | stt (speech recognition running) | done | error | skipped. Result in meta["ai"].
+    ai_status: Mapped[str | None] = mapped_column(String(12), index=True)
     meta: Mapped[dict | None] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

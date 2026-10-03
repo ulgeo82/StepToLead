@@ -231,3 +231,32 @@ class OfflineConversion(Base):
     upload_id: Mapped[str | None] = mapped_column(String(40))
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CrmDocument(Base):
+    """A commercial offer (КП) or an invoice built from a deal; the client opens it by a secret link."""
+    __tablename__ = "crm_documents"
+    __table_args__ = (UniqueConstraint("project_id", "kind", "number", name="uq_crm_document_number"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    workspace_id: Mapped[int] = mapped_column(ForeignKey("client_workspaces.id"), index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    deal_id: Mapped[int] = mapped_column(ForeignKey("crm_deals.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(12))            # offer | invoice
+    number: Mapped[int] = mapped_column()
+    title: Mapped[str | None] = mapped_column(String(220))
+    items: Mapped[list] = mapped_column(JSON, default=list)  # [{name, qty, unit, price, discount}]
+    total: Mapped[float] = mapped_column(Numeric(16, 2), default=0)
+    note: Mapped[str | None] = mapped_column(Text)
+    valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Snapshot of the seller's requisites at creation, so old invoices do not change with the settings.
+    seller: Mapped[dict] = mapped_column(JSON, default=dict)
+    buyer: Mapped[dict] = mapped_column(JSON, default=dict)  # {name, company, inn, phone, email}
+    public_token: Mapped[str] = mapped_column(String(48), unique=True, index=True)
+    status: Mapped[str] = mapped_column(String(12), default="draft")  # draft | sent | viewed | paid | canceled
+    views: Mapped[int] = mapped_column(default=0)
+    viewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("portal_users.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

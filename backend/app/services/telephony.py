@@ -556,6 +556,9 @@ async def run_worker() -> None:
                 await download_pending(db)
                 await purge_expired(db)
                 await close_stale(db)
+            async with SessionLocal() as db:
+                from app.services import call_ai
+                await call_ai.process(db)
         except asyncio.CancelledError:
             raise
         except Exception:

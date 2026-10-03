@@ -22,7 +22,12 @@ class Settings(BaseSettings):
     # Web push for the installable portal (PWA). Generated on first start when empty.
     vapid_public_key: str = ""
     vapid_private_key: str = ""
-    vapid_subject: str = "mailto:admin@steptolead.ru"  # Call recordings (kept for TelephonyConnection.retention_days).
+    vapid_subject: str = "mailto:admin@steptolead.ru"
+    # Speech-to-text for AI call analysis: yandex (SpeechKit, key and folder default to the LLM ones) | openai (Whisper-style API).
+    stt_provider: str = ""
+    stt_api_key: str = ""
+    stt_model: str = ""          # openai: whisper-1 by default
+    stt_base_url: str = ""       # openai-style endpoint; defaults to LLM_BASE_URL or api.openai.com
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

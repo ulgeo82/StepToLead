@@ -90,6 +90,10 @@ export function describeActivity(a: Activity): { icon: string; text: string; ton
     case "INBOUND_REPEAT": return { icon: "↻", text: `Повторное обращение${s("source") ? ` · ${s("source")}` : ""}`, tone: "touch" };
     case "COMMENT_ADDED": return { icon: "💬", text: s("text"), tone: "comment" };
     case "CALL_LOGGED": return { icon: "📞", text: `Звонок${s("text") ? `: ${s("text")}` : ""}`, tone: "touch" };
+    case "CALL_ANALYZED": return { icon: "✨", text: `Разбор звонка${p.score != null ? ` · ${s("score")}/100` : ""}: ${s("summary")}${s("next_step") ? `\nСледующий шаг: ${s("next_step")}` : ""}`, tone: "comment" };
+    case "DOCUMENT_CREATED": return { icon: "📄", text: s("text") || "Создан документ", tone: "touch" };
+    case "DOCUMENT_VIEWED": return { icon: "👁", text: s("text") || "Клиент открыл документ", tone: "stage" };
+    case "DOCUMENT_PAID": return { icon: "₽", text: s("text") || "Счёт оплачен", tone: "won" };
     case "MESSAGE_SENT": return { icon: "✉", text: `Сообщение клиенту${s("text") ? `: ${s("text")}` : ""}`, tone: "touch" };
     case "MEETING_HELD": return { icon: "🤝", text: `Встреча${s("text") ? `: ${s("text")}` : ""}`, tone: "touch" };
     case "AUTOMATION": return { icon: "⚡", text: `${s("text")} (правило «${s("rule")}»)`, tone: "auto" };

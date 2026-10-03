@@ -8,7 +8,10 @@ export type CallRow = { id: number; direction: "in" | "out"; status: string; pho
   duration_sec: number; wait_sec: number; contact_id: number | null; contact_name: string | null; deal_id: number | null;
   deal_name: string | null; inbound_id: number | null; has_recording: boolean; recording_deleted: boolean;
   callback_status: string | null; callback_task_id: number | null; stage_name?: string | null; amount?: number | null;
-  responsible_name?: string | null; channel?: string | null };
+  responsible_name?: string | null; channel?: string | null; ai?: CallAi | null };
+type CallAi = { status: string; score: number | null; summary: string | null; error: string | null };
+type CallAnalysis = CallAi & { need?: string; next_step?: string; objections?: string[]; client_mood?: string; advice?: string;
+  reason?: string; provider?: string; at?: string; transcript?: string; checklist?: { item: string; ok: boolean; comment: string }[] };
 type PbxUser = { extension: string; name: string; numbers: string[] };
 type Connection = { id: number; provider: string; provider_name: string; name: string; active: boolean; status: string;
   last_error: string | null; last_event_at: string | null; retention_days: number; create_leads: boolean; missed_task_minutes: number;
@@ -18,7 +21,7 @@ type Tracking = { lines: string[]; channels: { kind: string; id: number; label: 
 export type TelephonyInfo = { connection: Connection | null; can_manage: boolean; my_extension: string | null;
   members: { id: number; name: string }[]; tracking?: Tracking | null };
 type Bucket = { total: number; incoming: number; outgoing: number; answered_in: number; missed_in: number; answered_out: number;
-  talk_sec: number; avg_wait_sec: number | null };
+  talk_sec: number; avg_wait_sec: number | null; ai_score?: number | null; ai_calls?: number };
 type Log = { items: CallRow[]; total: number; page: number;
   stats: { total: Bucket; users: (Bucket & { user_id: number | null; name: string })[]; open_callbacks: number } };
 
@@ -64,14 +67,65 @@ export function CallPlayer({ call }: { call: CallRow }) {
     : <button type="button" className="crmLinkButton" onClick={() => setOpen(true)}>▶ Запись</button>;
 }
 
+const scoreTone = (score: number | null | undefined) => score == null ? "" : score >= 75 ? "good" : score >= 50 ? "warn" : "bad";
+
+/** AI analysis state of one call: score pill (opens the analysis), progress, or «Разобрать». */
+export function CallAiBadge({ call, onChanged }: { call: CallRow; onChanged?: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const ai = call.ai;
+  async function run() {
+    setBusy(true); setError("");
+    try { await request(`/crm/calls/${call.id}/ai`, "POST", {}); onChanged?.(); } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+  }
+  if (ai?.status === "queued" || ai?.status === "stt") return <span className="callAi pending" title="Расшифровка и разбор займут пару минут">✨ разбираем…</span>;
+  if (ai?.status === "done") return <><button type="button" className={`callAi score ${scoreTone(ai.score)}`} onClick={() => setOpen(true)} title={ai.summary || "Разбор звонка"}>
+    ✨ {ai.score == null ? "разбор" : `${ai.score}/100`}</button>{open && <CallAiModal callId={call.id} onClose={() => setOpen(false)}/>}</>;
+  if (call.status !== "answered" || !call.has_recording || call.duration_sec < 10) return null;
+  return <>{ai?.status === "error" && <span className="callAi bad" title={ai.error || ""}>ошибка разбора</span>}
+    <button type="button" className="crmLinkButton" disabled={busy} onClick={run} title={error || "Расшифровать и оценить разговор"}>{busy ? "…" : error ? "⚠ Разобрать" : "✨ Разобрать"}</button></>;
+}
+
+function CallAiModal({ callId, onClose }: { callId: number; onClose: () => void }) {
+  const [data, setData] = useState<{ call: CallRow; analysis: CallAnalysis | null } | null>(null);
+  const [error, setError] = useState("");
+  const [showText, setShowText] = useState(false);
+  useEffect(() => { request<{ call: CallRow; analysis: CallAnalysis | null }>(`/crm/calls/${callId}/ai`, "GET").then(setData).catch(e => setError((e as Error).message)); }, [callId]);
+  const a = data?.analysis;
+  return <div className="resultModalBackdrop" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}><div className="resultModal crmModal callAiModal">
+    <header><h2>Разбор звонка</h2><button type="button" onClick={onClose}>×</button></header>
+    {error && <p className="crmFormError">{error}</p>}
+    {data && <p className="crmModalLead">{callLabel(data.call).text} · {data.call.contact_name || fmtPhone(data.call.phone)} · {when(data.call.started_at)}{data.call.user_name ? ` · ${data.call.user_name}` : ""} · {duration(data.call.duration_sec)}</p>}
+    {a && <>{a.score != null && <div className={`callAiScore ${scoreTone(a.score)}`}><strong>{a.score}</strong><span>из 100 по чек-листу{a.client_mood ? ` · клиент: ${a.client_mood}` : ""}</span></div>}
+      {a.summary && <section><h3>Коротко</h3><p>{a.summary}</p></section>}
+      {a.need && <section><h3>Что нужно клиенту</h3><p>{a.need}</p></section>}
+      {a.next_step && <section><h3>Следующий шаг</h3><p>{a.next_step}</p></section>}
+      {!!a.objections?.length && <section><h3>Возражения</h3><ul>{a.objections.map((o, i) => <li key={i}>{o}</li>)}</ul></section>}
+      {!!a.checklist?.length && <section><h3>Чек-лист</h3><ul className="callAiChecklist">{a.checklist.map((c, i) => <li key={i} className={c.ok ? "ok" : "no"}>
+        <i>{c.ok ? "✓" : "✕"}</i><div><b>{c.item}</b>{c.comment && <small>{c.comment}</small>}</div></li>)}</ul></section>}
+      {a.advice && <section className="callAiAdvice"><h3>Совет менеджеру</h3><p>{a.advice}</p></section>}
+      {a.reason && <p className="crmMuted">{a.reason}</p>}
+      {data && <CallPlayer call={data.call}/>}
+      {a.transcript && <section><button type="button" className="crmLinkButton" onClick={() => setShowText(v => !v)}>{showText ? "Скрыть расшифровку" : "Показать расшифровку"}</button>
+        {showText && <pre className="callAiTranscript">{a.transcript}</pre>}</section>}
+      <p className="crmMuted">Разбор сделан ИИ{a.provider ? ` (${a.provider})` : ""} по записи разговора — возможны неточности распознавания.</p></>}
+  </div></div>;
+}
+
 /** Calls block inside the deal card. */
 export function DealCalls({ dealId, refreshKey }: { dealId: number; refreshKey?: unknown }) {
   const [rows, setRows] = useState<CallRow[] | null>(null);
-  useEffect(() => { request<CallRow[]>(`/crm/deals/${dealId}/calls`, "GET").then(setRows).catch(() => setRows([])); }, [dealId, refreshKey]);
+  const [tick, setTick] = useState(0);
+  useEffect(() => { request<CallRow[]>(`/crm/deals/${dealId}/calls`, "GET").then(setRows).catch(() => setRows([])); }, [dealId, refreshKey, tick]);
+  const pending = rows?.some(c => c.ai?.status === "queued" || c.ai?.status === "stt");
+  useEffect(() => { if (!pending) return; const t = setInterval(() => setTick(v => v + 1), 15000); return () => clearInterval(t); }, [pending]);
   if (!rows?.length) return null;
   return <div className="crmBlock"><h3>Звонки</h3><div className="callList">{rows.map(c => { const l = callLabel(c);
     return <div key={c.id} className={`callRow ${l.tone}`}><i>{l.icon}</i><div><b>{l.text}{c.status === "answered" ? ` · ${duration(c.duration_sec)}` : ""}</b>
-      <small>{when(c.started_at)}{c.user_name ? ` · ${c.user_name}` : ""}</small></div><CallPlayer call={c}/></div>; })}</div></div>;
+      <small>{when(c.started_at)}{c.user_name ? ` · ${c.user_name}` : ""}</small>
+      {c.ai?.status === "done" && c.ai.summary && <p className="callAiSummary">{c.ai.summary}</p>}</div>
+      <div className="callRowActions"><CallAiBadge call={c} onChanged={() => setTick(v => v + 1)}/><CallPlayer call={c}/></div></div>; })}</div></div>;
 }
 
 /** Pop-up card while a client is calling: who it is and the deal, before the manager picks up. */
@@ -138,9 +192,10 @@ export function CallsTab({ projectId, team, info, reloadInfo, onOpenDeal, onOpen
       <div className={`crmKpi ${t.missed_in ? "bad" : "good"}`}><span>Пропущено входящих</span><strong>{t.missed_in}</strong><small>{answeredShare == null ? "входящих не было" : `принято ${answeredShare}%`}</small></div>
       <div className={`crmKpi ${log!.stats.open_callbacks ? "warn" : ""}`}><span>Ждут перезвона</span><strong>{log!.stats.open_callbacks}</strong><small>открытые задачи «Перезвонить»</small></div>
       <div className="crmKpi"><span>Время разговоров</span><strong>{talk(t.talk_sec)}</strong><small>{t.avg_wait_sec == null ? "" : `ожидание ответа ~${t.avg_wait_sec} сек`}</small></div></div>}
-    {log && log.stats.users.length > 1 && <div className="crmTableScroll callStats"><table><thead><tr><th>Менеджер</th><th>Входящие</th><th>Пропущено</th><th>Исходящие</th><th>Дозвонились</th><th>Разговоры</th><th>Ожидание</th></tr></thead>
+    {log && log.stats.users.length > 1 && <div className="crmTableScroll callStats"><table><thead><tr><th>Менеджер</th><th>Входящие</th><th>Пропущено</th><th>Исходящие</th><th>Дозвонились</th><th>Разговоры</th><th>Ожидание</th>{log.stats.users.some(u => u.ai_score != null) && <th>Оценка ИИ</th>}</tr></thead>
       <tbody>{log.stats.users.map(u => <tr key={u.user_id ?? 0}><td>{u.name}</td><td>{u.incoming}</td><td className={u.missed_in ? "bad" : ""}>{u.missed_in}</td><td>{u.outgoing}</td>
-        <td>{u.outgoing ? `${Math.round(u.answered_out / u.outgoing * 100)}%` : "—"}</td><td>{talk(u.talk_sec)}</td><td>{u.avg_wait_sec == null ? "—" : `${u.avg_wait_sec} сек`}</td></tr>)}</tbody></table></div>}
+        <td>{u.outgoing ? `${Math.round(u.answered_out / u.outgoing * 100)}%` : "—"}</td><td>{talk(u.talk_sec)}</td><td>{u.avg_wait_sec == null ? "—" : `${u.avg_wait_sec} сек`}</td>
+        {log.stats.users.some(x => x.ai_score != null) && <td className={scoreTone(u.ai_score)}>{u.ai_score == null ? "—" : `${u.ai_score}/100`}</td>}</tr>)}</tbody></table></div>}
     <div className="crmFilters crmFiltersPro callFilters">
       <select value={days} onChange={e => setDays(e.target.value)}><option value="1">Сегодня и вчера</option><option value="7">7 дней</option><option value="30">30 дней</option><option value="90">3 месяца</option></select>
       <select value={direction} onChange={e => setDirection(e.target.value)}><option value="">Все направления</option><option value="in">Входящие</option><option value="out">Исходящие</option></select>
@@ -155,7 +210,7 @@ export function CallsTab({ projectId, team, info, reloadInfo, onOpenDeal, onOpen
             : c.inbound_id ? <button className="crmLinkButton" onClick={onOpenInbound}>заявка</button> : "—"}</td>
           <td>{c.user_name || (c.extension ? `доб. ${c.extension}` : "—")}</td><td>{when(c.started_at)}</td>
           <td>{c.status === "answered" ? duration(c.duration_sec) : c.direction === "in" && c.wait_sec ? `ждал ${duration(c.wait_sec)}` : "—"}</td>
-          <td><CallPlayer call={c}/></td>
+          <td><div className="callRowActions"><CallPlayer call={c}/><CallAiBadge call={c} onChanged={load}/></div></td>
           <td>{c.callback_status === "OPEN" ? <span className="callBack">ждёт перезвона</span> : c.callback_status === "COMPLETED" ? <span className="crmMuted">перезвонили</span> : null}
             {c.phone && c.direction === "in" && c.status !== "answered" && c.callback_status === "OPEN" &&
               <CallButton projectId={projectId} phone={c.phone} dealId={c.deal_id ?? undefined} canDial={canDial} onNotice={(text, err) => setNotice({ text, error: err })}/>}</td></tr>; })}</tbody></table>

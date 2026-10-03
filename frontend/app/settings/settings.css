@@ -42,3 +42,16 @@
 .settingsCard .crmOk{margin:8px 0;padding:8px 10px;border-radius:7px;background:#e8f7ee;color:#17693d;font-size:12px}
 .settingsCard .crmFormError{margin:8px 0;padding:8px 10px;border-radius:7px;background:#fdecef;color:#a52a3d;font-size:12px}
 .settingsCard .chatError{color:#c8344b}
+.aiForm h3{margin:10px 0 0;font-size:14px;color:#0f2140}
+.aiForm p.crmMuted{margin:0;font-size:12px;color:#6f829d;line-height:1.45}
+.aiForm label.aiCheck{flex-direction:row;align-items:center;gap:8px;font-size:13px;color:#0f2140}
+.aiForm label.aiCheck input{min-height:0;width:16px;height:16px}
+.reqForm{display:flex;flex-direction:column;gap:10px}
+.reqForm label{display:flex;flex-direction:column;gap:5px;font-size:12px;color:#5d6f8a}
+.reqForm input,.reqForm select,.reqForm textarea{min-height:38px;padding:8px 10px;border:1px solid #dce5f2;border-radius:8px;font:inherit;font-size:14px;color:#0f2140;background:#fff}
+.reqForm input[type=color]{padding:2px;width:64px}
+.reqForm input:invalid{border-color:#e7a0ac}
+.reqGrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.reqGrid .wide{grid-column:span 2}
+.reqForm .crmPrimary{align-self:flex-start}
+@media(max-width:760px){.reqGrid{grid-template-columns:1fr}.reqGrid .wide{grid-column:auto}}

@@ -22,6 +22,8 @@ const nextConfig: NextConfig = {
   },
   async rewrites() {
     return [
+      // Commercial offers / invoices opened by clients: short public link.
+      { source: "/d/:token", destination: `${process.env.BACKEND_URL || "http://backend:8000"}/api/public/documents/:token` },
       {
         source: "/api/:path*",
         destination: `${process.env.BACKEND_URL || "http://backend:8000"}/api/:path*`,

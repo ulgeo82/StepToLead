@@ -49,7 +49,8 @@ export function ConversionsCard({ projectId }: { projectId: number }) {
   </section>;
 }
 
-type AiSettings = { knowledge: string; tone: string; goal: string; configured: boolean; provider: string | null; can_manage: boolean };
+type AiSettings = { knowledge: string; tone: string; goal: string; configured: boolean; provider: string | null; can_manage: boolean;
+  calls: boolean; call_checklist: string; calls_available: boolean; default_checklist: string };
 
 /** Settings → «Подключения»: the knowledge base the AI assistant answers from. */
 export function AiSettingsCard({ projectId }: { projectId: number }) {
@@ -59,11 +60,12 @@ export function AiSettingsCard({ projectId }: { projectId: number }) {
   useEffect(() => { api<AiSettings>(`/crm/projects/${projectId}/ai-settings`).then(setData).catch(e => setError((e as Error).message)); }, [projectId]);
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); const f = new FormData(event.currentTarget); setError(""); setNotice("");
-    try { setData(await api<AiSettings>(`/crm/projects/${projectId}/ai-settings`, json("PUT", { knowledge: f.get("knowledge"), tone: f.get("tone"), goal: f.get("goal") }))); setNotice("Сохранено"); }
+    try { setData(await api<AiSettings>(`/crm/projects/${projectId}/ai-settings`, json("PUT", { knowledge: f.get("knowledge"), tone: f.get("tone"), goal: f.get("goal"),
+      calls: f.get("calls") === "on", call_checklist: f.get("call_checklist") || "" }))); setNotice("Сохранено"); }
     catch (e) { setError((e as Error).message); }
   }
   if (!data) return null;
-  return <section className="resultPanel settingsCard"><h2>ИИ-помощник в чатах</h2>
+  return <section className="resultPanel settingsCard"><h2>ИИ-помощник: чаты и звонки</h2>
     <p>{data.configured ? `Подключён: ${data.provider}. ` : "Сервис ИИ ещё не подключён на сервере — базу знаний можно заполнить заранее. "}
       В чате появятся кнопки «Подсказать ответ» и «Резюме переписки». ИИ только пишет черновик — отправляет менеджер. Факты ИИ берёт только отсюда.</p>
     {error && <p className="crmFormError">{error}</p>}{notice && <p className="crmOk">{notice}</p>}
@@ -72,5 +74,11 @@ export function AiSettingsCard({ projectId }: { projectId: number }) {
         placeholder={"Кухни на заказ от 60 000 ₽ за погонный метр, фасады МДФ и пластик.\nЗамер и дизайн-проект бесплатно, в Самаре и пригороде.\nСрок изготовления 25–35 рабочих дней. Гарантия 2 года.\nРассрочка 0% на 6 месяцев через банк-партнёр."}/></label>
       <label>Цель диалога<input name="goal" maxLength={300} defaultValue={data.goal} disabled={!data.can_manage} placeholder="Записать на бесплатный замер"/></label>
       <label>Тон<input name="tone" maxLength={300} defaultValue={data.tone} disabled={!data.can_manage} placeholder="Дружелюбно, на «вы», без смайликов"/></label>
+      <h3>Разбор звонков</h3>
+      <p className="crmMuted">{data.calls_available ? "Каждый состоявшийся звонок дольше 25 секунд расшифровывается: резюме, следующий шаг и оценка менеджера по чек-листу появятся в карточке звонка и сделки."
+        : "Нужен ключ ИИ и распознавания речи на сервере (SpeechKit). Чек-лист можно заполнить заранее."}</p>
+      <label className="aiCheck"><input type="checkbox" name="calls" defaultChecked={data.calls} disabled={!data.can_manage}/> Разбирать звонки автоматически</label>
+      <label>Чек-лист скрипта продаж — по пункту в строке<textarea name="call_checklist" rows={6} maxLength={2000} defaultValue={data.call_checklist} disabled={!data.can_manage}
+        placeholder={data.default_checklist}/></label>
       {data.can_manage && <button className="crmPrimary">Сохранить</button>}</form></section>;
 }

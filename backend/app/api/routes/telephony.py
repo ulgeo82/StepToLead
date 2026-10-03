@@ -18,7 +18,7 @@ from app.db import get_db
 from app.models.crm import CrmContact, CrmDeal, CrmStage, CrmTask
 from app.models.marketing import AdConnection, PortalUser, ProjectSource
 from app.models.telephony import Call, TelephonyConnection
-from app.services import telephony
+from app.services import call_ai, telephony
 from app.services.messaging import project_people
 from app.services.telephony import TelephonyError
 
@@ -282,14 +282,15 @@ async def calls_json(db: AsyncSession, rows: list[Call]) -> list[dict]:
             "recording_deleted": bool(r.recording_deleted_at),
             "callback_status": task.status if task else None, "callback_task_id": r.task_id,
             "channel": (telephony.line_route(routes[r.connection_id], r.line_number) or {}).get("label")
-            if r.connection_id in routes else None})
+            if r.connection_id in routes else None,
+            "ai": call_ai.public(r)})
     return result
 
 
 def call_stats(rows: list[Call], names: dict[int, str]) -> dict:
     def empty():
         return {"total": 0, "incoming": 0, "outgoing": 0, "answered_in": 0, "missed_in": 0, "answered_out": 0,
-                "talk_sec": 0, "wait_sum": 0}
+                "talk_sec": 0, "wait_sum": 0, "ai_sum": 0, "ai_n": 0}
     total, per_user = empty(), {}
     for r in rows:
         for bucket in (total, per_user.setdefault(r.user_id, empty())):
@@ -304,10 +305,15 @@ def call_stats(rows: list[Call], names: dict[int, str]) -> dict:
                 bucket["outgoing"] += 1
                 bucket["answered_out"] += r.status == "answered"
             bucket["talk_sec"] += r.duration_sec
+            score = ((r.meta or {}).get("ai") or {}).get("score") if r.ai_status == "done" else None
+            if score is not None:
+                bucket["ai_sum"] += score; bucket["ai_n"] += 1
 
     def finish(bucket):
         answered = bucket.pop("wait_sum") / bucket["answered_in"] if bucket["answered_in"] else None
-        return {**bucket, "avg_wait_sec": round(answered) if answered is not None else None}
+        ai_sum, ai_n = bucket.pop("ai_sum"), bucket.pop("ai_n")
+        return {**bucket, "avg_wait_sec": round(answered) if answered is not None else None,
+                "ai_score": round(ai_sum / ai_n) if ai_n else None, "ai_calls": ai_n}
     return {"total": finish(total),
             "users": [{"user_id": uid, "name": names.get(uid) or "Не назначен", **finish(b)}
                       for uid, b in sorted(per_user.items(), key=lambda item: -item[1]["total"])]}
@@ -429,3 +435,47 @@ async def call_recording(call_id: int, db: AsyncSession = Depends(get_db), user:
         raise HTTPException(404, "Записи нет")
     return FileResponse(path, media_type="audio/mpeg", filename=f"call-{call.id}.mp3",
                         headers={"Cache-Control": "private, max-age=3600"})
+
+
+async def visible_call(db: AsyncSession, user: PortalUser, call_id: int) -> Call:
+    call = await db.get(Call, call_id)
+    if not call or call.workspace_id != user.workspace_id:
+        raise HTTPException(404, "Звонок не найден")
+    await project_for(db, user, call.project_id)
+    if not await db.scalar(visible_calls(select(Call.id).where(Call.id == call.id), user)):
+        raise HTTPException(403, "Звонок другого сотрудника")
+    return call
+
+
+@router.get("/calls/{call_id}/ai")
+async def call_analysis(call_id: int, db: AsyncSession = Depends(get_db), user: PortalUser = Depends(require_portal_user)):
+    """Full AI analysis of a call: summary, checklist, advice and the transcript."""
+    require_permission(user, "view_crm")
+    call = await visible_call(db, user, call_id)
+    return {"call": (await calls_json(db, [call]))[0], "analysis": call_ai.public(call, full=True),
+            "available": call_ai.available()}
+
+
+@router.post("/calls/{call_id}/ai")
+async def queue_call_analysis(call_id: int, request: Request, db: AsyncSession = Depends(get_db),
+                              user: PortalUser = Depends(require_portal_user)):
+    """Analyze (or re-analyze) a call on demand; the worker picks it up within a minute."""
+    check_origin(request); require_permission(user, "view_crm")
+    call = await visible_call(db, user, call_id)
+    if not call_ai.available():
+        raise HTTPException(422, "Разбор звонков не подключён: нужен ключ ИИ и распознавания речи в настройках сервера")
+    if call.status != "answered" or call.duration_sec < 10:
+        raise HTTPException(422, "Разбирать можно только состоявшийся разговор")
+    if call.recording_deleted_at or not (call.recording_path or call.recording_id):
+        raise HTTPException(422, "Записи разговора нет")
+    if call.ai_status in {"queued", "stt"}:
+        return {"status": call.ai_status}
+    if not call.recording_path:
+        try:
+            await telephony.fetch_recording(db, call)
+        except TelephonyError as exc:
+            raise HTTPException(502, str(exc)) from None
+    call.meta = {**(call.meta or {}), "ai": {}}
+    call.ai_status = "queued"
+    await db.commit()
+    return {"status": "queued"}

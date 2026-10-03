@@ -4,6 +4,7 @@ import { FormEvent, useCallback, useEffect, useState } from "react";
 import { money } from "@/components/reporting";
 import { DealChats } from "./inbox";
 import { CallButton, DealCalls } from "./telephony";
+import { DealDocuments } from "./documents";
 import { CompleteTaskModal, NewTaskModal } from "./task-modals";
 import { contactLinks, CustomField, Deal, day, days, describeActivity, Pipeline, priorityLabels, qualityReasons, request,
   Source, stateLabels, Task, Team, typeLabels, when } from "./shared";
@@ -174,6 +175,8 @@ export function DealCard({ dealId, projectId, pipelines, team, sources, fields, 
         {deal.form_data && <div className="crmBlock"><h3>Что написал клиент</h3>{clientFields(deal.form_data).map(({ label, value }) => <p key={label} className="crmKV"><span>{label}</span><span className="crmPre">{linkify(value)}</span></p>)}</div>}
 
         <div className="crmBlock"><h3>Продажи</h3>{deal.sales?.length ? deal.sales.map(s => <p key={s.id} className="crmKV"><span>{day(s.occurred_at)}</span><b>{money(s.amount)}</b></p>) : <p className="crmMuted">Продажа ещё не подтверждена. Выручка в аналитике считается только по подтверждённым продажам.</p>}</div>
+
+        <DealDocuments dealId={deal.id} projectId={projectId} canEdit={can("edit_deal")} canSale={can("create_sale")} onChanged={() => { load(); onChanged(); }}/>
       </section>
 
       <section className="crmCardFeed">
