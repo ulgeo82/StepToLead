@@ -260,3 +260,19 @@ class CrmDocument(Base):
     created_by_id: Mapped[int | None] = mapped_column(ForeignKey("portal_users.id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class CareEvent(Base):
+    """One after-sale / reminder touch, so each one happens once: reminder per task, review and repeat sale per deal."""
+    __tablename__ = "crm_care_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    workspace_id: Mapped[int] = mapped_column(ForeignKey("client_workspaces.id"), index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    deal_id: Mapped[int | None] = mapped_column(ForeignKey("crm_deals.id", ondelete="CASCADE"), index=True)
+    key: Mapped[str] = mapped_column(String(80), unique=True)           # reminder:<task> | review:<deal> | repeat:<deal>
+    kind: Mapped[str] = mapped_column(String(12), index=True)            # reminder | review | repeat
+    status: Mapped[str] = mapped_column(String(12))                      # sent | task | skipped | failed
+    channel: Mapped[str | None] = mapped_column(String(24))
+    detail: Mapped[str | None] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)

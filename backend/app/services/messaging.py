@@ -438,7 +438,7 @@ async def send(db: AsyncSession, conversation: Conversation, text: str, user: Po
     if len(text) > limit:
         raise ChannelError(f"Сообщение длиннее {limit} символов — разбейте его на части")
     message = Message(conversation_id=conversation.id, direction="out", text=text, author_user_id=user.id if user else None,
-                      author_name=user.display_name if user else "ИИ-ассистент", status="sent", sent_at=now(), is_ai=is_ai,
+                      author_name=user.display_name if user else ("ИИ-ассистент" if is_ai else "Автоматически"), status="sent", sent_at=now(), is_ai=is_ai,
                       attachments=[])
     try:
         message.external_id = await adapter(channel, db).send(conversation, text)

@@ -55,3 +55,5 @@
 .reqGrid .wide{grid-column:span 2}
 .reqForm .crmPrimary{align-self:flex-start}
 @media(max-width:760px){.reqGrid{grid-template-columns:1fr}.reqGrid .wide{grid-column:auto}}
+.careForm label small{color:#9aa8bb}
+.careRow{display:flex;gap:10px;flex-wrap:wrap}.careRow label{flex:0 0 120px}.careRow label.grow{flex:1 1 240px}

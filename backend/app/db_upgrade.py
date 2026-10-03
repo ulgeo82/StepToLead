@@ -61,6 +61,7 @@ def upgrade_existing_schema(connection):
                              "form_succeeded": "BOOLEAN NOT NULL DEFAULT false",
                              "click_type": "VARCHAR(12)", "ym_client_id": "VARCHAR(32)"},
         "calls": {"ai_status": "VARCHAR(12)"},
+        "website_sites": {"widget": "JSON"},
     }
     for table, additions in columns.items():
         existing = {column["name"] for column in inspector.get_columns(table)}

@@ -426,3 +426,18 @@ button.callAi{cursor:pointer}
 @media(max-width:640px){.docItemsHead{display:none}
   .docItem{grid-template-columns:1fr 1fr 1fr 26px;padding:8px;border:1px solid #e3e9f2;border-radius:10px}
   .docItem input:first-child{grid-column:1/-1}.docItem b{grid-column:1/4;text-align:left}}
+/* amoCRM import */
+.amoImport{max-width:720px}
+.amoSteps{margin:0 0 12px;padding-left:20px;font-size:13px;line-height:1.55;color:#40536f}
+.amoPick{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap}
+.amoFile{position:relative;overflow:hidden;cursor:pointer;display:inline-flex;align-items:center;min-height:38px;padding:0 14px}
+.amoFile input{position:absolute;inset:0;opacity:0;cursor:pointer}
+.amoSummary{font-size:14px;margin:12px 0 4px}.amoCols{font-size:11px;line-height:1.5}
+.amoImport h3{margin:14px 0 6px;font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:#7a8ca5}
+.amoMap{display:flex;flex-direction:column;gap:6px}
+.amoMap>div{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px;align-items:center}
+.amoMap span{font-size:13px;color:#0f2140}.amoMap small{color:#8a99ad;margin-left:4px}
+.amoMap select{min-height:34px}
+.amoSample{font-size:12px}.amoSample td,.amoSample th{padding:6px 8px}
+.amoResult ul{font-size:13px;color:#40536f;line-height:1.6}
+@media(max-width:560px){.amoMap>div{grid-template-columns:1fr;gap:4px}}

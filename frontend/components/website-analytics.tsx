@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import { count, money, MetricChart } from "@/components/reporting";
 import "./website-analytics.css";
 import TildaIntegration from "@/components/tilda-integration";
+import { SiteWidgetEditor } from "@/components/site-widget";
 
 type Site = { id: number; name: string; origin: string; public_key: string; active: boolean; last_event_at: string | null };
 type Report = { totals: { sessions: number; visitors: number; page_views: number; engaged: number; bounce_rate: number | null;
@@ -36,6 +37,7 @@ const eventName: Record<string, string> = { page_view: "Просмотр стр�
 
 export default function WebsiteAnalytics({ projectId, start, end, role }: { projectId: number; start: string; end: string; role: string }) {
   const [sites, setSites] = useState<Site[]>([]);
+  const [widgetSite, setWidgetSite] = useState<Site | null>(null);
   const [report, setReport] = useState<Report | null>(null);
   const [siteId, setSiteId] = useState("");
   const [page, setPage] = useState("");
@@ -100,7 +102,8 @@ export default function WebsiteAnalytics({ projectId, start, end, role }: { proj
       <details><summary>Код установки</summary><p>Разместите перед закрывающим тегом страницы. Передавайте согласие после выбора посетителя.</p>
         <code>{`<script async src="${typeof window === "undefined" ? "https://YOUR_STEPTOLEAD_DOMAIN" : window.location.origin}/stl.js" data-stl-key="${site.public_key}"></script>`}</code>
         <code>{`StepToLead.consent(true)`}</code><p>При отправке заявки передайте <code>StepToLead.context()</code> в существующий входящий поток. Успех формы фиксируйте вызовом <code>{`StepToLead.track("form_success", { element_name: "Название формы" })`}</code> только после ответа сервера. Точно такое же название укажите в <code>data-stl-name</code> формы.</p></details>
-      {canManage && <button onClick={() => toggle(site)}>{site.active ? "Приостановить" : "Включить"}</button>}</article>)}</div></section>}
+      <div className="websiteSiteActions"><button onClick={() => setWidgetSite(site)}>☎ Виджет «Перезвоните мне»</button>{canManage && <button onClick={() => toggle(site)}>{site.active ? "Приостановить" : "Включить"}</button>}</div></article>)}</div></section>}
+    {widgetSite && <SiteWidgetEditor siteId={widgetSite.id} siteName={widgetSite.name} canManage={canManage} onClose={() => setWidgetSite(null)}/>}
     {!sites.length && <section className="resultPanel"><p className="resultTableEmpty">Сайт не подключён. Добавьте домен и установите код на сайт после настройки согласия на аналитику.</p></section>}
     <TildaIntegration projectId={projectId} sites={sites} canManage={canManage} />
     <div className="websiteFilters"><select aria-label="Сайт" value={siteId} onChange={e => setSiteId(e.target.value)}><option value="">Все сайты</option>{sites.map(site => <option key={site.id} value={site.id}>{site.name}</option>)}</select>

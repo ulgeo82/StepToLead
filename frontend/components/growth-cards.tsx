@@ -82,3 +82,48 @@ export function AiSettingsCard({ projectId }: { projectId: number }) {
         placeholder={data.default_checklist}/></label>
       {data.can_manage && <button className="crmPrimary">Сохранить</button>}</form></section>;
 }
+
+type Care = { reminders: boolean; reminder_hours: number; reminder_text: string; review: boolean; review_days: number; review_url: string;
+  review_text: string; repeat: boolean; repeat_days: number; repeat_text: string };
+type CareView = { care: Care; defaults: Care; can_manage: boolean; stats: Record<string, { sent: number; task: number; failed: number; skipped: number }> };
+
+/** Settings → «Воронка»: meeting reminders, review requests after a sale, repeat-sale tasks. */
+export function CareCard({ projectId }: { projectId: number }) {
+  const [data, setData] = useState<CareView | null>(null);
+  const [c, setC] = useState<Care | null>(null);
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+  useEffect(() => { api<CareView>(`/crm/projects/${projectId}/care`).then(d => { setData(d); setC(d.care); }).catch(e => setError((e as Error).message)); }, [projectId]);
+  const set = (patch: Partial<Care>) => { setC(v => v && { ...v, ...patch }); setNotice(""); };
+  async function save(event: FormEvent) {
+    event.preventDefault(); setError(""); setNotice("");
+    try { const d = await api<CareView>(`/crm/projects/${projectId}/care`, json("PUT", c)); setData(d); setC(d.care); setNotice("Сохранено"); }
+    catch (e) { setError((e as Error).message); }
+  }
+  if (!data || !c) return error ? <section className="resultPanel settingsCard"><p className="crmFormError">{error}</p></section> : null;
+  const off = !data.can_manage;
+  const s = (k: string) => data.stats[k] || { sent: 0, task: 0, failed: 0, skipped: 0 };
+  return <section className="resultPanel settingsCard"><h2>Забота о клиенте</h2>
+    <p>Портал сам напомнит клиенту о встрече, попросит отзыв после покупки и напомнит менеджеру о повторной продаже. Сообщения уходят в чат сделки (WhatsApp, Telegram, Авито) с 9:00 до 21:00; если написать некуда — менеджер получает задачу с готовым текстом.</p>
+    {error && <p className="crmFormError">{error}</p>}{notice && <p className="crmOk">{notice}</p>}
+    <form className="aiForm careForm" onSubmit={save}>
+      <h3>Напоминание о встрече</h3>
+      <label className="aiCheck"><input type="checkbox" checked={c.reminders} disabled={off} onChange={e => set({ reminders: e.target.checked })}/> Напоминать клиенту о встречах и замерах (задачи типа «Встреча»)</label>
+      {c.reminders && <><label>За сколько часов<input type="number" min={2} max={72} value={c.reminder_hours} disabled={off} onChange={e => set({ reminder_hours: Number(e.target.value) || 24 })}/></label>
+        <label>Текст <small>— {"{name}"}, {"{date}"}, {"{time}"}, {"{what}"}, {"{company}"}</small><textarea rows={3} maxLength={600} value={c.reminder_text} disabled={off} onChange={e => set({ reminder_text: e.target.value })}/></label></>}
+      <p className="crmMuted">За 30 дней: отправлено {s("reminder").sent}{s("reminder").skipped ? `, некуда написать ${s("reminder").skipped}` : ""}{s("reminder").failed ? `, ошибок ${s("reminder").failed}` : ""}</p>
+
+      <h3>Отзыв после покупки</h3>
+      <label className="aiCheck"><input type="checkbox" checked={c.review} disabled={off} onChange={e => set({ review: e.target.checked })}/> Просить отзыв после подтверждённой продажи</label>
+      {c.review && <><div className="careRow"><label>Через, дней<input type="number" min={1} max={60} value={c.review_days} disabled={off} onChange={e => set({ review_days: Number(e.target.value) || 3 })}/></label>
+        <label className="grow">Где оставить отзыв<input type="url" value={c.review_url} disabled={off} placeholder="https://yandex.ru/maps/org/..." onChange={e => set({ review_url: e.target.value })}/></label></div>
+        <label>Текст <small>— {"{name}"}, {"{company}"}, {"{review_url}"}</small><textarea rows={3} maxLength={600} value={c.review_text} disabled={off} onChange={e => set({ review_text: e.target.value })}/></label></>}
+      <p className="crmMuted">За 30 дней: отправлено {s("review").sent}, задач менеджерам {s("review").task}</p>
+
+      <h3>Повторная продажа</h3>
+      <label className="aiCheck"><input type="checkbox" checked={c.repeat} disabled={off} onChange={e => set({ repeat: e.target.checked })}/> Ставить менеджеру задачу связаться с клиентом снова</label>
+      {c.repeat && <><label>Через, дней после покупки<input type="number" min={7} max={1095} value={c.repeat_days} disabled={off} onChange={e => set({ repeat_days: Number(e.target.value) || 180 })}/></label>
+        <label>Описание задачи <small>— {"{name}"}, {"{days}"}</small><textarea rows={2} maxLength={600} value={c.repeat_text} disabled={off} onChange={e => set({ repeat_text: e.target.value })}/></label></>}
+      <p className="crmMuted">За 30 дней: задач {s("repeat").task}</p>
+      {data.can_manage && <button className="crmPrimary">Сохранить</button>}</form></section>;
+}

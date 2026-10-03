@@ -8,3 +8,34 @@
 .tildaSecret { padding: 12px; background: #f6f8fd; border-radius: 8px; }
 .tildaSecret code { display: block; margin: 8px 0; }
 .tildaIntegration details { margin-top: 14px; }
+.widgetBackdrop{position:fixed;inset:0;z-index:60;background:rgba(15,33,64,.45);display:flex;align-items:flex-start;justify-content:center;padding:32px 16px;overflow:auto}
+.widgetModal{width:min(960px,100%);background:#fff;border-radius:16px;padding:20px 22px;box-shadow:0 20px 60px rgba(15,33,64,.3);color:#101b31}
+.widgetModal header{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px}
+.widgetModal header h2{margin:0;font-size:19px}.widgetModal header button{width:32px;height:32px;border:0;border-radius:8px;background:#f1f4f9;font-size:20px;cursor:pointer}
+.widgetBody{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:22px;align-items:start}
+.widgetFields{display:flex;flex-direction:column;gap:12px}
+.widgetFields fieldset{border:1px solid #e3e9f2;border-radius:12px;padding:10px 14px 14px;display:flex;flex-direction:column;gap:9px;margin:0}
+.widgetFields legend{font-size:12px;font-weight:650;color:#40536f;padding:0 4px}
+.widgetFields label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:#5d6f8a}
+.widgetFields input,.widgetFields select{min-height:38px;padding:0 10px;border:1px solid #d9e2ee;border-radius:8px;font:inherit;font-size:14px;color:#101b31;background:#fff}
+.widgetFields input[type=color]{padding:2px;width:64px}
+.widgetFields small{font-size:11px;color:#8a99ad}
+.widgetFields label.widgetSwitch{flex-direction:row;align-items:center;gap:8px;font-size:14px;color:#101b31}
+.widgetFields label.widgetSwitch input{min-height:0;width:17px;height:17px}
+.widgetGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+.widgetInstall summary{color:#006bfd;cursor:pointer;font-size:14px}.widgetInstall p{font-size:12px;color:#667893}
+.widgetInstall code{display:block;background:#eef4fd;white-space:pre-wrap;overflow-wrap:anywhere;padding:8px;border-radius:6px;font-size:11px}
+.widgetError{padding:8px 10px;border-radius:8px;background:#fdecef;color:#a52a3d;font-size:13px}
+.widgetOk{padding:8px 10px;border-radius:8px;background:#e8f7ee;color:#17693d;font-size:13px;margin:0}
+.widgetFields .websitePrimary{align-self:flex-start}
+.widgetPreview{position:sticky;top:0;background:#eef2f7;border-radius:14px;padding:12px;min-height:420px;display:flex;flex-direction:column;align-items:flex-end;gap:12px}
+.widgetPreview.left{align-items:flex-start}.widgetPreview>small{align-self:stretch;color:#7a8ca5;font-size:11px}
+.wpPanel{width:100%;background:#fff;border-radius:14px;box-shadow:0 10px 30px rgba(15,33,64,.18);padding:14px;display:flex;flex-direction:column;gap:7px}
+.wpPanel b{font-size:15px}.wpPanel p{margin:0;font-size:12px;color:#5d6f8a;line-height:1.4}
+.wpInput{display:block;height:34px;line-height:34px;padding:0 10px;border:1px solid #d5deea;border-radius:8px;color:#9aa8bb;font-size:13px}
+.wpConsent{font-size:10px;color:#5d6f8a}
+.wpSend{display:block;text-align:center;height:38px;line-height:38px;border-radius:8px;color:#fff;font-weight:600;font-size:14px}
+.wpLinks{display:flex;flex-wrap:wrap;gap:6px}.wpLinks span{flex:1 1 40%;text-align:center;height:32px;line-height:32px;border-radius:8px;color:#fff;font-size:12px;font-weight:600}
+.wpFab{width:52px;height:52px;border-radius:50%;display:grid;place-items:center;color:#fff;font-size:22px;box-shadow:0 8px 20px rgba(15,33,64,.25)}
+@media(max-width:820px){.widgetBody{grid-template-columns:1fr}.widgetPreview{position:static;min-height:0}.widgetGrid{grid-template-columns:1fr}}
+.websiteSiteActions{display:flex;flex-wrap:wrap;gap:8px}

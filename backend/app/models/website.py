@@ -20,6 +20,8 @@ class WebsiteSite(Base):
     public_key: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     last_event_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Callback / messengers widget (stl-widget.js): display settings + the inbound source its leads go to.
+    widget: Mapped[dict | None] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { api, API_URL } from "@/lib/api";
 import { money, ProjectSidebar } from "@/components/reporting";
 import { Automations } from "@/components/crm/automations";
+import { AmoImport } from "@/components/crm/amo-import";
 import { ContactCard } from "@/components/crm/contact-card";
 import { DealCard } from "@/components/crm/deal-card";
 import { Inbox } from "@/components/crm/inbox";
@@ -58,6 +59,7 @@ export default function CrmPage() {
   const [fields, setFields] = useState<CustomField[]>([]);
   const [lostReasons, setLostReasons] = useState<{ id: number; label: string }[]>([]);
   const [modal, setModal] = useState<Modal>(null);
+  const [amoOpen, setAmoOpen] = useState(false);
   const [editStage, setEditStage] = useState<Stage | null>(null);
   const [editPipeline, setEditPipeline] = useState<Pipeline | null>(null);
   const [completing, setCompleting] = useState<Task | null>(null);
@@ -273,7 +275,9 @@ export default function CrmPage() {
           <select aria-label="Архив сделок" value={archived ? "archive" : "active"} onChange={e => { setArchived(e.target.value === "archive"); setPage(1); setFilterState(""); }}><option value="active">Активные</option><option value="archive">Архив</option></select>
           {activeFilters > 0 && <button className="crmLinkButton" onClick={() => { setOwner(""); setSourceFilter(""); setTagFilter(""); setSearch(""); setMine(false); setIdleOnly(false); setPage(1); }}>Сбросить ({activeFilters})</button>}
           <div className="crmView"><button className={view === "kanban" ? "active" : ""} onClick={() => setView("kanban")}>▦ Канбан</button><button className={view === "list" ? "active" : ""} onClick={() => setView("list")}>☷ Список</button></div>
-          <button className="crmGhost" onClick={exportCsv} title="Выгрузить сделки воронки в CSV (Excel)">⇩ CSV</button></div>
+          <button className="crmGhost" onClick={exportCsv} title="Выгрузить сделки воронки в CSV (Excel)">⇩ CSV</button>
+          {(can("manage_pipeline") || can("manage_settings")) && <button className="crmGhost" onClick={() => setAmoOpen(true)} title="Перенести сделки из выгрузки amoCRM">⇧ Импорт из amoCRM</button>}</div>
+        {amoOpen && projectId && <AmoImport projectId={projectId} pipelines={pipelines} pipelineId={currentPipelineId} onClose={() => setAmoOpen(false)} onDone={() => setRevision(v => v + 1)}/>}
         <div className="crmCounters">{Object.entries(stateLabels).map(([key, label]) => <button key={key} className={`crmCount ${key.toLowerCase()} ${filterState === key ? "active" : ""}`}
           onClick={() => { setFilterState(filterState === key ? "" : key); setPage(1); }}><strong>{board?.control[key] ?? "—"}</strong><span>{label}</span></button>)}
           <div className="crmCount crmCountSum"><strong>{money(totalAmount)}</strong><span>в воронке</span></div></div>

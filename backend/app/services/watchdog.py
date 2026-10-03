@@ -239,6 +239,9 @@ async def run_worker() -> None:
         try:
             async with SessionLocal() as db:
                 await check_sla(db)
+                if now().minute % 5 == 0:
+                    from app.services.care import run as care_run
+                    await care_run(db)  # reminders, review requests, repeat sales
                 hour = now().replace(minute=0, second=0, microsecond=0)
                 if last_hourly != hour or now().minute in (1, 31):
                     await scheduled(db)
