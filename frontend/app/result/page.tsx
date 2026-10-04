@@ -78,6 +78,11 @@ export default function ResultPage() {
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [projectId, start, end, granularity, revision]);
+  // Live: new leads and fresh ad spend show up without reloading (quiet refresh while the tab is visible).
+  useEffect(() => { if (!projectId) return;
+    const query = new URLSearchParams({ project_id: String(projectId), start, end, granularity });
+    const timer = setInterval(() => { if (document.visibilityState === "visible") api<Result>(`/result?${query}`).then(setData).catch(() => {}); }, 60000);
+    return () => clearInterval(timer); }, [projectId, start, end, granularity]);
 
   async function createSource(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); if (!projectId) return;

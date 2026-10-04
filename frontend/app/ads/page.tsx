@@ -77,6 +77,11 @@ export default function AdsPage() {
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [projectId, start, end, granularity, revision]);
+  // Live: new leads and fresh ad spend show up without reloading (quiet refresh while the tab is visible).
+  useEffect(() => { if (!projectId) return;
+    const query = new URLSearchParams({ project_id: String(projectId), start, end, granularity });
+    const timer = setInterval(() => { if (document.visibilityState === "visible") api<Ads>(`/ads?${query}`).then(setData).catch(() => {}); }, 60000);
+    return () => clearInterval(timer); }, [projectId, start, end, granularity]);
   useEffect(() => {
     setRemoteCampaigns([]); setRemoteError("");
     if (selectedPlatform !== "vk_ads" || !selectedAccount) return;

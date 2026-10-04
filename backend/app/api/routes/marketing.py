@@ -207,7 +207,7 @@ async def _vk_access_token(db: AsyncSession, row: AdConnection) -> str:
     return data["access_token"]
 
 
-def _vk_metrics(token: str) -> list[dict]:
+def _vk_metrics(token: str, recent_days: int | None = None) -> list[dict]:
     """Import only VK's ad facts. VK goals are not CRM leads."""
     campaigns = []
     for offset in range(0, 10000, 100):
@@ -222,7 +222,7 @@ def _vk_metrics(token: str) -> list[dict]:
         raise ValueError("Слишком много кампаний VK для одной синхронизации")
     result: dict[date, dict] = {}
     today = datetime.now(timezone.utc).date()
-    start = today - timedelta(days=365)  # VK limits statistics to the last 366 days.
+    start = today - timedelta(days=min(recent_days or 365, 365))  # VK limits statistics to the last 366 days.
     names = {str(item["id"]): item.get("name") or "Кампания без названия" for item in campaigns if item.get("id") is not None}
     ids = list(names)
     for index in range(0, len(ids), 200):
@@ -339,12 +339,14 @@ def _test_connection(connection: AdConnection) -> dict:
     return {"name": client.get("ClientInfo") or client.get("Login"), "currency": client.get("Currency"), "remote_status": "active"}
 
 
-def _meta_metrics(connection: AdConnection) -> list[dict]:
+def _meta_metrics(connection: AdConnection, recent_days: int | None = None) -> list[dict]:
     token = decrypt_secret(connection.access_token_encrypted)
     account_id = connection.external_account_id.removeprefix("act_")
     query = urllib.parse.urlencode({
         "fields": "date_start,campaign_id,campaign_name,spend,impressions,clicks", "level": "campaign",
-        "date_preset": "maximum", "time_increment": "1", "limit": "500", "access_token": token,
+        "time_increment": "1", "limit": "500", "access_token": token,
+        **({"time_range": json.dumps({"since": (datetime.now(timezone.utc).date() - timedelta(days=recent_days)).isoformat(),
+                                      "until": datetime.now(timezone.utc).date().isoformat()})} if recent_days else {"date_preset": "maximum"}),
     })
     next_url = f"https://graph.facebook.com/v22.0/act_{account_id}/insights?{query}"
     result: dict[date, dict] = {}
@@ -371,7 +373,7 @@ def _meta_metrics(connection: AdConnection) -> list[dict]:
     return [result[day] for day in sorted(result)]
 
 
-def _yandex_metrics(connection: AdConnection) -> list[dict]:
+def _yandex_metrics(connection: AdConnection, recent_days: int | None = None) -> list[dict]:
     token = decrypt_secret(connection.access_token_encrypted)
     headers = {
         "Authorization": f"Bearer {token}", "Client-Login": connection.external_account_id,
@@ -379,10 +381,12 @@ def _yandex_metrics(connection: AdConnection) -> list[dict]:
         "processingMode": "auto", "returnMoneyInMicros": "false", "skipReportHeader": "true",
         "skipReportSummary": "true", "skipColumnHeader": "false",
     }
-    payload = {"params": {"SelectionCriteria": {},
+    today = datetime.now(timezone.utc).date()
+    criteria = {"DateFrom": (today - timedelta(days=recent_days)).isoformat(), "DateTo": today.isoformat()} if recent_days else {}
+    payload = {"params": {"SelectionCriteria": criteria,
                           "FieldNames": ["Date", "CampaignId", "CampaignName", "Impressions", "Clicks", "Cost"],
                           "ReportName": f"StepToLead-{connection.id}-{int(datetime.now().timestamp())}", "ReportType": "CUSTOM_REPORT",
-                          "DateRangeType": "ALL_TIME", "Format": "TSV", "IncludeVAT": "YES", "IncludeDiscount": "NO"}}
+                          "DateRangeType": "CUSTOM_DATE" if recent_days else "ALL_TIME", "Format": "TSV", "IncludeVAT": "YES", "IncludeDiscount": "NO"}}
     body = ""
     for _ in range(40):
         status, body, response_headers = _request_full(
@@ -690,7 +694,7 @@ async def store_metrics(db: AsyncSession, row: AdConnection, metrics: list[dict]
                 db.add(AdCampaignMetricDaily(connection_id=row.id, **campaign))
 
 
-async def sync_core(db: AsyncSession, connection_id: int) -> dict:
+async def sync_core(db: AsyncSession, connection_id: int, recent_days: int | None = None) -> dict:
     """Pull statistics of one ad cabinet into AdMetricDaily. Commits. Raises ValueError with the reason on failure."""
     row = await db.get(AdConnection, connection_id)
     if not row:
@@ -708,13 +712,13 @@ async def sync_core(db: AsyncSession, connection_id: int) -> dict:
             data = await run_in_threadpool(_vk_json, "/api/v3/user.json", token)
             if str(data.get("id")) != row.external_account_id:
                 raise ValueError("Токен VK больше не соответствует подключенному кабинету")
-            metrics = await run_in_threadpool(_vk_metrics, token)
+            metrics = await run_in_threadpool(_vk_metrics, token, recent_days)
         elif row.platform == "meta":
-            metrics = await run_in_threadpool(_meta_metrics, row)
+            metrics = await run_in_threadpool(_meta_metrics, row, recent_days)
         elif row.platform in avito.PLATFORMS:
             metrics = await avito.metrics(db, row)
         else:
-            metrics = await run_in_threadpool(_yandex_metrics, row)
+            metrics = await run_in_threadpool(_yandex_metrics, row, recent_days)
         await store_metrics(db, row, metrics)
         row.status = "connected"; row.last_error = None; row.last_synced_at = datetime.now(timezone.utc)
         await db.commit()

@@ -71,7 +71,26 @@ class AdminOpsTests(unittest.TestCase):
         engine_sessions = self.sessions
         with patch("app.db.SessionLocal", engine_sessions), patch("app.api.routes.marketing.sync_core", AsyncMock(return_value={"ok": True})) as sync:
             self.assertEqual(asyncio.run(ad_sync.run_once()), 1)
-        self.assertEqual(sync.await_args.args[1], 11)
+        self.assertEqual(sync.await_args.args[1:], (11, None))  # first sync takes the whole history
+
+    def test_lead_triggers_cabinet_refresh(self):
+        from app.models.marketing import ClientLead, ClientLeadAttribution
+        now = datetime.now(timezone.utc)
+        async def seed(db):
+            db.add(AdConnection(id=11, workspace_id=1, project_id=1, platform="yandex", name="Директ", external_account_id="romax",
+                                access_token_encrypted="x", status="connected", last_synced_at=now - timedelta(minutes=40)))
+            db.add(AdConnection(id=12, workspace_id=1, project_id=1, platform="vk_ads", name="VK", external_account_id="v",
+                                access_token_encrypted="x", status="connected", last_synced_at=now - timedelta(minutes=5)))
+            for cid in (11, 12):
+                lead = ClientLead(workspace_id=1, project_id=1, full_name="Анна", status="new", source="Директ")
+                db.add(lead); await db.flush()
+                db.add(ClientLeadAttribution(lead_id=lead.id, connection_id=cid))
+            await db.commit()
+        self.run_db(seed)
+        self.assertEqual(self.run_db(ad_sync.lead_driven), [11])  # VK synced 5 minutes ago — waits for the 15-minute window
+        with patch("app.db.SessionLocal", self.sessions), patch("app.api.routes.marketing.sync_core", AsyncMock(return_value={"ok": True})) as sync:
+            asyncio.run(ad_sync.run_once())
+        self.assertIn((11, ad_sync.LEAD_DAYS), [c.args[1:] for c in sync.await_args_list])
 
 
 del Base
