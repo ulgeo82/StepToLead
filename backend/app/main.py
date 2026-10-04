@@ -33,6 +33,13 @@ async def lifespan(_: FastAPI):
     telephony_worker = asyncio.create_task(run_telephony_worker())
     watchdog = asyncio.create_task(run_watchdog())
     ad_sync = asyncio.create_task(run_ad_sync())
+    from app.services import monitor
+    monitor.install()
+    for name, task in (("Рассылки Telegram", runner), ("Сбор контактов", parser_worker), ("Авито", avito_worker),
+                       ("Автоматизации CRM", crm_worker), ("Переписки", messaging_worker), ("Телефония", telephony_worker),
+                       ("Контроль заявок и отчёты", watchdog), ("Обновление рекламы", ad_sync)):
+        monitor.register(name, task)
+    monitor_worker = asyncio.create_task(monitor.run_worker())
     try:
         yield
     finally:
@@ -44,8 +51,11 @@ async def lifespan(_: FastAPI):
         telephony_worker.cancel()
         watchdog.cancel()
         ad_sync.cancel()
+        monitor_worker.cancel()
         with suppress(asyncio.CancelledError):
             await ad_sync
+        with suppress(asyncio.CancelledError):
+            await monitor_worker
         with suppress(asyncio.CancelledError):
             await runner
         with suppress(asyncio.CancelledError):
@@ -81,4 +91,18 @@ app.include_router(api_router, prefix="/api")
 
 @app.get("/health")
 async def health():
+    return {"status": "ok"}
+
+
+@app.get("/api/health")
+async def public_health():
+    """For an external uptime monitor (reachable through Caddy → Next): fails when the database is down."""
+    from sqlalchemy import text
+    from app.db import SessionLocal
+    try:
+        async with SessionLocal() as db:
+            await db.execute(text("SELECT 1"))
+    except Exception:
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"status": "error", "database": "unavailable"}, status_code=503)
     return {"status": "ok"}

@@ -281,6 +281,69 @@ async def change_password(payload: PasswordChange, request: Request, db: AsyncSe
     return {"ok": True}
 
 
+class ResetStart(BaseModel):
+    username: str = Field(min_length=1, max_length=254)
+
+
+class ResetFinish(BaseModel):
+    username: str = Field(min_length=1, max_length=254)
+    code: str = Field(min_length=6, max_length=6, pattern=r"^\d{6}$")
+    new_password: str = Field(min_length=12, max_length=256)
+
+
+RESET_TTL = timedelta(minutes=15)
+RESET_ATTEMPTS = 5
+RESET_GENERIC = ("Если к этому логину подключён Telegram, бот StepToLead прислал код на 15 минут. "
+                 "Telegram не подключён — попросите руководителя или ваше агентство сбросить пароль.")
+
+
+@auth_router.post("/reset/start")
+async def reset_start(payload: ResetStart, request: Request, db: AsyncSession = Depends(get_db)):
+    """Self-service reset: a one-time code to the user's Telegram. The answer never tells whether the login exists."""
+    check_origin(request)
+    await rate_limit(request, "portal-reset", 6, 900)
+    username = payload.username.strip().lower()
+    user = await db.scalar(select(PortalUser).where(PortalUser.username == username))
+    from app.services.notifications import telegram_api, telegram_configured
+    if user and user.active and user.telegram_chat_id and telegram_configured():
+        code = f"{secrets.randbelow(1_000_000):06d}"
+        user.reset_code_hash = token_digest(f"{user.id}:{code}")
+        user.reset_expires_at = datetime.now(timezone.utc) + RESET_TTL
+        user.reset_attempts = 0
+        await db.commit()
+        try:
+            await telegram_api("sendMessage", {"chat_id": user.telegram_chat_id, "parse_mode": "HTML", "text":
+                f"Код для смены пароля StepToLead: <b>{code}</b>\nДействует 15 минут. Если это были не вы — просто проигнорируйте сообщение."})
+        except Exception:
+            pass  # same answer either way
+    return {"ok": True, "message": RESET_GENERIC}
+
+
+@auth_router.post("/reset/finish")
+async def reset_finish(payload: ResetFinish, request: Request, db: AsyncSession = Depends(get_db)):
+    check_origin(request)
+    await rate_limit(request, "portal-reset-finish", 20, 900)
+    user = await db.scalar(select(PortalUser).where(PortalUser.username == payload.username.strip().lower()))
+    expires = user.reset_expires_at if user else None
+    if expires is not None and expires.tzinfo is None:
+        expires = expires.replace(tzinfo=timezone.utc)
+    if not user or not user.active or not user.reset_code_hash or not expires or expires < datetime.now(timezone.utc):
+        raise HTTPException(422, "Код устарел или не запрашивался — запросите новый")
+    if not secrets.compare_digest(user.reset_code_hash, token_digest(f"{user.id}:{payload.code}")):
+        user.reset_attempts = int(user.reset_attempts or 0) + 1
+        if user.reset_attempts >= RESET_ATTEMPTS:
+            user.reset_code_hash = user.reset_expires_at = None
+        await db.commit()
+        raise HTTPException(422, "Неверный код" + ("" if user.reset_code_hash else " — попытки закончились, запросите новый код"))
+    user.password_hash = await run_in_threadpool(hash_password, payload.new_password)
+    user.must_change_password = False
+    user.reset_code_hash = user.reset_expires_at = None
+    user.reset_attempts = 0
+    await db.execute(delete(PortalSession).where(PortalSession.user_id == user.id))  # sign out everywhere
+    await db.commit()
+    return {"ok": True}
+
+
 @admin_router.get("/users")
 async def list_users(workspace_id: int | None = None, db: AsyncSession = Depends(get_db)):
     query = select(PortalUser, ClientWorkspace.name).join(ClientWorkspace).order_by(ClientWorkspace.name, PortalUser.display_name)

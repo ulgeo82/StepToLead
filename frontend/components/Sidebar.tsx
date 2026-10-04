@@ -14,6 +14,7 @@ const mainNavigation = [
   { label: "Сбор контактов", href: "/admin/parser", icon: "07" },
   { label: "Прокси", href: "/admin/proxies", icon: "08" },
   { label: "Заявки роста", href: "/admin/growth-leads", icon: "09" },
+  { label: "Мониторинг", href: "/admin/monitor", icon: "10" },
 ];
 
 const futureNavigation = [

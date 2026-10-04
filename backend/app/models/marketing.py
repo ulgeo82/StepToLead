@@ -137,6 +137,10 @@ class PortalUser(Base):
     telegram_username: Mapped[str | None] = mapped_column(String(64))
     telegram_link_code_hash: Mapped[str | None] = mapped_column(String(64))
     telegram_link_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Self-service password reset: one-time code sent by the Telegram bot.
+    reset_code_hash: Mapped[str | None] = mapped_column(String(64))
+    reset_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reset_attempts: Mapped[int] = mapped_column(default=0)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     must_change_password: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

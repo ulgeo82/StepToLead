@@ -106,3 +106,20 @@
 .deletedClientRow{display:grid;grid-template-columns:auto 1fr auto;gap:14px;align-items:center;padding:12px 0;border-top:1px solid var(--line)}
 .deletedClientRow strong{font-size:13px}.deletedClientRow span{color:#92949c;font-size:10px}
 @media(max-width:480px){.clientWorkspaceHead{grid-template-columns:42px 1fr auto}.deletedClientRow{grid-template-columns:1fr}}
+.monitorStatus{padding:18px 22px;display:flex;flex-direction:column;gap:4px;margin-bottom:14px}
+.monitorStatus b{font-size:18px}.monitorStatus span{color:#777a82;font-size:11px}
+.monitorStatus.good{border-color:#cfe5b2;background:#f4faeb}.monitorStatus.good b{color:#3f6b1f}
+.monitorStatus.bad{border-color:#efc9c0;background:#fff4f1}.monitorStatus.bad b{color:#a04b3e}
+.monitorList{padding:6px 20px;margin-bottom:14px}
+.monitorList article{display:grid;grid-template-columns:28px 1fr;gap:12px;padding:14px 0;border-bottom:1px solid var(--line)}
+.monitorList article:last-child{border-bottom:0}
+.monitorList i{width:26px;height:26px;display:grid;place-items:center;border-radius:8px;background:#fae2dc;color:#a04b3e;font-style:normal;font-weight:800}
+.monitorList strong{font-size:13px}.monitorList small{display:block;margin-top:3px;color:#8e9098;font-size:10px}
+.monitorList p{margin:6px 0 0;color:#6a6d75;font-size:11px;white-space:pre-wrap;overflow-wrap:anywhere}
+.monitorGrid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.monitorBox{padding:20px}.monitorBox h2{margin:2px 0 10px;font-size:18px}.monitorBox p{font-size:12px;line-height:1.5}
+.monitorActions{display:flex;gap:8px;flex-wrap:wrap}
+.monitorWorkers{list-style:none;margin:0 0 12px;padding:0;display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px}
+.monitorWorkers li{display:flex;gap:8px;align-items:center}.monitorWorkers li.ok i{color:#5c9a2b}.monitorWorkers li.bad i{color:#c8402e}
+.monitorWorkers i{font-style:normal;font-size:10px}
+@media(max-width:820px){.monitorGrid{grid-template-columns:1fr}}

@@ -79,6 +79,9 @@ async def _consume_updates(db: AsyncSession) -> None:
         code = text.split(maxsplit=1)[1] if " " in text else ""
         target = await db.scalar(select(PortalUser).where(
             PortalUser.telegram_link_code_hash == token_digest(code))) if code else None
+        if target is None and code:  # agency admin linking failure alerts (routes/monitor.py)
+            from app.models.access import AdminUser
+            target = await db.scalar(select(AdminUser).where(AdminUser.telegram_link_code_hash == token_digest(code)))
         expires = target.telegram_link_expires_at if target else None
         if expires is not None and expires.tzinfo is None:
             expires = expires.replace(tzinfo=timezone.utc)
@@ -89,7 +92,8 @@ async def _consume_updates(db: AsyncSession) -> None:
             target.telegram_username = (message.get("from") or {}).get("username")
             target.telegram_link_code_hash = None
             target.telegram_link_expires_at = None
-            reply = f"Готово! {target.display_name}, сюда будут приходить уведомления StepToLead."
+            reply = (f"Готово! {target.display_name}, сюда будут приходить уведомления StepToLead." if isinstance(target, PortalUser)
+                     else "Готово! Сюда будут приходить уведомления о сбоях портала StepToLead.")
         try:
             await telegram_api("sendMessage", {"chat_id": chat["id"], "text": reply})
         except Exception as exc:

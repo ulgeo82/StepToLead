@@ -22,7 +22,7 @@ def upgrade_existing_schema(connection):
                            "vk_refresh_token_encrypted": "TEXT", "vk_access_expires_at": "TIMESTAMP WITH TIME ZONE",
                            "config": "JSON"},
         "ad_hypotheses": {"project_id": "INTEGER REFERENCES projects(id)"},
-        "portal_users": {"manage_sources": "BOOLEAN NOT NULL DEFAULT false",
+        "portal_users": {"reset_code_hash": "VARCHAR(64)", "reset_expires_at": "TIMESTAMP WITH TIME ZONE", "reset_attempts": "INTEGER NOT NULL DEFAULT 0", "manage_sources": "BOOLEAN NOT NULL DEFAULT false",
                          "manage_integrations": "BOOLEAN NOT NULL DEFAULT false",
                          "phone": "VARCHAR(64)", "permissions": "JSON", "last_activity_at": "TIMESTAMP WITH TIME ZONE",
                          "telegram_chat_id": "VARCHAR(32)", "telegram_username": "VARCHAR(64)",
@@ -61,6 +61,8 @@ def upgrade_existing_schema(connection):
                              "form_succeeded": "BOOLEAN NOT NULL DEFAULT false",
                              "click_type": "VARCHAR(12)", "ym_client_id": "VARCHAR(32)"},
         "calls": {"ai_status": "VARCHAR(12)"},
+        "admin_users": {"telegram_chat_id": "VARCHAR(32)", "telegram_username": "VARCHAR(64)",
+                        "telegram_link_code_hash": "VARCHAR(64)", "telegram_link_expires_at": "TIMESTAMP WITH TIME ZONE"},
         "website_sites": {"widget": "JSON"},
     }
     for table, additions in columns.items():

@@ -12,6 +12,11 @@ class AdminUser(Base):
     username: Mapped[str] = mapped_column(String(254), unique=True)
     password_hash: Mapped[str] = mapped_column(Text)
     role: Mapped[str] = mapped_column(String(30), default="admin")
+    # Failure alerts of the whole installation (services/monitor.py) go to this Telegram chat.
+    telegram_chat_id: Mapped[str | None] = mapped_column(String(32))
+    telegram_username: Mapped[str | None] = mapped_column(String(64))
+    telegram_link_code_hash: Mapped[str | None] = mapped_column(String(64))
+    telegram_link_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class AdminSession(Base):
