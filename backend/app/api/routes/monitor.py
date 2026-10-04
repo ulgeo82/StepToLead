@@ -45,11 +45,6 @@ async def link(request: Request, db: AsyncSession = Depends(get_db), admin: Admi
 @router.post("/telegram/check")
 async def check(request: Request, db: AsyncSession = Depends(get_db), admin: AdminUser = Depends(require_admin)):
     check_origin(request)
-    from app.api.routes.telegram_bot import _consume_updates
-    try:
-        await _consume_updates(db)
-    except Exception as exc:
-        raise HTTPException(502, f"Не удалось получить ответ от Telegram: {exc}") from None
     await db.refresh(admin)
     return telegram_state(admin)
 

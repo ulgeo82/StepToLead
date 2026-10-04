@@ -85,6 +85,10 @@ async def validate_required_fields(db: AsyncSession, project_id: int, keys: list
 
 
 async def project_for(db: AsyncSession, user: PortalUser, project_id: int):
+    from app.models.marketing import ClientWorkspace
+    workspace = await db.get(ClientWorkspace, user.workspace_id)
+    if not user.active or not workspace or workspace.status == "deleted":
+        raise HTTPException(403, "Доступ отключён")
     project = await db.get(Project, project_id)
     if not project or project.workspace_id != user.workspace_id:
         raise HTTPException(404, "Проект не найден")
@@ -687,9 +691,10 @@ async def create_deal(payload: DealCreate, request: Request, db: AsyncSession = 
                                    created_at=payload.created_at)
     if payload.comment:
         activity(db, deal, user, "COMMENT_ADDED", {"text": payload.comment})
+    from app.services.tg_preferences import lead_buttons
     await notify(db, project.id, "new_lead", "Новый лид", f"{contact.name} · создан вручную ({user.display_name})",
                  assignee_id=deal.responsible_user_id, actor_id=user.id,
-                 details=[*(contact.phones or [])[:1], *(contact.emails or [])[:1]])
+                 details=[*(contact.phones or [])[:1], *(contact.emails or [])[:1]], reply_markup=lead_buttons(deal_id=deal.id))
     await db.commit(); await db.refresh(deal)
     flush_telegram(db)
     return {"id": deal.id, "lead_id": deal.lead_id, "potential_duplicates": duplicates}
@@ -746,7 +751,12 @@ async def deal_by_lead(lead_id: int, db: AsyncSession = Depends(get_db),
 @router.patch("/deals/{deal_id}")
 async def update_deal(deal_id: int, payload: DealUpdate, request: Request, db: AsyncSession = Depends(get_db),
                       user: PortalUser = Depends(require_portal_user)):
-    check_origin(request); require_permission(user, "edit_deal")
+    check_origin(request)
+    return await update_deal_core(deal_id, payload, db, user)
+
+
+async def update_deal_core(deal_id: int, payload: DealUpdate, db: AsyncSession, user: PortalUser, *, commit: bool = True):
+    require_permission(user, "edit_deal")
     deal = await deal_for(db, user, deal_id)
     changes = payload.model_dump(exclude_unset=True)
     if "source_id" in changes and changes["source_id"] != deal.source_id:
@@ -781,7 +791,8 @@ async def update_deal(deal_id: int, payload: DealUpdate, request: Request, db: A
                     attribution.hypothesis_id = None
                     attribution.external_campaign_id = None
                     attribution.external_ad_id = None
-    await db.commit()
+    if commit:
+        await db.commit()
     return {"ok": True}
 
 
@@ -901,8 +912,13 @@ class QualityIn(BaseModel):
 @router.post("/deals/{deal_id}/quality")
 async def set_quality(deal_id: int, payload: QualityIn, request: Request, db: AsyncSession = Depends(get_db),
                       user: PortalUser = Depends(require_portal_user)):
+    check_origin(request)
+    return await set_quality_core(deal_id, payload, db, user)
+
+
+async def set_quality_core(deal_id: int, payload: QualityIn, db: AsyncSession, user: PortalUser, *, commit: bool = True):
     """Целевой / нецелевой: feedback from sales to the marketer, counted per campaign in analytics."""
-    check_origin(request); require_permission(user, "edit_deal")
+    require_permission(user, "edit_deal")
     deal = await deal_for(db, user, deal_id)
     lead = await db.get(ClientLead, deal.lead_id) if deal.lead_id else None
     if lead is None:
@@ -914,7 +930,8 @@ async def set_quality(deal_id: int, payload: QualityIn, request: Request, db: As
     text = {"target": "Заявка отмечена как целевая", "non_target": f"Заявка нецелевая: {lead.quality_reason}",
             None: "Отметка качества снята"}[payload.quality]
     activity(db, deal, user, "QUALITY_CHANGED", {"quality": payload.quality, "reason": lead.quality_reason, "text": text})
-    await db.commit()
+    if commit:
+        await db.commit()
     return {"quality": lead.quality, "quality_reason": lead.quality_reason}
 
 
@@ -1050,8 +1067,13 @@ async def accept_core(db: AsyncSession, inbound: CrmInbound, project: Project, a
 @router.post("/inbound/{inbound_id}/accept")
 async def accept_inbound(inbound_id: int, payload: InboundAction, request: Request,
                          db: AsyncSession = Depends(get_db), user: PortalUser = Depends(require_portal_user)):
-    check_origin(request); require_permission(user, "create_deal")
-    inbound = await db.get(CrmInbound, inbound_id)
+    check_origin(request)
+    return await accept_inbound_core(inbound_id, payload, db, user)
+
+
+async def accept_inbound_core(inbound_id: int, payload: InboundAction, db: AsyncSession, user: PortalUser, *, commit: bool = True):
+    require_permission(user, "create_deal")
+    inbound = await db.get(CrmInbound, inbound_id, with_for_update=True)
     if not inbound or inbound.workspace_id != user.workspace_id:
         raise HTTPException(404, "Заявка не найдена")
     project = await project_for(db, user, inbound.project_id)
@@ -1060,8 +1082,9 @@ async def accept_inbound(inbound_id: int, payload: InboundAction, request: Reque
     await validate_owner(db, project.id, project.workspace_id, payload.responsible_user_id)
     deal = await accept_core(db, inbound, project, user, contact_id=payload.contact_id,
                              responsible_user_id=payload.responsible_user_id, deal_name=payload.deal_name)
-    await db.commit()
-    flush_telegram(db)
+    if commit:
+        await db.commit()
+        flush_telegram(db)
     return {"deal_id": deal.id, "contact_id": deal.contact_id, "lead_id": deal.lead_id}
 
 
@@ -1121,7 +1144,12 @@ async def tasks(project_id: int, status: str | None = None, responsible_user_id:
 @router.post("/tasks", status_code=201)
 async def create_task(payload: TaskCreate, request: Request, db: AsyncSession = Depends(get_db),
                       user: PortalUser = Depends(require_portal_user)):
-    check_origin(request); require_permission(user, "manage_tasks")
+    check_origin(request)
+    return await create_task_core(payload, db, user)
+
+
+async def create_task_core(payload: TaskCreate, db: AsyncSession, user: PortalUser, *, commit: bool = True):
+    require_permission(user, "manage_tasks")
     project = await project_for(db, user, payload.project_id)
     deal = await deal_for(db, user, payload.deal_id) if payload.deal_id else None
     if deal and deal.project_id != project.id:
@@ -1144,14 +1172,27 @@ async def create_task(payload: TaskCreate, request: Request, db: AsyncSession = 
                    duration_minutes=payload.duration_minutes, priority=payload.priority, created_by_id=user.id)
     db.add(task); await db.flush()
     if deal: activity(db, deal, user, "TASK_CREATED", {"task_id": task.id, "title": task.title})
-    await db.commit()
+    from app.services.notifications import direct
+    from app.services.tg_preferences import task_buttons
+    owner = await db.get(PortalUser, owner_id) if owner_id else None
+    if owner:
+        direct(db, project.workspace_id, [owner.id], "Новая задача", task.title, {owner.id: owner},
+               reply_markup=task_buttons(task.id, task.deal_id), project_id=project.id)
+    if commit:
+        await db.commit()
+        flush_telegram(db)
     return task_json(task)
 
 
 @router.post("/tasks/{task_id}/complete")
 async def complete_task(task_id: int, payload: TaskComplete, request: Request,
                         db: AsyncSession = Depends(get_db), user: PortalUser = Depends(require_portal_user)):
-    check_origin(request); require_permission(user, "manage_tasks")
+    check_origin(request)
+    return await complete_task_core(task_id, payload, db, user)
+
+
+async def complete_task_core(task_id: int, payload: TaskComplete, db: AsyncSession, user: PortalUser, *, commit: bool = True):
+    require_permission(user, "manage_tasks")
     task = await db.get(CrmTask, task_id)
     if not task or task.workspace_id != user.workspace_id:
         raise HTTPException(404, "Задача не найдена")
@@ -1175,16 +1216,29 @@ async def complete_task(task_id: int, payload: TaskComplete, request: Request,
                             contact_id=task.contact_id, type_code=follow.type_code, title=follow.title,
                             responsible_user_id=owner_id, due_at=follow.due_at, created_by_id=user.id)
         db.add(next_task); await db.flush()
+        from app.services.notifications import direct
+        from app.services.tg_preferences import task_buttons
+        owner = await db.get(PortalUser, owner_id) if owner_id else None
+        if owner:
+            direct(db, task.workspace_id, [owner.id], "Новая задача", next_task.title, {owner.id: owner},
+                   reply_markup=task_buttons(next_task.id, next_task.deal_id), project_id=task.project_id)
         if deal:
             activity(db, deal, user, "TASK_CREATED", {"task_id": next_task.id, "title": next_task.title}, touch=False)
-    await db.commit()
+    if commit:
+        await db.commit()
+        flush_telegram(db)
     return {"ok": True, "next_task": task_json(next_task) if next_task else None}
 
 
 @router.patch("/tasks/{task_id}")
 async def update_task(task_id: int, payload: TaskUpdate, request: Request,
                       db: AsyncSession = Depends(get_db), user: PortalUser = Depends(require_portal_user)):
-    check_origin(request); require_permission(user, "manage_tasks")
+    check_origin(request)
+    return await update_task_core(task_id, payload, db, user)
+
+
+async def update_task_core(task_id: int, payload: TaskUpdate, db: AsyncSession, user: PortalUser, *, commit: bool = True):
+    require_permission(user, "manage_tasks")
     task = await db.get(CrmTask, task_id)
     if not task or task.workspace_id != user.workspace_id:
         raise HTTPException(404, "Задача не найдена")
@@ -1210,7 +1264,8 @@ async def update_task(task_id: int, payload: TaskUpdate, request: Request,
         deal = await deal_for(db, user, task.deal_id)
         activity(db, deal, user, "TASK_UPDATED", {"task_id": task.id, "old": old,
                                                   "new": {key: serializable(value) for key, value in changes.items()}})
-    await db.commit()
+    if commit:
+        await db.commit()
     return task_json(task)
 
 

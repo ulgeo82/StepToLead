@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { api, API_URL } from "@/lib/api";
 import { money, ProjectSidebar } from "@/components/reporting";
@@ -74,6 +74,7 @@ export default function CrmPage() {
   const can = useCallback((name: string) => permissions.includes(name), [permissions]);
   const project = projects.find(p => p.id === projectId);
   const refresh = useCallback(() => setRevision(v => v + 1), []);
+  const deepLinkOpened = useRef(false);
   const currentPipelineId = pipelineId || board?.pipeline.id || pipelines[0]?.id || null;
   const currentPipeline = pipelines.find(p => p.id === currentPipelineId);
 
@@ -123,9 +124,19 @@ export default function CrmPage() {
       .then(b => { if (active) { setBoard(b); setSelectedIds([]); } }).catch(e => active && setError(e.message)), 200);
     return () => { active = false; clearTimeout(timer); };
   }, [projectId, boardQuery, revision]);
-  useEffect(() => { if (!projectId) return;
+  useEffect(() => { if (!projectId || deepLinkOpened.current) return;
+    let active = true;
     const leadId = Number(new URLSearchParams(window.location.search).get("lead_id"));
-    if (leadId > 0) api<{ deal_id: number }>(`/crm/leads/${leadId}/deal`).then(row => setDealId(row.deal_id)).catch(() => {});
+    const directDealId = Number(new URLSearchParams(window.location.search).get("deal"));
+    if (directDealId > 0) api<{ project_id: number }>(`/crm/deals/${directDealId}`).then(row => {
+      if (!active) return;
+      if (row.project_id !== projectId) { setProjectId(row.project_id); return; }
+      deepLinkOpened.current = true; setDealId(directDealId);
+    }).catch(e => active && setError((e as Error).message));
+    else if (leadId > 0) api<{ deal_id: number }>(`/crm/leads/${leadId}/deal`).then(row => {
+      if (active) { deepLinkOpened.current = true; setDealId(row.deal_id); }
+    }).catch(() => {});
+    return () => { active = false; };
   }, [projectId]);
   useEffect(() => { if (!projectId) return; let active = true;
     if (tab === "contacts") { const q = new URLSearchParams({ limit: "100" }); if (contactSearch.trim()) q.set("search", contactSearch.trim());

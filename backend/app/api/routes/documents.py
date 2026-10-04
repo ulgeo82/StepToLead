@@ -275,7 +275,7 @@ async def public_document(token: str, request: Request, db: AsyncSession = Depen
                     owner = await db.get(PortalUser, deal.responsible_user_id)
                     if owner:
                         notify_direct(db, deal.workspace_id, [owner.id], "Клиент открыл документ", f"{label} · {deal.name}",
-                                      {owner.id: owner})
+                                      {owner.id: owner}, project_id=deal.project_id)
         await db.commit()
         flush_telegram(db)
     return HTMLResponse(await render_doc(db, doc, public=True),

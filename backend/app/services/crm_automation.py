@@ -105,10 +105,15 @@ async def execute(db: AsyncSession, rule: CrmAutomation, deal: CrmDeal) -> str |
         if owner_id not in users:
             owner_id = deal.responsible_user_id if deal.responsible_user_id in users else None
         due = _now() + timedelta(minutes=max(0, int(params.get("due_minutes") or 15)))
-        db.add(CrmTask(workspace_id=deal.workspace_id, project_id=deal.project_id, deal_id=deal.id,
+        task = CrmTask(workspace_id=deal.workspace_id, project_id=deal.project_id, deal_id=deal.id,
                        contact_id=deal.contact_id, type_code=params.get("type_code") if params.get("type_code") in TASK_TYPES else "CALL",
                        title=title, description=params.get("description"), responsible_user_id=owner_id,
-                       due_at=due, priority=params.get("priority") if params.get("priority") in {"LOW", "NORMAL", "HIGH"} else "NORMAL"))
+                       due_at=due, priority=params.get("priority") if params.get("priority") in {"LOW", "NORMAL", "HIGH"} else "NORMAL")
+        db.add(task); await db.flush()
+        if owner_id:
+            from app.services.tg_preferences import task_buttons
+            notify_direct(db, deal.workspace_id, [owner_id], "Новая задача", title, users,
+                          reply_markup=task_buttons(task.id, deal.id), project_id=deal.project_id)
         text = f"Создана задача «{title}»"
     elif rule.action == "SET_RESPONSIBLE":
         candidates = [int(uid) for uid in (params.get("user_ids") or []) if int(uid) in users]
@@ -126,7 +131,7 @@ async def execute(db: AsyncSession, rule: CrmAutomation, deal: CrmDeal) -> str |
         if lead:
             lead.assigned_to_id = target
         text = f"Ответственный: {users[target].display_name}"
-        notify_direct(db, deal.workspace_id, [target], "Вам назначена сделка", deal.name, users)
+        notify_direct(db, deal.workspace_id, [target], "Вам назначена сделка", deal.name, users, project_id=deal.project_id)
     elif rule.action == "ADD_TAG":
         tag = normalize_tags([params.get("tag")])
         if not tag or tag[0].casefold() in {t.casefold() for t in deal.tags or []}:
@@ -141,7 +146,7 @@ async def execute(db: AsyncSession, rule: CrmAutomation, deal: CrmDeal) -> str |
         if to in {"heads", "owner_and_heads"} or not recipients:
             recipients |= {uid for uid, user in users.items() if user.role in {"client_owner", "sales_head"}}
         body = str(params.get("text") or rule.name)[:500]
-        notify_direct(db, deal.workspace_id, sorted(recipients), body, deal.name, users)
+        notify_direct(db, deal.workspace_id, sorted(recipients), body, deal.name, users, project_id=deal.project_id)
         text = f"Уведомление: {body}"
     if text:
         activity(db, deal, None, "AUTOMATION", {"rule_id": rule.id, "rule": rule.name, "text": text}, touch=False)

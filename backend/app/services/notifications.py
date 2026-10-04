@@ -8,12 +8,14 @@ Telegram messages are queued on the DB session and sent only after commit via
 import asyncio
 import html
 import logging
+import time
 
 import httpx
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.services.tg_preferences import allowed, bounded_html, private_text
 from app.models.marketing import PortalNotification, PortalProjectAccess, PortalUser, Project, ProjectNotificationRule
 
 logger = logging.getLogger("uvicorn.error.notifications")
@@ -65,7 +67,8 @@ def rule_state(event_key: str, row: ProjectNotificationRule | None) -> dict:
 
 
 async def notify(db: AsyncSession, project_id: int | None, event_key: str, title: str, body: str, *,
-                 assignee_id: int | None = None, actor_id: int | None = None, details: list[str] | None = None) -> int:
+                 assignee_id: int | None = None, actor_id: int | None = None, details: list[str] | None = None,
+                 reply_markup: dict | None = None) -> int:
     """Create notifications for an event. Returns the number of recipients. Call before commit."""
     if not project_id or event_key not in EVENTS or not EVENTS[event_key]["active"]:
         return 0
@@ -95,32 +98,87 @@ async def notify(db: AsyncSession, project_id: int | None, event_key: str, title
             db.add(PortalNotification(workspace_id=project.workspace_id, user_id=user.id, level="success",
                                       title=title[:180], body=body))
             push.queue(db, user.id, title, body, f"/crm?project_id={project.id}")
-        if state["telegram"] and telegram_configured() and user.telegram_chat_id:
-            lines = [f"<b>{html.escape(title)}</b> · {html.escape(project.name)}", html.escape(body)]
-            lines += [html.escape(line) for line in details or [] if line]
-            db.sync_session.info.setdefault(PENDING_KEY, []).append((user.telegram_chat_id, "\n".join(lines)))
+        if state["telegram"] and telegram_configured() and user.telegram_chat_id and allowed(user, event_key, project.timezone):
+            lines = [f"<b>{html.escape(private_text(user, title))}</b> · {html.escape(project.name)}", html.escape(private_text(user, body))]
+            lines += [html.escape(private_text(user, line)) for line in details or [] if line]
+            db.sync_session.info.setdefault(PENDING_KEY, []).append({"chat_id": user.telegram_chat_id,
+                "text": bounded_html("\n".join(lines)), "reply_markup": reply_markup, "user_id": user.id,
+                "event_key": event_key, "project_id": project.id})
     return len(recipients)
+
+
+class TelegramError(RuntimeError):
+    def __init__(self, code: int, retry_after: int = 0):
+        self.code, self.retry_after = code, retry_after
+        super().__init__(f"Telegram API error {code}")
+
+
+_api_lock = asyncio.Lock()
+_last_send = 0.0
+_chat_sent: dict[str, float] = {}
 
 
 async def telegram_api(method: str, payload: dict | None = None, timeout: float = 10) -> dict:
     if not telegram_configured():
         raise RuntimeError("TELEGRAM_BOT_TOKEN не задан")
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        response = await client.post(f"https://api.telegram.org/bot{settings.telegram_bot_token}/{method}",
-                                     json=payload or {})
-    data = response.json()
-    if not data.get("ok"):
-        raise RuntimeError(data.get("description") or f"Telegram API error {response.status_code}")
-    return data["result"]
-
-
-async def _send_all(messages: list[tuple[str, str]]) -> None:
-    for chat_id, text in messages:
+    global _last_send
+    for attempt in range(3):
+        if method in {"sendMessage", "editMessageText"}:
+            async with _api_lock:
+                chat = str((payload or {}).get("chat_id", ""))
+                await asyncio.sleep(max(0, .05 - (time.monotonic() - _last_send),
+                    1 - (time.monotonic() - _chat_sent.get(chat, 0))))
+                _last_send = _chat_sent[chat] = time.monotonic()
+                if len(_chat_sent) > 10000:
+                    _chat_sent.clear()
         try:
-            await telegram_api("sendMessage", {"chat_id": chat_id, "text": text, "parse_mode": "HTML",
-                                               "disable_web_page_preview": True})
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                response = await client.post(f"https://api.telegram.org/bot{settings.telegram_bot_token}/{method}", json=payload or {})
+                data = response.json()
+        except (httpx.HTTPError, ValueError):
+            raise TelegramError(502) from None
+        if data.get("ok"):
+            return data.get("result")
+        code = int(data.get("error_code", response.status_code))
+        delay = int((data.get("parameters") or {}).get("retry_after", 1))
+        if code == 429 and attempt < 2:
+            await asyncio.sleep(max(delay, 1))
+            continue
+        if code == 403 and (payload or {}).get("chat_id"):
+            from app.services.tg_bot import unlink_blocked
+            await unlink_blocked(payload["chat_id"])
+        raise TelegramError(code, delay if code == 429 else 0)
+
+
+async def _send_all(messages: list[dict]) -> None:
+    for message in messages:
+        try:
+            from app.db import SessionLocal
+            from app.models.marketing import ClientWorkspace
+            async with SessionLocal() as db:
+                user = await db.get(PortalUser, message["user_id"])
+                company = await db.get(ClientWorkspace, user.workspace_id) if user else None
+                project = await db.get(Project, message["project_id"]) if message.get("project_id") else None
+                if not user or not company or company.status == "deleted" or user.telegram_chat_id != message["chat_id"] or not allowed(user, message.get("event_key", "direct"), project.timezone if project else None):
+                    continue
+                if message.get("project_id"):
+                    if not project or project.workspace_id != user.workspace_id:
+                        continue
+                    if user.id not in {member.id for member in await project_members(db, project)}:
+                        continue
+                    event = message.get("event_key")
+                    if event in EVENTS:
+                        state = rule_state(event, await rule_for(db, project.id, event))
+                        if not state["enabled"] or not state["telegram"]:
+                            continue
+                message = {**message, "text": bounded_html(private_text(user, message["text"]))}
+            payload = {key: message[key] for key in ("chat_id", "text", "reply_markup") if message.get(key) is not None}
+            await telegram_api("sendMessage", {**payload, "parse_mode": "HTML", "disable_web_page_preview": True})
         except Exception as exc:  # Delivery is best-effort; the cabinet notification already exists.
-            logger.warning("telegram notification failed chat_id=%s error=%s", chat_id, exc)
+            if isinstance(exc, TelegramError) and exc.code == 403:
+                from app.services.tg_bot import unlink_blocked
+                await unlink_blocked(message["chat_id"])
+            logger.warning("telegram notification failed type=%s", type(exc).__name__)
 
 
 def flush_telegram(db: AsyncSession) -> None:
@@ -142,7 +200,8 @@ def discard_telegram(db: AsyncSession) -> None:
 
 
 def direct(db: AsyncSession, workspace_id: int, user_ids: list[int], title: str, body: str,
-           users: dict[int, PortalUser]) -> None:
+           users: dict[int, PortalUser], *, event_key: str = "direct", reply_markup: dict | None = None,
+           project_id: int | None = None) -> None:
     """Notify specific users (automation rules): cabinet notification + Telegram if linked. Call before commit."""
     for user_id in user_ids:
         user = users.get(user_id)
@@ -152,6 +211,8 @@ def direct(db: AsyncSession, workspace_id: int, user_ids: list[int], title: str,
                                   title=title[:180], body=body))
         from app.services import push
         push.queue(db, user.id, title, body)
-        if telegram_configured() and user.telegram_chat_id:
-            text = f"<b>{html.escape(title)}</b>\n{html.escape(body)}"
-            db.sync_session.info.setdefault(PENDING_KEY, []).append((user.telegram_chat_id, text))
+        if telegram_configured() and user.telegram_chat_id and allowed(user, event_key, check_quiet=not bool(project_id)):
+            text = f"<b>{html.escape(private_text(user, title))}</b>\n{html.escape(private_text(user, body))}"
+            db.sync_session.info.setdefault(PENDING_KEY, []).append({"chat_id": user.telegram_chat_id,
+                "text": bounded_html(text), "user_id": user.id, "event_key": event_key,
+                "project_id": project_id, "reply_markup": reply_markup})

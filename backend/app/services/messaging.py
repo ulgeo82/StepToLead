@@ -100,6 +100,10 @@ class TelegramBot:
         self.base = f"https://api.telegram.org/bot{secret(channel)}"
 
     async def call(self, method: str, payload: dict | None = None):
+        from app.core.config import settings
+        import secrets
+        if settings.telegram_bot_token and secrets.compare_digest(secret(self.channel).encode(), settings.telegram_bot_token.encode()):
+            raise ChannelError("Служебный бот StepToLead нельзя использовать для клиентской переписки")
         data = await _json("POST", f"{self.base}/{method}", json=payload or {})
         if not isinstance(data, dict) or not data.get("ok"):
             raise ChannelError(str((data or {}).get("description") or "Telegram отклонил запрос"))
@@ -406,7 +410,7 @@ async def ingest(db: AsyncSession, channel: MessagingChannel, item: Incoming) ->
             targets = [conversation.assigned_user_id] if conversation.assigned_user_id in people else \
                 [uid for uid, u in people.items() if u.role in {"client_owner", "sales_head"}]
             notify_direct(db, conversation.workspace_id, targets, f"Новое сообщение · {KINDS.get(channel.kind)}",
-                          f"{conversation.title}: {(item.get('text') or '')[:200]}", people)
+                          f"{conversation.title}: {(item.get('text') or '')[:200]}", people, project_id=conversation.project_id)
     else:
         conversation.waiting_since = None
     await db.flush()

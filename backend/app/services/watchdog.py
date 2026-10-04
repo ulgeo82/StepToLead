@@ -102,7 +102,8 @@ async def check_sla(db: AsyncSession) -> int:
         people = await project_people(db, project.id)
         if deal.responsible_user_id in people:
             direct(db, project.workspace_id, [deal.responsible_user_id], "Клиент ждёт ответа",
-                   f"{deal.name}: прошло {minutes} мин, а с клиентом ещё не связались", people)
+                   f"{deal.name}: прошло {minutes} мин, а с клиентом ещё не связались", people,
+                   event_key="lead_sla", project_id=project.id)
         await notify(db, project.id, "lead_sla", "Заявка без ответа", f"{deal.name} · {minutes} мин без ответа",
                      actor_id=deal.responsible_user_id)
         deal.automation_state = {**(deal.automation_state or {}), "sla_escalated": current.isoformat()}
@@ -121,7 +122,8 @@ async def check_sla(db: AsyncSession) -> int:
         people = await project_people(db, project.id)
         if conversation.assigned_user_id in people:
             direct(db, project.workspace_id, [conversation.assigned_user_id], "Клиент ждёт ответа в чате",
-                   f"{conversation.title}: {minutes} мин без ответа", people)
+                   f"{conversation.title}: {minutes} мин без ответа", people,
+                   event_key="lead_sla", project_id=project.id)
         await notify(db, project.id, "lead_sla", "Чат без ответа", f"{conversation.title} · {minutes} мин без ответа",
                      actor_id=conversation.assigned_user_id,
                      details=[f"Последнее сообщение: {conversation.last_message_preview}" if conversation.last_message_preview else None])

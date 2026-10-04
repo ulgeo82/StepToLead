@@ -438,8 +438,10 @@ async def link_crm(db: AsyncSession, conn: TelephonyConnection, call: Call) -> N
             if deal:
                 activity(db, deal, None, "TASK_CREATED", {"task_id": task.id, "title": task.title}, touch=False)
     targets = [responsible] if responsible else [uid for uid, u in people.items() if u.role in {"client_owner", "sales_head"}]
+    from app.services.tg_preferences import task_buttons
     notify_direct(db, call.workspace_id, targets, "Пропущенный звонок",
-                  f"{name + ' · ' if name else ''}{pretty_phone(digits)} — перезвоните клиенту", people)
+                  f"{name + ' · ' if name else ''}{pretty_phone(digits)} — перезвоните клиенту", people,
+                  project_id=call.project_id, reply_markup=task_buttons(call.task_id, call.deal_id) if call.task_id else None)
 
 
 async def handle(db: AsyncSession, conn: TelephonyConnection, kind: str, data: dict) -> Call | None:

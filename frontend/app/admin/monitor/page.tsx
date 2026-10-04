@@ -14,6 +14,20 @@ export default function MonitorPage() {
   const [waiting, setWaiting] = useState(false);
   const load = useCallback(() => api<Overview>("/admin/monitor").then(setData).catch(e => setError((e as Error).message)), []);
   useEffect(() => { load(); const t = setInterval(load, 60000); return () => clearInterval(t); }, [load]);
+  useEffect(() => {
+    if (!waiting) return;
+    let active = true; let pending = false; const started = Date.now();
+    const timer = setInterval(async () => {
+      if (Date.now() - started >= 120000) { clearInterval(timer); if (active) { setWaiting(false); setNotice("Проверка завершена. При необходимости подключите Telegram ещё раз."); } return; }
+      if (pending) return;
+      pending = true;
+      try {
+        const overview = await api<Overview>("/admin/monitor");
+        if (active) { setData(overview); if (overview.telegram.linked) { setWaiting(false); setNotice("Telegram подключён."); } }
+      } catch { /* retry while waiting */ } finally { pending = false; }
+    }, 3000);
+    return () => { active = false; clearInterval(timer); };
+  }, [waiting]);
   async function link() {
     setError(""); try { const r = await post("/admin/monitor/telegram/link"); if (r.url) window.open(r.url, "_blank", "noopener"); setWaiting(true); } catch (e) { setError((e as Error).message); }
   }

@@ -1,15 +1,12 @@
 """Link a portal user's Telegram to the notification bot.
 
-Flow without a public webhook: the cabinet creates a one-time code and opens
-t.me/<bot>?start=<code>; the user presses Start; the cabinet then calls /check,
-which reads pending bot updates (getUpdates) and binds the chat to the user.
+The worker services/tg_bot.py is the sole update consumer. /check only reads DB.
 """
 import logging
 import secrets
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.access import require_portal_user, token_digest
@@ -65,51 +62,9 @@ async def start_link(db: AsyncSession = Depends(get_db), user: PortalUser = Depe
     return {"url": f"https://t.me/{username}?start={code}", "expires_in": int(LINK_TTL.total_seconds())}
 
 
-async def _consume_updates(db: AsyncSession) -> None:
-    updates = await telegram_api("getUpdates", {"timeout": 0, "allowed_updates": ["message"]})
-    if not updates:
-        return
-    now = datetime.now(timezone.utc)
-    for update in updates:
-        message = update.get("message") or {}
-        text = (message.get("text") or "").strip()
-        chat = message.get("chat") or {}
-        if not text.startswith("/start") or chat.get("type") != "private":
-            continue
-        code = text.split(maxsplit=1)[1] if " " in text else ""
-        target = await db.scalar(select(PortalUser).where(
-            PortalUser.telegram_link_code_hash == token_digest(code))) if code else None
-        if target is None and code:  # agency admin linking failure alerts (routes/monitor.py)
-            from app.models.access import AdminUser
-            target = await db.scalar(select(AdminUser).where(AdminUser.telegram_link_code_hash == token_digest(code)))
-        expires = target.telegram_link_expires_at if target else None
-        if expires is not None and expires.tzinfo is None:
-            expires = expires.replace(tzinfo=timezone.utc)
-        if target is None or expires is None or expires < now:
-            reply = "Ссылка устарела или неверна. Нажмите «Подключить Telegram» в кабинете StepToLead ещё раз."
-        else:
-            target.telegram_chat_id = str(chat["id"])
-            target.telegram_username = (message.get("from") or {}).get("username")
-            target.telegram_link_code_hash = None
-            target.telegram_link_expires_at = None
-            reply = (f"Готово! {target.display_name}, сюда будут приходить уведомления StepToLead." if isinstance(target, PortalUser)
-                     else "Готово! Сюда будут приходить уведомления о сбоях портала StepToLead.")
-        try:
-            await telegram_api("sendMessage", {"chat_id": chat["id"], "text": reply})
-        except Exception as exc:
-            logger.warning("telegram reply failed: %s", exc)
-    await db.commit()
-    # Acknowledge processed updates so they are not read again.
-    await telegram_api("getUpdates", {"offset": max(u["update_id"] for u in updates) + 1, "timeout": 0})
-
-
 @router.post("/check")
 async def check_link(db: AsyncSession = Depends(get_db), user: PortalUser = Depends(require_portal_user)):
     _require_bot()
-    try:
-        await _consume_updates(db)
-    except Exception as exc:
-        raise HTTPException(502, f"Не удалось получить ответ от Telegram: {exc}") from None
     await db.refresh(user)
     return _status(user)
 

@@ -10,6 +10,7 @@ from app.models.marketing import LeadInboundReceipt, LeadInboundSource, Project,
 from app.models.website import WebsiteSession
 from app.services.notifications import flush_telegram, notify
 from app.services.project_scope import default_project
+from app.services.tg_preferences import lead_buttons
 
 
 async def create_inbound(db: AsyncSession, source: LeadInboundSource, payload,
@@ -99,7 +100,7 @@ async def create_inbound(db: AsyncSession, source: LeadInboundSource, payload,
         f"Email: {email}" if email and not raw_contact else None,
         f"Сайт: {extra.get('website')}" if extra.get("website") else None,
         f"Комментарий: {payload.notes[:500]}" if payload.notes else None,
-    ])
+    ], reply_markup=lead_buttons(inbound.id, deal.id if deal else None))
     if commit:
         await db.commit()
         flush_telegram(db)

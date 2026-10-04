@@ -88,6 +88,14 @@ class ChannelPatch(BaseModel):
     token: str | None = Field(default=None, max_length=500)
 
 
+def reject_notification_token(kind: str, token: str | None):
+    import secrets
+    from app.core.config import settings
+    if kind == "telegram_bot" and settings.telegram_bot_token and secrets.compare_digest(
+            (token or "").strip().encode(), settings.telegram_bot_token.encode()):
+        raise HTTPException(422, "Служебный бот StepToLead нельзя подключить как канал переписки")
+
+
 @router.get("/projects/{project_id}/channels")
 async def list_channels(project_id: int, db: AsyncSession = Depends(get_db), user: PortalUser = Depends(require_portal_user)):
     require_permission(user, "view_crm"); await project_for(db, user, project_id)
@@ -111,6 +119,7 @@ async def create_channel(project_id: int, payload: ChannelIn, request: Request, 
     if payload.kind not in messaging.KINDS:
         raise HTTPException(422, "Неизвестный тип канала")
     if payload.kind == "telegram_bot":
+        reject_notification_token(payload.kind, payload.token)
         await plans.require(db, project.workspace_id, "all_chats")
     config: dict = {}
     if payload.kind == "avito":
@@ -156,6 +165,7 @@ async def edit_channel(channel_id: int, payload: ChannelPatch, request: Request,
     await project_for(db, user, channel.project_id)
     if not can_manage_channels(user):
         raise HTTPException(403, "Настраивать каналы может руководитель или владелец")
+    reject_notification_token(channel.kind, payload.token)
     if payload.name: channel.name = payload.name.strip()
     if payload.active is not None: channel.active = payload.active
     if payload.token: channel.secret_encrypted = encrypt_secret(payload.token.strip())

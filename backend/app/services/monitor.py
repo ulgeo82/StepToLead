@@ -134,7 +134,7 @@ async def send(db: AsyncSession, text: str) -> int:
             await telegram_api("sendMessage", {"chat_id": chat, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True})
             sent += 1
         except Exception as exc:
-            logger.warning("monitor alert failed chat=%s: %s", chat, exc)
+            logger.warning("monitor alert failed type=%s", type(exc).__name__)
     return sent
 
 

@@ -195,12 +195,27 @@ function TelegramCard({ configured, onChanged }: { configured: boolean; onChange
   const [waiting, setWaiting] = useState(false);
   const [message, setMessage] = useState("");
   const call = async (path: string, method: string) => api<TelegramStatus>(`/portal/telegram${path}`, { method });
+  useEffect(() => {
+    if (!waiting) return;
+    let active = true; let pending = false;
+    const started = Date.now();
+    const timer = setInterval(async () => {
+      if (Date.now() - started >= 120000) { clearInterval(timer); if (active) { setWaiting(false); setMessage("Проверка завершена. Если Telegram не подключён, откройте ссылку ещё раз."); } return; }
+      if (pending) return;
+      pending = true;
+      try {
+        const next = await api<TelegramStatus>("/portal/telegram");
+        if (active) { setStatus(next); if (next.linked) { setWaiting(false); setMessage("Telegram подключён."); onChanged(); } }
+      } catch { /* keep checking until the timeout */ } finally { pending = false; }
+    }, 3000);
+    return () => { active = false; clearInterval(timer); };
+  }, [waiting]);
   useEffect(() => { api<TelegramStatus>("/portal/telegram").then(setStatus).catch(() => setStatus(null)); }, [configured]);
   async function run(name: string, action: () => Promise<void>) { setBusy(name); setMessage("");
     try { await action(); } catch (e) { setMessage((e as Error).message); } finally { setBusy(""); } }
   const link = () => run("link", async () => { const result = await api<{ url: string }>("/portal/telegram/link", { method: "POST" });
     window.open(result.url, "_blank", "noopener,noreferrer"); setWaiting(true);
-    setMessage("В Telegram нажмите «Запустить» (Start), затем вернитесь сюда и нажмите «Проверить»."); });
+    setMessage("В Telegram нажмите «Запустить» (Start). Подключение подтвердится здесь автоматически."); });
   const check = () => run("check", async () => { const next = await call("/check", "POST"); setStatus(next);
     if (next.linked) { setWaiting(false); setMessage("Telegram подключён."); onChanged(); }
     else setMessage("Бот пока не получил команду Start. Откройте ссылку ещё раз и нажмите «Запустить»."); });

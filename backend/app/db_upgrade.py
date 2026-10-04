@@ -27,7 +27,7 @@ def upgrade_existing_schema(connection):
                          "phone": "VARCHAR(64)", "permissions": "JSON", "last_activity_at": "TIMESTAMP WITH TIME ZONE",
                          "telegram_chat_id": "VARCHAR(32)", "telegram_username": "VARCHAR(64)",
                          "telegram_link_code_hash": "VARCHAR(64)",
-                         "telegram_link_expires_at": "TIMESTAMP WITH TIME ZONE"},
+                         "telegram_link_expires_at": "TIMESTAMP WITH TIME ZONE", "telegram_state": "JSON"},
         "project_notification_rules": {"telegram": "BOOLEAN NOT NULL DEFAULT false",
                                        "recipient_user_ids": "JSON",
                                        "notify_assignee": "BOOLEAN NOT NULL DEFAULT true"},
@@ -108,8 +108,8 @@ def upgrade_existing_schema(connection):
                 "WHERE workspace_id=:workspace_id AND project_id IS NULL"
             ), {"project_id": project_id, "workspace_id": workspace_id})
         connection.execute(text(
-            "INSERT INTO portal_project_access (user_id, project_id, manage_sources) "
-            "SELECT u.id, :project_id, u.manage_sources FROM portal_users u "
+            "INSERT INTO portal_project_access (user_id, project_id, manage_sources, manage_integrations) "
+            "SELECT u.id, :project_id, u.manage_sources, u.manage_integrations FROM portal_users u "
             "WHERE u.workspace_id=:workspace_id AND NOT EXISTS "
             "(SELECT 1 FROM portal_project_access a WHERE a.user_id=u.id AND a.project_id=:project_id)"
         ), {"project_id": project_id, "workspace_id": workspace_id})

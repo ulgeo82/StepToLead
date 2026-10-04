@@ -393,7 +393,12 @@ class DialIn(BaseModel):
 @router.post("/projects/{project_id}/calls/dial")
 async def dial(project_id: int, payload: DialIn, request: Request, db: AsyncSession = Depends(get_db),
                user: PortalUser = Depends(require_portal_user)):
-    check_origin(request); require_permission(user, "view_crm")
+    check_origin(request)
+    return await dial_core(project_id, payload, db, user)
+
+
+async def dial_core(project_id: int, payload: DialIn, db: AsyncSession, user: PortalUser):
+    require_permission(user, "view_crm")
     await project_for(db, user, project_id)
     if payload.deal_id:
         await deal_for(db, user, payload.deal_id)

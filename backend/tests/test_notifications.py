@@ -112,8 +112,8 @@ class NotificationRecipientTests(unittest.TestCase):
         with patch.object(notifications.settings, "telegram_bot_token", "123:abc"):
             count, ids, pending = self.fire(details=["Способ связи: WhatsApp"])
         self.assertEqual((count, ids), (2, []))
-        self.assertEqual([chat for chat, _ in pending], ["555"])
-        self.assertIn("WhatsApp", pending[0][1])
+        self.assertEqual([message["chat_id"] for message in pending], ["555"])
+        self.assertIn("WhatsApp", pending[0]["text"])
 
     def test_settings_api_validates_recipients(self):
         owner = self.client.post("/api/portal/admin/users", headers=self.origin, json={

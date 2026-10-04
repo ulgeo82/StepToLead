@@ -137,6 +137,7 @@ class PortalUser(Base):
     telegram_username: Mapped[str | None] = mapped_column(String(64))
     telegram_link_code_hash: Mapped[str | None] = mapped_column(String(64))
     telegram_link_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    telegram_state: Mapped[dict | None] = mapped_column(JSON)
     # Self-service password reset: one-time code sent by the Telegram bot.
     reset_code_hash: Mapped[str | None] = mapped_column(String(64))
     reset_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
