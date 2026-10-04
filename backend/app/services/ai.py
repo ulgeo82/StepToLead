@@ -70,7 +70,7 @@ async def complete(system: str, messages: list[dict], *, max_tokens: int = 500, 
             else:
                 headers = {"Authorization": f"Bearer {settings.llm_api_key}"}
                 if name == "yandex":
-                    base = YANDEX_URL
+                    base = (settings.llm_base_url or YANDEX_URL).rstrip("/")
                     model = settings.llm_model or f"gpt://{settings.yandex_folder_id}/yandexgpt/latest"
                     if settings.yandex_folder_id:
                         headers["OpenAI-Project"] = settings.yandex_folder_id
