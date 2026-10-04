@@ -18,9 +18,27 @@ router = APIRouter(prefix="/auth", tags=["access"])
 _dummy_hash = hash_password(secrets.token_urlsafe(32))
 
 
+def client_address(request: Request) -> str:
+    """The visitor's IP. Behind Caddy → Next the socket address is the frontend container for everyone, so the
+    real one comes from X-Real-IP, which Caddy sets from the TCP connection (deploy/Caddyfile, header_up) and the
+    visitor cannot forge. Trusted only when the request itself comes from the private network (our proxies)."""
+    import ipaddress
+    peer = request.client.host if request.client else "unknown"
+    try:
+        internal = ipaddress.ip_address(peer).is_private or ipaddress.ip_address(peer).is_loopback
+    except ValueError:
+        internal = False
+    real = (request.headers.get("x-real-ip") or "").strip()
+    if internal and real:
+        try:
+            return str(ipaddress.ip_address(real))
+        except ValueError:
+            pass
+    return peer
+
+
 async def rate_limit(request: Request, scope: str, limit: int, seconds: int):
-    # Не доверяем X-Forwarded-For от клиента. За Next лимит общий — консервативно.
-    address = request.client.host if request.client else "unknown"
+    address = client_address(request)
     key = f"stl:rate:{scope}:{token_digest(address)}"
     try:
         async with Redis.from_url(settings.redis_url) as redis:

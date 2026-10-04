@@ -1,4 +1,7 @@
 {$SITE_DOMAIN} {
     encode zstd gzip
-    reverse_proxy frontend:3000
+    # The visitor's real IP for per-user limits (login attempts, forms); overwrites anything the client sent.
+    reverse_proxy frontend:3000 {
+        header_up X-Real-IP {remote_host}
+    }
 }

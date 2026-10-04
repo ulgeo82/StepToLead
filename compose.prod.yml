@@ -59,6 +59,27 @@ services:
       redis:
         condition: service_healthy
 
+  # Nightly database backup: /backups inside the volume, 14 days kept. Copy them off the server as well.
+  backup:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.prod}
+    volumes:
+      - db_backups:/backups
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        while true; do
+          f=/backups/steptolead-$$(date +%Y-%m-%d_%H%M).sql.gz
+          if pg_dump -h postgres -U steptolead -d steptolead | gzip > "$$f.tmp"; then mv "$$f.tmp" "$$f"; echo "backup ok $$f"; else rm -f "$$f.tmp"; echo "backup FAILED"; fi
+          find /backups -name 'steptolead-*.sql.gz' -mtime +14 -delete
+          sleep 86400
+        done
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   frontend:
     build:
       context: ./frontend
@@ -90,6 +111,7 @@ services:
       - frontend
 
 volumes:
+  db_backups:
   call_recordings:
   postgres_prod_data:
   redis_prod_data:
