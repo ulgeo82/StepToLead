@@ -28,7 +28,7 @@ export function clientFields(data: Record<string, unknown>) {
   });
 }
 
-const platformNames: Record<string, string> = { avito_items: "Авито · Объявления", avito_ads: "Авито Реклама",
+const platformNames: Record<string, string> = { yandex_maps: "Яндекс Карты", "2gis": "2ГИС", avito_items: "Авито · Объявления", avito_ads: "Авито Реклама",
   yandex: "Яндекс Директ", vk_ads: "VK Реклама", meta: "Meta Ads" };
 const linkify = (value: string) => /^https?:\/\//.test(value)
   ? <a href={value} target="_blank" rel="noopener noreferrer">{value}</a> : value;

@@ -25,7 +25,8 @@ from app.services.project_scope import default_project
 
 router = APIRouter(prefix="/marketing", tags=["marketing"])
 SUPPORTED = {"meta": "Meta Ads", "yandex": "Яндекс Директ", "vk_ads": "VK Реклама",
-             "avito_items": "Авито · Объявления", "avito_ads": "Авито Реклама"}
+             "avito_items": "Авито · Объявления", "avito_ads": "Авито Реклама",
+             "yandex_maps": "Яндекс Карты", "2gis": "2ГИС"}
 # Platforms authorised with Client ID + Client Secret (stored in the generic vk_* OAuth columns).
 CLIENT_CREDENTIAL_PLATFORMS = {"vk_ads", "avito_items", "avito_ads"}
 
@@ -75,6 +76,8 @@ class ConnectionCreate(BaseModel):
         elif self.platform == "avito_ads":
             if not self.client_id or not self.client_secret or not self.external_account_id.isdigit():
                 raise ValueError("Для Авито Рекламы нужны ID аккаунта (число) и ключи из вкладки «API» кабинета")
+        elif self.platform in {"yandex_maps", "2gis"}:
+            pass  # no API: spend, statistics files and call tracking (services/maps.py)
         elif not self.external_account_id or not self.access_token:
             raise ValueError("Укажите ID кабинета и OAuth access token")
         return self
@@ -579,7 +582,9 @@ async def test_connection(connection_id: int, request: Request, db: AsyncSession
     row = await db.get(AdConnection, connection_id)
     if not row: raise HTTPException(404, "Подключение не найдено")
     try:
-        if row.platform == "vk_ads":
+        if row.platform in {"yandex_maps", "2gis"}:
+            result = {"currency": "RUB"}
+        elif row.platform == "vk_ads":
             token = await _vk_access_token(db, row)
             data = await run_in_threadpool(_vk_json, "/api/v3/user.json", token)
             account_id = str(data.get("id") or "")
@@ -655,6 +660,9 @@ async def sync_connection(connection_id: int, request: Request, db: AsyncSession
     if not row: raise HTTPException(404, "Подключение не найдено")
     if row.status == "disconnected":
         raise HTTPException(409, "Сначала восстановите подключение")
+    if row.platform in {"yandex_maps", "2gis"}:  # nothing to pull: data comes from files, budgets and call tracking
+        row.last_synced_at = datetime.now(timezone.utc); row.status = "connected"; await db.commit()
+        return {"ok": True, "days": 0, "first_date": None, "last_date": None}
     row.status = "syncing"
     await db.commit()
     try:

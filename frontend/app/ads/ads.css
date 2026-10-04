@@ -31,3 +31,32 @@
 .avitoTotals{margin-bottom:14px;grid-template-columns:repeat(auto-fit,minmax(90px,1fr))!important}.avitoDaily{height:90px;display:flex;align-items:flex-end;gap:2px;padding-top:6px;border-bottom:1px solid #e5edf7}.avitoDaily>div{flex:1;height:100%;display:flex;align-items:flex-end}.avitoDaily i{display:block;width:100%;border-radius:2px 2px 0 0;background:#965eeb}.avitoDaily>div:hover i{background:#006bfd}
 .avitoPeriod{display:flex;align-items:flex-end;gap:8px;flex-wrap:wrap}.avitoPeriod label{display:flex;flex-direction:column;gap:4px;color:#72829a;font-size:10px}.avitoPeriod input{height:34px;padding:0 8px;border:1px solid #d8e2f1;border-radius:7px}.avitoPeriod small{flex-basis:100%;color:#8a9bb2;font-size:9px}
 @media(max-width:800px){.avitoBalance,.avitoToggles{grid-template-columns:1fr}.avitoCardHead{flex-direction:column}.avitoTableTools input{min-width:0;width:100%}}
+/* Yandex Maps / 2GIS */
+.adsLogo.yandex_maps{background:#ffe7e0;color:#e8432b}.adsLogo.\32 gis{background:#e3f6e6;color:#1f9d43}
+.mapsPanel{margin-top:12px;display:flex;flex-direction:column;gap:14px}
+.mapsHead h3{margin:0;font-size:16px}.mapsHead p{margin:4px 0 0;font-size:12px}.mapsHead a{color:#006bfd}
+.mapsTiles{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px}
+.mapsTiles div{padding:10px 12px;border:1px solid #e3eaf4;border-radius:10px;background:#f8fbff}
+.mapsTiles span{display:block;font-size:11px;color:#6f829d}.mapsTiles strong{display:block;margin-top:4px;font-size:20px;color:#0f2140}
+.mapsGrid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.mapsBox{padding:14px;border:1px solid #e3eaf4;border-radius:12px}
+.mapsBox h4,.mapsMonth h4{margin:0 0 8px;font-size:14px;color:#0f2140}
+.mapsBox p{margin:0 0 8px;font-size:13px;line-height:1.5;color:#40536f}
+.mapsLink{display:flex;gap:8px;align-items:center}
+.mapsLink code{flex:1;min-width:0;padding:8px;border-radius:7px;background:#eef4fd;font-size:11px;overflow-wrap:anywhere}
+.mapsLink button,.mapsUpload{flex:none;min-height:34px;padding:0 12px;border:1px solid #d9e2ee;border-radius:8px;background:#fff;color:#006bfd;font-size:12px;font-weight:600;cursor:pointer}
+.mapsUpload{position:relative;display:inline-flex;align-items:center;overflow:hidden;border-style:dashed}
+.mapsUpload input{position:absolute;inset:0;opacity:0;cursor:pointer}
+.mapsMuted{font-size:11px!important;color:#7a8ca5!important;margin:8px 0 0!important}
+.mapsHint{margin:0;font-size:12px;color:#8a6b14;background:#fff8e6;padding:8px 10px;border-radius:8px}
+.mapsOk{margin:0;font-size:12px;color:#17693d;background:#e8f7ee;padding:8px 10px;border-radius:8px}
+.mapsMonth{padding:14px;border:1px solid #e3eaf4;border-radius:12px;display:flex;flex-direction:column;gap:10px}
+.mapsMonthHead{display:flex;justify-content:space-between;align-items:center;gap:12px}
+.mapsMonthHead select{min-height:34px;border:1px solid #d9e2ee;border-radius:8px;padding:0 10px;background:#fff}
+.mapsMonth>p{margin:0;font-size:12px;color:#6f829d}
+.mapsFields{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px}
+.mapsFields label{display:flex;flex-direction:column;gap:4px;font-size:11px;color:#6f829d}
+.mapsFields input{min-height:36px;padding:0 9px;border:1px solid #d9e2ee;border-radius:8px;font-size:13px;min-width:0}
+.mapsMonth .adsBlueButton{align-self:flex-start}
+@media(max-width:900px){.mapsTiles{grid-template-columns:repeat(3,minmax(0,1fr))}.mapsGrid{grid-template-columns:1fr}.mapsFields{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:520px){.mapsTiles,.mapsFields{grid-template-columns:repeat(2,minmax(0,1fr))}}

@@ -63,6 +63,11 @@ async def create_inbound(db: AsyncSession, source: LeadInboundSource, payload,
                     value = getattr(website_session, key, None)
                     if value:
                         attribution[key] = value
+    if not (attribution_extra or {}).get("verified_connection_id") and attribution.get("utm_source"):
+        from app.services import maps  # Yandex Maps / 2GIS card → site: matched by the channel's utm_source
+        map_connection = await maps.connection_for_utm(db, project_id, attribution.get("utm_source"))
+        if map_connection:
+            attribution["verified_connection_id"] = map_connection
     if attribution_extra:
         attribution.update({key: value for key, value in attribution_extra.items() if value is not None})
     inbound = CrmInbound(workspace_id=source.workspace_id, project_id=project_id,
