@@ -307,8 +307,10 @@ async def run_worker() -> None:
     while True:
         try:
             async with SessionLocal() as db:
+                from app.models.marketing import Project
                 ids = (await db.scalars(select(AdConnection.id).where(
-                    AdConnection.platform.in_(avito.PLATFORMS), AdConnection.status == "connected"))).all()
+                    AdConnection.platform.in_(avito.PLATFORMS), AdConnection.status == "connected",
+                    AdConnection.project_id.not_in(select(Project.id).where(Project.status == "demo"))))).all()
             for connection_id in ids:
                 try:
                     await _tick(connection_id)

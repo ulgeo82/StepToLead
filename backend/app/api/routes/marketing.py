@@ -432,6 +432,14 @@ async def workspaces(deleted: bool = False, db: AsyncSession = Depends(get_db)):
     return (await db.scalars(query)).all()
 
 
+@router.post("/workspaces/demo", status_code=201)
+async def create_demo_workspace(request: Request, db: AsyncSession = Depends(get_db)):
+    """A demo company with 4 months of invented data for sales meetings. Returns a one-time owner password."""
+    from app.services import demo
+    check_origin(request)
+    return await demo.create_demo(db)
+
+
 class WorkspaceDelete(BaseModel):
     model_config = ConfigDict(extra="forbid")
     confirm_name: str = Field(min_length=1, max_length=180)

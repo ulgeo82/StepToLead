@@ -490,7 +490,10 @@ async def run_worker() -> None:
     while True:
         try:
             async with SessionLocal() as db:
-                channels = (await db.scalars(select(MessagingChannel).where(MessagingChannel.active.is_(True)))).all()
+                from app.models.marketing import Project
+                channels = (await db.scalars(select(MessagingChannel).where(
+                    MessagingChannel.active.is_(True),
+                    MessagingChannel.project_id.not_in(select(Project.id).where(Project.status == "demo"))))).all()
                 ids = [(c.id, c.kind, aware(c.last_polled_at)) for c in channels]
             for channel_id, kind, polled in ids:
                 if kind == "avito" and polled and polled > now() - timedelta(seconds=AVITO_POLL_SECONDS):
