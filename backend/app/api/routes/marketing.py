@@ -422,8 +422,45 @@ def serialize_connection(row: AdConnection, workspace_name: str | None = None):
 
 
 @router.get("/workspaces")
-async def workspaces(db: AsyncSession = Depends(get_db)):
-    return (await db.scalars(select(ClientWorkspace).order_by(ClientWorkspace.name))).all()
+async def workspaces(deleted: bool = False, db: AsyncSession = Depends(get_db)):
+    query = select(ClientWorkspace).order_by(ClientWorkspace.name)
+    query = query.where(ClientWorkspace.status == "deleted") if deleted else query.where(ClientWorkspace.status != "deleted")
+    return (await db.scalars(query)).all()
+
+
+class WorkspaceDelete(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    confirm_name: str = Field(min_length=1, max_length=180)
+
+
+@router.post("/workspaces/{workspace_id}/delete")
+async def delete_workspace(workspace_id: int, payload: WorkspaceDelete, request: Request, db: AsyncSession = Depends(get_db)):
+    """Removes the company from the portal and switches everything off; history is kept and can be restored."""
+    from app.services import workspace_archive
+    check_origin(request)
+    row = await db.get(ClientWorkspace, workspace_id)
+    if not row or row.status == "deleted":
+        raise HTTPException(404, "Клиент не найден")
+    if payload.confirm_name.strip().casefold() != row.name.strip().casefold():
+        raise HTTPException(422, "Название не совпадает — введите название компании точно как в карточке")
+    result = await workspace_archive.delete_workspace(db, row)
+    await db.commit()
+    return {"ok": True, **result}
+
+
+@router.post("/workspaces/{workspace_id}/restore")
+async def restore_workspace(workspace_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    from app.services import workspace_archive
+    check_origin(request)
+    row = await db.get(ClientWorkspace, workspace_id)
+    if not row or row.status != "deleted":
+        raise HTTPException(404, "Удалённый клиент не найден")
+    try:
+        await workspace_archive.restore_workspace(db, row)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from None
+    await db.commit()
+    return row
 
 
 @router.post("/workspaces", status_code=201)
@@ -653,13 +690,13 @@ async def store_metrics(db: AsyncSession, row: AdConnection, metrics: list[dict]
                 db.add(AdCampaignMetricDaily(connection_id=row.id, **campaign))
 
 
-@router.post("/connections/{connection_id}/sync")
-async def sync_connection(connection_id: int, request: Request, db: AsyncSession = Depends(get_db)):
-    check_origin(request)
+async def sync_core(db: AsyncSession, connection_id: int) -> dict:
+    """Pull statistics of one ad cabinet into AdMetricDaily. Commits. Raises ValueError with the reason on failure."""
     row = await db.get(AdConnection, connection_id)
-    if not row: raise HTTPException(404, "Подключение не найдено")
+    if not row:
+        raise LookupError("Подключение не найдено")
     if row.status == "disconnected":
-        raise HTTPException(409, "Сначала восстановите подключение")
+        raise PermissionError("Сначала восстановите подключение")
     if row.platform in {"yandex_maps", "2gis"}:  # nothing to pull: data comes from files, budgets and call tracking
         row.last_synced_at = datetime.now(timezone.utc); row.status = "connected"; await db.commit()
         return {"ok": True, "days": 0, "first_date": None, "last_date": None}
@@ -685,11 +722,24 @@ async def sync_connection(connection_id: int, request: Request, db: AsyncSession
         await db.rollback()
         row = await db.get(AdConnection, connection_id)
         row.status = "error"; row.last_error = str(exc)[:1500]; await db.commit()
-        raise HTTPException(422, row.last_error)
+        raise ValueError(row.last_error) from exc
     metric_dates = [item["date"] for item in metrics]
     return {"ok": True, "days": len(metrics),
             "first_date": min(metric_dates).isoformat() if metric_dates else None,
             "last_date": max(metric_dates).isoformat() if metric_dates else None}
+
+
+@router.post("/connections/{connection_id}/sync")
+async def sync_connection(connection_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    check_origin(request)
+    try:
+        return await sync_core(db, connection_id)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from None
+    except PermissionError as exc:
+        raise HTTPException(409, str(exc)) from None
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
 
 
 @router.delete("/connections/{connection_id}", status_code=204)

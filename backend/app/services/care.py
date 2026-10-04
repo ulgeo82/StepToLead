@@ -196,7 +196,7 @@ def working(zone) -> bool:
 async def run(db: AsyncSession) -> int:
     """One pass over projects with care on. Messages only in working hours (9–21 local)."""
     from app.services.watchdog import project_zone
-    projects = (await db.scalars(select(Project))).all()
+    projects = (await db.scalars(select(Project).where(Project.status == "active"))).all()
     total = 0
     for project in projects:
         conf = settings_for(project)

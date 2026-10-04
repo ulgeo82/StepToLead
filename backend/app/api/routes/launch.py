@@ -398,7 +398,7 @@ async def client_health(db: AsyncSession, workspace_id: int) -> dict:
 @admin_router.get("/health")
 async def admin_health(db: AsyncSession = Depends(get_db)):
     from app.models.marketing import ClientWorkspace
-    workspaces = (await db.scalars(select(ClientWorkspace).order_by(ClientWorkspace.id))).all()
+    workspaces = (await db.scalars(select(ClientWorkspace).where(ClientWorkspace.status != "deleted").order_by(ClientWorkspace.id))).all()
     return [await client_health(db, w.id) for w in workspaces]
 
 

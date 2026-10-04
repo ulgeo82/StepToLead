@@ -98,3 +98,11 @@
 .clientHealth small{display:block;margin-top:2px;color:#5e6b63;font-size:11px}
 .clientHealth.warning{background:#fff6e5}.clientHealth.warning b{background:#d88a00}.clientHealth.warning strong{color:#8a5800}
 .clientHealth.risk{background:#fdecef}.clientHealth.risk b{background:#c8344b}.clientHealth.risk strong{color:#a52a3d}
+.clientWorkspaceHead{grid-template-columns:46px 1fr auto auto}
+.clientDelete{padding:6px 9px;border:1px solid #efd3cc;border-radius:20px;background:#fff;color:#a04b3e;font-size:9px;font-weight:700;cursor:pointer;opacity:.75}
+.clientDelete:hover{opacity:1;background:#fff1ee}
+.button.danger{color:#fff;background:#c8402e;border:0}.button.danger:hover{background:#b23423}.button.danger:disabled{opacity:.45}
+.deletedClients{margin-top:18px;padding:20px}
+.deletedClientRow{display:grid;grid-template-columns:auto 1fr auto;gap:14px;align-items:center;padding:12px 0;border-top:1px solid var(--line)}
+.deletedClientRow strong{font-size:13px}.deletedClientRow span{color:#92949c;font-size:10px}
+@media(max-width:480px){.clientWorkspaceHead{grid-template-columns:42px 1fr auto}.deletedClientRow{grid-template-columns:1fr}}
