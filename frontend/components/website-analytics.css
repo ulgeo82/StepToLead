@@ -39,3 +39,16 @@
 .wpFab{width:52px;height:52px;border-radius:50%;display:grid;place-items:center;color:#fff;font-size:22px;box-shadow:0 8px 20px rgba(15,33,64,.25)}
 @media(max-width:820px){.widgetBody{grid-template-columns:1fr}.widgetPreview{position:static;min-height:0}.widgetGrid{grid-template-columns:1fr}}
 .websiteSiteActions{display:flex;flex-wrap:wrap;gap:8px}
+/* Масштаб как в остальном кабинете */
+.websiteAnalytics{font-size:12px}
+.websiteAnalytics .resultPanel,.tildaIntegration{padding:18px}
+.websiteTitle h2,.tildaIntegration h2{margin:0 0 4px;font-size:16px;letter-spacing:-.35px}
+.websiteTitle p,.tildaIntegration p{margin:0;color:#687b98;font-size:11px;line-height:1.45}
+.websiteAnalytics>.websiteTitle h2{font-size:20px;letter-spacing:-.6px}
+.websitePrimary{display:inline-flex;align-items:center;justify-content:center;min-height:34px;padding:0 13px;border:1px solid #006bfd;border-radius:7px;font-size:11px;white-space:nowrap}
+.websitePrimary:hover{background:#0f56cb;border-color:#0f56cb}
+.websiteFilters input,.websiteFilters select{min-height:35px;padding:0 10px;font-size:11px;box-shadow:0 3px 8px #1a37650a}
+.websiteGrid h3,.websiteSites h3,.websiteConnect h3,.tildaIntegration h3{font-size:14px}
+.tildaIntegration summary{margin-top:10px;color:#006bfd;font-size:11px;font-weight:650;cursor:pointer}
+.tildaIntegration details p,.tildaIntegration li{font-size:11px;color:#40516a}
+.tildaIntegration .websiteTitle{align-items:flex-start}

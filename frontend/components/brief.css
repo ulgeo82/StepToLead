@@ -1,46 +1,86 @@
-/* Reference layouts in the portal's neutral/lime visual language. */
-.briefShell{max-width:1000px;margin:32px auto;padding:24px;color:var(--ink);background:var(--surface);font:16px/1.55 Inter,system-ui,sans-serif}
-.briefShell button{border:0;font:inherit;cursor:pointer;margin:4px;color:var(--ink);background:var(--lime);border-radius:999px;padding:14px 24px;font-weight:650;display:inline-block}
-.briefShell button:focus-visible,.briefShell input:focus-visible,.briefShell textarea:focus-visible{outline:3px solid var(--lime-deep);outline-offset:3px}
-.briefShell h1{line-height:1.2;font-size:clamp(26px,3.6vw,36px);letter-spacing:-.03em;font-weight:800}
-.briefShell h2{font-size:24px;letter-spacing:-.02em}
-.briefShell section{background:white;margin:20px 0;border:1px solid var(--line);border-radius:28px;box-shadow:var(--shadow);padding:32px 36px}
-.briefShell input:not([type=checkbox]):not([type=file]),.briefShell textarea,.briefBaseline input,.briefBaseline textarea,.briefBaseline select{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px;font:inherit;width:100%;color:var(--ink)}
-.briefShell small{color:var(--muted)}
-.briefShell progress,.briefBaseline progress{height:7px;accent-color:var(--lime-deep);width:100%;border:0}
-.briefShell progress::-webkit-progress-bar{background:var(--line);border-radius:4px}
-.briefShell progress::-webkit-progress-value{background:var(--lime-deep);border-radius:4px}
-.briefTop{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:16px}
-.briefShell .briefLink{background:none;color:var(--muted);padding-left:0}
-.briefOptions{display:flex;flex-wrap:wrap;gap:8px}
-.briefOptions button{background:var(--panel);border:1.5px solid var(--line);color:var(--ink);text-align:left;margin:0;min-height:48px}
-.briefOptions button[aria-pressed=true]{background:var(--lime);border-color:var(--lime-deep)}
-.briefHero{background:#202126;color:white;border-radius:24px;padding:24px;margin:20px 0}
-.briefHero strong{display:block;color:var(--lime);font-size:clamp(32px,5vw,52px);line-height:1.1;margin-top:10px}
-.briefHero small,.briefHero p{color:#dedfdb}
-.fullBriefShell{max-width:1240px}
-.briefLayout{display:grid;grid-template-columns:260px minmax(0,1fr);gap:32px;align-items:start}
-.briefLayout>aside{position:sticky;top:24px}
-.briefLayout>section{margin-top:0;min-width:0}
-.briefRail{display:flex;flex-direction:column}
-.briefRail button{background:none;text-align:left;color:var(--muted);border-radius:12px;margin:0;font-size:14px}
-.briefRail button[aria-current]{background:var(--panel);color:var(--ink);box-shadow:var(--shadow)}
-.briefRail small{float:right}
-.briefQuestion{display:grid;grid-template-columns:1fr 1.25fr;gap:24px;padding:24px 0;border-top:1px solid var(--line)}
-.briefQuestion label{margin:0;font-weight:650}
-.briefShell .briefQuestion label{margin:0}
-.briefQuestion p{font-size:14px;margin:8px 0;color:var(--muted)}
-.briefBadge{display:inline-block;background:#edf1d9;padding:3px 7px;border-radius:6px;font-size:12px}
-.briefBaseline{padding:24px;margin:24px 0;border:1px solid var(--line);border-radius:20px;background:var(--panel);color:var(--ink)}
-.briefBaseline label{display:block;margin:14px 0}
-.briefBaseline small{display:block;margin-top:8px}
-.briefBaseline button{padding:12px 18px;border:0;border-radius:10px;background:var(--lime);color:var(--ink);cursor:pointer}
-.briefBaselineGrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
-.briefBaseline pre{white-space:pre-wrap;overflow-wrap:anywhere}
-.briefShell table{width:100%;border-collapse:collapse;font-size:14px}
-.briefShell th,.briefShell td{padding:12px;text-align:left;border-bottom:1px solid var(--line)}
-.briefTableScroll{overflow-x:auto}
-@media(max-width:960px){.briefLayout{grid-template-columns:1fr}.briefLayout>aside{position:static}.briefRail{flex-direction:row;overflow-x:auto}.briefRail button{white-space:nowrap}.briefBaselineGrid{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:720px){.briefShell{padding:16px;margin:12px auto}.briefShell section{padding:24px 20px}.briefQuestion{grid-template-columns:1fr;gap:12px}.briefBaselineGrid{grid-template-columns:1fr}.briefTop{flex-wrap:wrap}}
+/* Бриф, точка А и админка брифов — в стиле кабинета клиента (resultShell): белые карточки, рамка #e2eaf5, акцент #006bfd. */
+.briefShell,.briefBaseline,.briefDemoBanner{--b-ink:#101c31;--b-text:#1f3049;--b-muted:#687b98;--b-faint:#8795a9;--b-line:#e2eaf5;--b-field:#f5f8fe;--b-accent:#006bfd;--b-accent-dark:#0f56cb;--b-soft:#e8f1ff;--b-shadow:0 3px 13px #1d45820a}
+.briefShell{color:var(--b-ink);font-size:13px;line-height:1.5}
+.briefShell h1{margin:0 0 4px;font-size:clamp(32px,3vw,42px);line-height:1.05;letter-spacing:-1.9px}
+.briefShell h2,.briefBaseline h2{margin:0 0 4px;font-size:16px;letter-spacing:-.35px;color:var(--b-ink)}
+.briefShell h3{margin:0 0 4px;font-size:14px}
+.briefShell p,.briefBaseline p{margin:0 0 12px;color:var(--b-muted);font-size:12px;line-height:1.5}
+.briefShell section,.briefBaseline{margin:0 0 14px;padding:18px;border:1px solid var(--b-line);border-radius:11px;background:#fff;box-shadow:var(--b-shadow)}
+.briefShell label,.briefBaseline label{display:flex;flex-direction:column;gap:5px;margin:0 0 12px;color:var(--b-muted);font-size:10px;font-weight:600}
+.briefShell input:not([type=checkbox]):not([type=file]),.briefShell textarea,.briefShell select,.briefBaseline input,.briefBaseline textarea,.briefBaseline select{width:100%;min-height:36px;padding:8px 10px;border:1px solid #d8e2f1;border-radius:8px;background:#fff;color:var(--b-text);font:inherit;font-size:12px;box-sizing:border-box}
+.briefShell textarea,.briefBaseline textarea{min-height:90px;resize:vertical;line-height:1.5}
+.briefShell input:focus,.briefShell textarea:focus,.briefShell select:focus,.briefBaseline input:focus,.briefBaseline textarea:focus,.briefBaseline select:focus{outline:none;border-color:var(--b-accent);box-shadow:0 0 0 3px #006bfd1f}
+.briefShell input[type=file]{font-size:11px;color:var(--b-muted)}
+.briefShell button,.briefBaseline button,.briefPrimary{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:34px;padding:0 13px;border:1px solid var(--b-accent);border-radius:7px;background:var(--b-accent);color:#fff;font:inherit;font-size:11px;font-weight:650;white-space:nowrap;cursor:pointer;text-decoration:none}
+.briefShell button:hover,.briefBaseline button:hover,.briefPrimary:hover{background:var(--b-accent-dark);border-color:var(--b-accent-dark)}
+.briefShell button:disabled,.briefBaseline button:disabled{opacity:.45;cursor:not-allowed}
+.briefShell button:focus-visible,.briefBaseline button:focus-visible{outline:3px solid #006bfd40;outline-offset:2px}
+.briefShell a{color:var(--b-accent);font-weight:650}
+.briefShell details{margin-top:8px;font-size:12px}.briefShell summary,.briefBaseline summary{cursor:pointer;color:var(--b-accent);font-weight:650;font-size:11px}
+.briefShell pre,.briefBaseline pre{margin:8px 0 0;padding:12px;border-radius:8px;background:var(--b-field);white-space:pre-wrap;overflow-wrap:anywhere;font:11px/1.55 "SFMono-Regular",Consolas,monospace;color:var(--b-text);max-height:360px;overflow:auto}
+.briefShell progress,.briefBaseline progress{width:100%;height:6px;border:0;border-radius:4px;background:var(--b-line);accent-color:var(--b-accent);-webkit-appearance:none;appearance:none}
+.briefShell progress::-webkit-progress-bar,.briefBaseline progress::-webkit-progress-bar{background:var(--b-line);border-radius:4px}
+.briefShell progress::-webkit-progress-value,.briefBaseline progress::-webkit-progress-value{background:var(--b-accent);border-radius:4px}
+.briefShell progress::-moz-progress-bar{background:var(--b-accent);border-radius:4px}
+.briefError{margin:0 0 12px;padding:10px 12px;border:1px solid #f3c7cf;border-radius:8px;background:#fff1f3;color:#b0233a!important;font-size:12px}
+.briefTrap{position:absolute;left:-10000px}
+.briefActions{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:6px}
+.briefActions button:first-child:not(:only-child){border-color:#c7d9f5;background:#fff;color:var(--b-accent)}
+.briefActions button:first-child:not(:only-child):hover{background:var(--b-soft)}
+.briefBadge{display:inline-block;margin-left:6px;padding:2px 7px;border-radius:10px;background:var(--b-soft);color:var(--b-accent-dark);font-size:9px;font-weight:700;vertical-align:1px}
 
-.briefShell label{display:block;margin:18px 0}.briefShell textarea{min-height:95px;resize:vertical}.briefShell pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit}.briefShell button:disabled{opacity:.5;cursor:default}.briefError{color:#9f2525;background:#fff0ef;padding:16px;border-radius:8px}.briefActions{display:flex;align-items:center;flex-wrap:wrap;gap:10px}.briefDemoBanner{background:#fff3b0;border-radius:10px;margin:16px;padding:12px;font-size:14px}.briefDemoBanner a{display:block;color:#124b95}
+/* Полный бриф */
+.fullBriefTop{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;margin:0 0 14px;padding:14px 18px;border:1px solid var(--b-line);border-radius:11px;background:#fff;box-shadow:var(--b-shadow)}
+.fullBriefTop progress{flex:1 1 220px}
+.fullBriefTop span{color:var(--b-muted);font-size:11px;white-space:nowrap}
+.fullBriefTop strong{font-size:12px}
+.briefLayout{display:grid;grid-template-columns:250px minmax(0,1fr);gap:14px;align-items:start;margin-bottom:14px}
+.briefLayout>aside{position:sticky;top:16px;display:flex;flex-direction:column;gap:12px}
+.briefLayout>section{margin:0}
+.briefRail{display:flex;flex-direction:column;gap:2px;padding:8px;border:1px solid var(--b-line);border-radius:11px;background:#fff;box-shadow:var(--b-shadow)}
+.briefShell .briefRail button{justify-content:space-between;width:100%;min-height:36px;padding:0 10px;border:0;border-radius:8px;background:transparent;color:#40516a;font-size:12px;font-weight:550;text-align:left;white-space:normal}
+.briefShell .briefRail button:hover{background:var(--b-field)}
+.briefShell .briefRail button[aria-current]{background:var(--b-soft);color:var(--b-accent);font-weight:700}
+.briefRail small{color:var(--b-faint);font-size:10px;font-weight:600}
+.briefHero{padding:16px;border-radius:11px;background:linear-gradient(150deg,#006bfd,#0f56cb);color:#fff;box-shadow:0 8px 22px #006bfd2e}
+.briefHero small{display:block;font-size:10px;font-weight:600;opacity:.85}
+.briefHero strong{display:block;margin-top:6px;font-size:24px;line-height:1.1;letter-spacing:-1px}
+.briefShell .briefHero p{margin:8px 0 0;color:#ffffffdd;font-size:11px}
+.briefQuestion{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.3fr);gap:8px 24px;padding:14px 0;border-top:1px solid #eef2f8}
+.briefQuestion:first-of-type{border-top:0}
+.briefQuestion label{margin:0;color:var(--b-ink);font-size:12px;font-weight:700;flex-direction:row;flex-wrap:wrap;align-items:center;gap:4px}
+.briefShell .briefQuestion p{margin:4px 0 0;font-size:11px}
+.briefQuestion>div:last-child{min-width:0;display:flex;flex-direction:column;gap:4px}
+.briefQuestion>div:last-child small{color:var(--b-faint);font-size:10px}
+.briefOptions{display:flex;flex-wrap:wrap;gap:6px}
+.briefShell .briefOptions button{min-height:32px;padding:0 11px;border:1px solid #d8e2f1;border-radius:16px;background:#fff;color:var(--b-text);font-weight:600}
+.briefShell .briefOptions button:hover{border-color:var(--b-accent);background:#fff}
+.briefShell .briefOptions button[aria-pressed=true]{border-color:var(--b-accent);background:var(--b-accent);color:#fff}
+
+/* Точка А */
+.briefBaseline{color:var(--b-ink)}
+.briefBaselineGrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px 12px}
+.briefBaselineGrid small{color:var(--b-faint);font-size:10px;font-weight:500}
+.briefBaseline details{margin-top:12px}
+.briefBaseline details>div{margin-top:8px}
+
+/* Админка: таблицы брифов */
+.briefTableScroll{overflow-x:auto;margin-bottom:14px}
+.briefShell table{width:100%;border-collapse:collapse;font-size:12px}
+.briefShell th{padding:9px 10px;border-bottom:1px solid var(--b-line);color:var(--b-muted);font-size:10px;font-weight:600;text-align:left;white-space:nowrap}
+.briefShell td{padding:10px;border-bottom:1px solid #eef2f8;vertical-align:top}
+.briefShell td button{min-height:0;padding:0;border:0;background:none;color:var(--b-accent);font-size:12px;text-align:left;white-space:normal}
+.briefShell td button:hover{background:none;text-decoration:underline}
+.briefShell td a{margin-right:8px}
+
+/* Плашка демо в боковом меню */
+.briefDemoBanner{margin:-10px 0 16px;padding:10px 12px;border:1px solid #ffffff1c;border-radius:9px;background:#ffffff0d;color:#c0cbd9;font-size:10px;line-height:1.45}
+.briefDemoBanner a{display:block;margin-top:6px;color:#63a5ff;font-weight:700}
+
+@media(max-width:1000px){.briefLayout{grid-template-columns:minmax(0,1fr)}.briefLayout>aside{position:static}.briefRail{flex-direction:row;overflow-x:auto}.briefShell .briefRail button{width:auto;white-space:nowrap}.briefBaselineGrid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:640px){.briefQuestion{grid-template-columns:minmax(0,1fr)}.briefBaselineGrid{grid-template-columns:minmax(0,1fr)}}
+.briefRail:empty{display:none}
+.briefAdminPage .briefShell{padding:22px;border:1px solid var(--b-line);border-radius:16px;background:#fff;box-shadow:var(--b-shadow)}
+.briefAdminPage .briefShell h2{margin-top:6px}
+.briefAdminPage .briefShell h2+.briefTableScroll,.briefAdminPage .briefShell h2+table{margin-top:10px}
+.briefAdminPage .briefShell table+h2,.briefAdminPage .briefShell .briefTableScroll+h2{margin-top:22px}

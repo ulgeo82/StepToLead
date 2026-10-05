@@ -224,7 +224,7 @@ async def integrations(project_id: int, db: AsyncSession = Depends(get_db), user
             {"key": "ads", "title": "Реклама", "href": f"/ads{suffix}", "items": [
                 {"name": a.name, "kind": PLATFORMS.get(a.platform, a.platform), "status": a.status,
                  "detail": f"данные за {a.last_synced_at:%d.%m %H:%M}" if a.last_synced_at else None} for a in ads]},
-            {"key": "site", "title": "Сайт и формы", "href": f"/settings{suffix}#sources", "items": [
+            {"key": "site", "title": "Сайт и формы", "href": f"/analytics{suffix}&tab=website", "items": [
                 *[{"name": s.name, "kind": "Трекинг сайта", "status": "connected" if s.active else "off",
                    "detail": f"последний визит {s.last_event_at:%d.%m %H:%M}" if s.last_event_at else "визитов ещё не было"} for s in sites],
                 *[{"name": t.form_name, "kind": "Форма Tilda", "status": "connected" if t.is_active else "off",

@@ -67,6 +67,12 @@ export default function SettingsPage() {
       sources: "sources", integrations: "integrations", funnel: "funnel", requisites: "company" };
     if (fromHash[anchor]) setTab(fromHash[anchor]);
   }).catch(e => setError(e.message)); }, []);
+  useEffect(() => {
+    const fromHash: Record<string, Tab> = { telegram: "notifications", notifications: "notifications", economics: "project",
+      sources: "sources", integrations: "integrations", funnel: "funnel", requisites: "company" };
+    const onHash = () => { const tab = fromHash[window.location.hash.slice(1)]; if (tab) setTab(tab); };
+    window.addEventListener("hashchange", onHash); return () => window.removeEventListener("hashchange", onHash);
+  }, []);
   useEffect(() => { if (!projectId) return;
     let active = true; setError("");
     api<Settings>(`/settings?project_id=${projectId}`).then(value => { if (active) { setData(value); setCompany(value.company); setProject(value.project); } })
