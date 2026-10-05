@@ -9,7 +9,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.api.routes.access import client_address
+from app.api.routes.access import client_address, rate_limit
 from app.api.routes.crm import project_for
 from app.api.routes.messaging import can_manage_channels
 from app.api.routes.portal import InboundLead
@@ -89,6 +89,8 @@ async def public_submit(payload: PublicIn, request: Request, tasks: BackgroundTa
         raise HTTPException(422,"Не удалось принять форму")
     if not payload.consent:
         raise HTTPException(422,"Нужно согласие на обработку персональных данных")
+    # Per-IP limit applies always, even when the global demo cap is exhausted and no demo is created.
+    await rate_limit(request,"brief_submit",5,3600)
     answers=service.express_answers(payload.answers)
     contact=answers["contact"].strip()
     is_telegram=bool(re.fullmatch(r"@[a-zA-Z0-9_]{5,32}",contact))

@@ -26,6 +26,7 @@ class BriefTests(unittest.TestCase):
         p = patch.object(settings, "brief_demo_daily_cap", 30); p.start(); self.addCleanup(p.stop)
         p = patch.object(ai, "configured", return_value=False); p.start(); self.addCleanup(p.stop)
         from app.api.routes import brief as route
+        p = patch.object(route, "rate_limit", AsyncMock()); self.limiter=p.start(); self.addCleanup(p.stop)
         self.original_alert=route.admin_alert
         p = patch.object(route, "admin_alert", AsyncMock()); self.alert=p.start(); self.addCleanup(p.stop)
         self.answers = {k: "Нет данных" for k,q in brief.QUESTIONS.items() if q["required"]}
@@ -116,6 +117,21 @@ class BriefTests(unittest.TestCase):
                 self.assertEqual(r.status_code,201,r.text)
                 self.assertIsNone(r.json()["demo"])
         self.assertEqual(self.run_db(lambda db:db.scalar(select(func.count(CrmInbound.id)))),4)
+
+    def test_ip_limit_applies_even_when_demo_cap_is_exhausted(self):
+        hits={}
+        async def limiter(request,scope,limit,seconds):
+            hits[scope]=hits.get(scope,0)+1
+            if hits[scope]>limit: raise HTTPException(429,"Слишком много запросов. Попробуйте позже.")
+        self.limiter.side_effect=limiter
+        with patch.object(settings,"brief_demo_daily_cap",0):
+            for i in range(5):
+                r=self.submit(answers={**self.payload()["answers"],"contact":f"@brief_ip_{i}"})
+                self.assertEqual(r.status_code,201,r.text)
+            r=self.submit(answers={**self.payload()["answers"],"contact":"@brief_ip_extra"})
+            self.assertEqual(r.status_code,429,r.text)
+        self.assertEqual(self.run_db(lambda db:db.scalar(select(func.count(CrmInbound.id)))),5)
+        self.assertEqual(self.limiter.await_args.args[1:],("brief_submit",5,3600))
 
     def test_telegram_alert_contains_client_numbers_and_lead_link(self):
         from app.api.routes import brief as route
