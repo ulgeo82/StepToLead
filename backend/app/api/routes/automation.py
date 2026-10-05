@@ -5,6 +5,7 @@ from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.crypto import decrypt_secret, encrypt_secret
+from app.core.config import settings as app_settings
 from app.db import get_db
 from app.models import Campaign, TelegramAccount, Lead
 from app.models.automation import CampaignRuntime, CampaignAccount, CampaignDialog, CampaignMessage, CampaignEvent, GlobalBlock
@@ -84,7 +85,7 @@ async def test_ai(campaign_id: int, db: AsyncSession = Depends(get_db)):
                 key,
                 [{"role": "user", "content": "Это проверка подключения. Ответьте одной короткой фразой на русском языке."}],
             ),
-            timeout=35,
+            timeout=max(1, app_settings.llm_timeout) * 2 + 5,
         )
     except AIProviderError as exc:
         runtime.last_error = str(exc)
@@ -123,7 +124,7 @@ async def start_campaign(campaign_id: int, db: AsyncSession = Depends(get_db)):
                     decrypt_secret(runtime.api_key_encrypted),
                     [{"role": "user", "content": "Проверка перед запуском. Ответьте одним словом: готово."}],
                 ),
-                timeout=35,
+                timeout=max(1, app_settings.llm_timeout) * 2 + 5,
             )
         except AIProviderError as exc:
             runtime.last_error = f"Запуск отменён: {exc}"

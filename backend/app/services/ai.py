@@ -5,6 +5,8 @@ any OpenAI-style endpoint, or Anthropic's Messages API. Chosen by LLM_PROVIDER i
 The model only drafts: a person reads and sends every message.
 """
 import logging
+import asyncio
+import time
 
 import httpx
 
@@ -16,21 +18,29 @@ PROVIDER_NAMES = {"yandex": "YandexGPT", "openai": "OpenAI", "anthropic": "Claud
 
 
 class AIError(ValueError):
-    pass
+    def __init__(self, message, status=None, code=None):
+        super().__init__(message)
+        self.status, self.code = status, code
+
+
+def model_for(feature="chat"):
+    return (getattr(settings, f"llm_model_{feature}", "") or settings.llm_model or
+            (f"gpt://{settings.yandex_folder_id}/yandexgpt/latest" if provider() == "yandex" and settings.yandex_folder_id else
+             "claude-sonnet-5-5" if provider() == "anthropic" else ""))
 
 
 def provider() -> str:
     return (settings.llm_provider or "").strip().lower()
 
 
-def configured() -> bool:
+def configured(feature="chat") -> bool:
     name = provider()
     if name not in PROVIDER_NAMES or not settings.llm_api_key:
         return False
     if name == "yandex":
-        return bool(settings.yandex_folder_id or settings.llm_model)
+        return bool(model_for(feature))
     if name in {"openai", "openai_compatible"}:
-        return bool(settings.llm_model) and (name == "openai" or bool(settings.llm_base_url))
+        return bool(model_for(feature)) and (name == "openai" or bool(settings.llm_base_url))
     return True
 
 
@@ -56,44 +66,111 @@ def normalize(messages: list[dict]) -> list[dict]:
     return result
 
 
-async def complete(system: str, messages: list[dict], *, max_tokens: int = 500, temperature: float = 0.3) -> str:
-    if not configured():
-        raise AIError("ИИ-помощник не подключён: администратору нужно указать LLM_PROVIDER и ключ в настройках сервера")
-    name, turns = provider(), normalize(messages)
-    try:
-        async with httpx.AsyncClient(timeout=60) as client:
-            if name == "anthropic":
-                response = await client.post("https://api.anthropic.com/v1/messages", headers={
-                    "x-api-key": settings.llm_api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
-                    json={"model": settings.llm_model or "claude-sonnet-5-5", "max_tokens": max_tokens, "temperature": temperature,
-                          "system": system, "messages": turns})
-            else:
-                headers = {"Authorization": f"Bearer {settings.llm_api_key}"}
-                if name == "yandex":
-                    base = (settings.llm_base_url or YANDEX_URL).rstrip("/")
-                    model = settings.llm_model or f"gpt://{settings.yandex_folder_id}/yandexgpt/latest"
-                    if settings.yandex_folder_id:
-                        headers["OpenAI-Project"] = settings.yandex_folder_id
+def trim_input(system, messages):
+    limit = max(1, settings.llm_max_input_chars)
+    # Keep instructions and the most recent turns; no mutation of caller-owned history.
+    system = system[:limit // 2] if messages and len(system) >= limit else system[:limit]
+    remaining = limit - len(system)
+    turns = []
+    for message in reversed(messages):
+        content = str(message.get("content") or "")[-remaining:] if remaining else ""
+        if content:
+            turns.append({"role": message["role"], "content": content})
+            remaining -= len(content)
+    return system, list(reversed(turns))
+
+
+def failure(status):
+    if status == 401:
+        return "ИИ-сервис отклонил API-ключ: проверьте ключ подключения"
+    if status == 403:
+        return "У API-ключа нет доступа к выбранной модели"
+    if status == 429:
+        return "ИИ-сервис исчерпал лимит запросов или доступный баланс"
+    if status >= 500:
+        return "Провайдер ИИ временно недоступен, попробуйте позже"
+    return "ИИ-сервис отклонил запрос: проверьте модель и параметры подключения"
+
+
+def output_budget(model, feature, requested):
+    # Gemini includes hidden thinking in its completion budget. A small visible
+    # reply can therefore need considerably more tokens than its text alone.
+    if "gemini" in model.lower():
+        return max(requested, {"chat": 1024, "summary": 2048, "calls": 4096, "campaigns": 1024}.get(feature, 1024))
+    return requested
+
+
+async def complete(system: str, messages: list[dict], *, max_tokens=500, temperature=0.3,
+                   feature="chat", workspace_id=None, api_key=None, base_url=None, model=None,
+                   provider_override=None, endpoint=None, normalize_turns=True, validator=None) -> str:
+    from app.services import ai_usage
+    name = provider_override or provider()
+    key, chosen = api_key or settings.llm_api_key, model or model_for(feature)
+    base = (base_url or settings.llm_base_url or (YANDEX_URL if name == "yandex" else "https://api.openai.com/v1")).rstrip("/")
+    if name not in PROVIDER_NAMES or not key or not chosen:
+        raise AIError("ИИ не подключён: укажите провайдера, модель и API-ключ")
+    if name == "openai_compatible" and not (base_url or settings.llm_base_url or endpoint):
+        raise AIError("ИИ не подключён: укажите адрес API")
+    max_tokens = output_budget(chosen, feature, max_tokens)
+    turns = normalize(messages) if normalize_turns else messages
+    system, turns = trim_input(system, turns)
+    input_tokens = ai_usage.estimate(system + "".join(m["content"] for m in turns))
+    for attempt in range(2):
+        usage_id = await ai_usage.reserve(feature, name, chosen, workspace_id, input_tokens + max_tokens)
+        started = time.monotonic()
+        error = None; data = {}; result = ""; tin = input_tokens; tout = 0; retry = False
+        try:
+            async with httpx.AsyncClient(timeout=max(1, settings.llm_timeout)) as client:
+                if name == "anthropic":
+                    response = await client.post(endpoint or "https://api.anthropic.com/v1/messages",
+                        headers={"x-api-key": key, "anthropic-version": "2023-06-01"},
+                        json={"model": chosen, "max_tokens": max_tokens, "temperature": temperature, "system": system, "messages": turns})
                 else:
-                    base = (settings.llm_base_url or "https://api.openai.com/v1").rstrip("/")
-                    model = settings.llm_model
-                response = await client.post(f"{base}/chat/completions", headers=headers, json={
-                    "model": model, "max_tokens": max_tokens, "temperature": temperature,
-                    "messages": [{"role": "system", "content": system}, *turns]})
-    except httpx.HTTPError:
-        raise AIError("Сервис ИИ недоступен, попробуйте ещё раз") from None
-    try:
-        data = response.json()
-    except ValueError:
-        data = {}
-    if response.status_code >= 400:
-        logger.warning("llm error status=%s body=%s", response.status_code, str(data)[:500])
-        raise AIError("Сервис ИИ отклонил запрос" + (" — проверьте ключ" if response.status_code in {401, 403} else ""))
-    try:
-        text = data["content"][0]["text"] if name == "anthropic" else data["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError):
-        raise AIError("Сервис ИИ вернул пустой ответ") from None
-    return (text or "").strip()
+                    headers = {"Authorization": f"Bearer {key}"}
+                    if name == "yandex" and settings.yandex_folder_id:
+                        headers["OpenAI-Project"] = settings.yandex_folder_id
+                    payload = {"model": chosen, "messages": [{"role": "system", "content": system}, *turns],
+                               "max_completion_tokens" if feature == "campaigns" else "max_tokens": max_tokens}
+                    if feature != "campaigns":
+                        payload["temperature"] = temperature
+                    response = await client.post(endpoint or f"{base}/chat/completions", headers=headers, json=payload)
+            if response.status_code >= 400:
+                retry = response.status_code == 429 or response.status_code >= 500
+                raise AIError(failure(response.status_code), response.status_code)
+            data = response.json()
+            usage = data.get("usage") or {}
+            tin = int(usage.get("prompt_tokens", usage.get("input_tokens", input_tokens)))
+            result = (data["content"][0]["text"] if name == "anthropic" else data["choices"][0]["message"]["content"])
+            tout = int(usage.get("completion_tokens", usage.get("output_tokens", ai_usage.estimate(result or ""))))
+            stop = data.get("stop_reason") if name == "anthropic" else data["choices"][0].get("finish_reason")
+            if stop in {"length", "max_tokens", "MAX_TOKENS"}:
+                retry = True
+                max_tokens = min(max_tokens * 2, 8192)
+                raise AIError("ИИ оборвал ответ из-за лимита генерации. Повторите запрос или выберите другую модель", code="truncated")
+            if not isinstance(result, str) or not result.strip():
+                raise AIError("ИИ вернул пустой ответ")
+            if validator:
+                validator(result)
+        except httpx.TimeoutException:
+            retry = True; error = AIError("ИИ не ответил вовремя, попробуйте ещё раз")
+        except httpx.HTTPError:
+            error = AIError("Провайдер ИИ недоступен, проверьте подключение")
+        except asyncio.CancelledError:
+            error = AIError("Запрос ИИ прерван")
+            raise
+        except AIError as exc:
+            error = exc
+        except (ValueError, KeyError, IndexError, TypeError):
+            error = AIError("ИИ вернул некорректный ответ")
+        finally:
+            await ai_usage.finish(usage_id, tokens_in=tin, tokens_out=tout,
+                                  duration_ms=int((time.monotonic() - started) * 1000), error=str(error) if error else None)
+        if error is None:
+            return result.strip()
+        if retry and attempt == 0:
+            await asyncio.sleep(1)
+            continue
+        raise error
 
 
 def transcript(messages, client_name: str) -> list[dict]:

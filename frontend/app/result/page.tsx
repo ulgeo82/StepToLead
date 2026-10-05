@@ -5,6 +5,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { count, dateInput, MetricChart, money, percent, PeriodControls, ProjectSidebar } from "@/components/reporting";
 import { LaunchPanel } from "@/components/launch-panel";
+import {BaselineCard} from "@/components/brief-baseline";
 import "./result.css";
 
 type Metric = "spend" | "leads" | "qualified" | "sales" | "revenue" | "romi";
@@ -157,6 +158,7 @@ export default function ResultPage() {
       {!loading && !data && !error && <div className="resultLoading">Проекты пока не созданы.</div>}
       {data && data.viewer.role !== "admin" && <LaunchPanel projectId={projectId}/>}
       {data && <>
+        {projectId&&<BaselineCard projectId={projectId} period={`${start} — ${end}`} current={{...current,budget:current?.spend,conversion:current?.leads&&current.sales!=null?current.sales/current.leads*100:null}}/>}
         <section className="resultKpis" aria-label="Главные показатели">{METRICS.map(({ key, label, icon, note }) => {
           const change = current?.[`${key}_change` as keyof Totals] as number | null | undefined;
           const prior = previous?.[key];

@@ -18,6 +18,20 @@ class Settings(BaseSettings):
     llm_api_key: str = ""
     llm_model: str = ""          # yandex: defaults to gpt://<folder>/yandexgpt/latest; anthropic: claude-sonnet-5-5
     llm_base_url: str = ""       # openai_compatible only (any OpenAI-style endpoint)
+    llm_model_chat: str = ""
+    llm_model_summary: str = ""
+    llm_model_calls: str = ""
+    llm_model_campaigns: str = ""
+    llm_timeout: float = 60
+    llm_max_input_chars: int = 24000
+    ai_daily_token_limit: int = 0
+    ai_workspace_daily_token_limit: int = 0
+    ai_prices: str = "{}"
+    agency_workspace_id: int = 0
+    brief_demo_ttl_days: int = 14
+    brief_demo_daily_cap: int = 30
+    brief_booking_url: str = "/contact"
+    brief_privacy_url: str = ""
     yandex_folder_id: str = ""   # Yandex Cloud folder for YandexGPT
     # Web push for the installable portal (PWA). Generated on first start when empty.
     vapid_public_key: str = ""
@@ -28,6 +42,7 @@ class Settings(BaseSettings):
     stt_api_key: str = ""
     stt_model: str = ""          # openai: whisper-1 by default
     stt_base_url: str = ""       # openai-style endpoint; defaults to LLM_BASE_URL or api.openai.com
+    stt_response_format: str = "verbose_json"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

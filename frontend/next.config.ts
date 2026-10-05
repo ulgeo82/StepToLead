@@ -2,8 +2,9 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: "standalone",
-  // Импорт tdata может проверять Telegram через прокси дольше обычного API-запроса.
-  experimental: { proxyTimeout: 120_000 },
+  // Запись встречи: STT нескольких аудиофрагментов и разбор брифа могут занять минуты.
+  // Обычные запросы по-прежнему ограничены таймаутом api(), загрузка записи — 30 минут.
+  experimental: { proxyTimeout: 1_800_000 },
   async redirects() {
     return [
       { source: "/telegram-accounts/:path*", destination: "/admin/accounts/:path*", permanent: false },

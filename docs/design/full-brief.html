@@ -1,0 +1,380 @@
+<title>Бриф StepToLead</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap">
+<style>
+/* Layout: sticky section rail + one section at a time; live "ceiling per lead" calculator as the signature element */
+:root{
+  --bg:#F4F8FF; --surface:#FFFFFF; --field:#F4F8FF; --field-hover:#EAF2FF;
+  --ink:#111820; --text:#17243A; --muted:#5C6C80; --faint:#8692A6;
+  --line:#E3EAF4; --accent:#006BFD; --accent-2:#167BFF; --accent-ink:#FFFFFF;
+  --accent-soft:#EDF5FF; --accent-text:#0052C2; --ring:rgba(0,107,253,.28);
+  --shadow:0 24px 60px rgba(23,36,58,.07); --ok:#0F8A5F; --ok-soft:#E7F6EF;
+  --font:'Manrope',system-ui,-apple-system,'Segoe UI',sans-serif;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0B1220; --surface:#121B2C; --field:#18233A; --field-hover:#1D2A45;
+  --ink:#F2F5FA; --text:#DCE3EE; --muted:#9AA8BE; --faint:#73819A;
+  --line:#24314A; --accent:#3D8BFF; --accent-2:#5A9DFF; --accent-ink:#FFFFFF;
+  --accent-soft:#16284A; --accent-text:#8CB8FF; --ring:rgba(61,139,255,.35);
+  --shadow:0 24px 60px rgba(0,0,0,.35); --ok:#4CC99A; --ok-soft:#123327; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0B1220; --surface:#121B2C; --field:#18233A; --field-hover:#1D2A45;
+  --ink:#F2F5FA; --text:#DCE3EE; --muted:#9AA8BE; --faint:#73819A;
+  --line:#24314A; --accent:#3D8BFF; --accent-2:#5A9DFF; --accent-ink:#FFFFFF;
+  --accent-soft:#16284A; --accent-text:#8CB8FF; --ring:rgba(61,139,255,.35);
+  --shadow:0 24px 60px rgba(0,0,0,.35); --ok:#4CC99A; --ok-soft:#123327; color-scheme:dark}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{background:var(--bg);color:var(--text);font-family:var(--font);font-size:16px;line-height:1.55;-webkit-font-smoothing:antialiased}
+button,input,textarea{font:inherit;color:inherit}
+:focus-visible{outline:3px solid var(--ring);outline-offset:2px}
+.num{font-variant-numeric:tabular-nums lining-nums}
+
+.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:color-mix(in srgb,var(--surface) 88%,transparent);backdrop-filter:blur(12px);border-bottom:1px solid var(--line)}
+.top-in{max-width:1240px;margin:0 auto;padding:14px 24px;display:flex;align-items:center;gap:16px}
+.brand{font-weight:800;font-size:18px;color:var(--ink);letter-spacing:-.01em}
+.brand span{color:var(--accent)}
+.bar{flex:1;height:6px;border-radius:3px;background:var(--line);overflow:hidden;min-width:60px}
+.bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--accent),var(--accent-2));transition:width .4s ease}
+.pct{font-weight:700;font-size:14px;color:var(--ink);min-width:44px;text-align:right}
+.saved{font-size:13px;color:var(--faint);white-space:nowrap}
+
+.wrap{max-width:1240px;margin:0 auto;padding:32px 24px 96px;display:grid;grid-template-columns:280px minmax(0,1fr);gap:40px;align-items:start}
+.rail{position:sticky;top:calc(env(safe-area-inset-top,0px) + 84px);display:flex;flex-direction:column;gap:20px}
+.nav{display:flex;flex-direction:column;gap:2px;margin:0;padding:0;list-style:none}
+.nav button{width:100%;display:flex;align-items:center;gap:12px;padding:10px 12px;border:0;background:none;border-radius:12px;cursor:pointer;text-align:left;color:var(--muted);font-weight:600;font-size:15px}
+.nav button:hover{background:var(--surface);color:var(--text)}
+.nav button[aria-current="step"]{background:var(--surface);color:var(--ink);box-shadow:var(--shadow)}
+.dot{flex:0 0 26px;height:26px;border-radius:13px;display:grid;place-items:center;font-size:12px;font-weight:700;border:1.5px solid var(--line);color:var(--faint)}
+.nav button[aria-current="step"] .dot{border-color:var(--accent);color:var(--accent)}
+.nav .done .dot{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.nav .cnt{margin-left:auto;font-size:12px;color:var(--faint);font-weight:600}
+
+.calc{background:linear-gradient(150deg,var(--accent) 0%,var(--accent-2) 100%);color:var(--accent-ink);border-radius:24px;padding:22px;box-shadow:0 20px 50px rgba(0,107,253,.25)}
+.calc small{display:block;font-size:13px;font-weight:600;opacity:.85}
+.calc strong{display:block;font-size:34px;line-height:1.1;font-weight:800;letter-spacing:-.03em;margin-top:8px}
+.calc p{margin:10px 0 0;font-size:13px;line-height:1.5;opacity:.9}
+.calc .rows{margin-top:14px;padding-top:12px;border-top:1px solid rgba(255,255,255,.25);display:grid;gap:4px;font-size:13px}
+.calc .rows div{display:flex;justify-content:space-between;gap:8px}
+
+.main{min-width:0;display:flex;flex-direction:column;gap:24px}
+.intro{display:flex;flex-direction:column;gap:18px}
+.intro h1{margin:0;font-size:clamp(32px,4.4vw,52px);line-height:1.05;font-weight:800;letter-spacing:-.035em;color:var(--ink);text-wrap:balance}
+.intro h1 span{color:var(--accent)}
+.intro p{margin:0;font-size:18px;color:var(--muted);max-width:60ch}
+.facts{display:flex;flex-wrap:wrap;gap:10px}
+.fact{display:flex;align-items:center;gap:8px;background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:8px 14px;font-size:14px;font-weight:600;color:var(--text)}
+.fact svg{flex:0 0 auto;color:var(--accent)}
+
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:28px;box-shadow:var(--shadow);overflow:hidden}
+.phead{padding:32px 36px 8px;display:flex;flex-direction:column;gap:8px}
+.step{font-size:14px;font-weight:700;color:var(--accent)}
+.phead h2{margin:0;font-size:32px;line-height:1.15;font-weight:800;letter-spacing:-.03em;color:var(--ink);text-wrap:balance}
+.phead p{margin:0;color:var(--muted);max-width:62ch}
+.qs{list-style:none;margin:0;padding:8px 36px 12px}
+.q{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.25fr);gap:12px 32px;padding:22px 0;border-top:1px solid var(--line)}
+.q:first-child{border-top:0}
+.q label,.q .lbl{display:block;font-weight:700;color:var(--ink);font-size:16px;line-height:1.4}
+.req{display:inline-block;margin-left:6px;font-size:12px;font-weight:700;color:var(--accent-text);background:var(--accent-soft);border-radius:6px;padding:1px 7px;vertical-align:2px}
+.hint{margin-top:6px;font-size:14px;color:var(--muted);line-height:1.5}
+.ctl{min-width:0}
+.in,.ta{width:100%;border:1.5px solid transparent;background:var(--field);border-radius:14px;padding:12px 14px;transition:border-color .15s,background .15s}
+.in:hover,.ta:hover{background:var(--field-hover)}
+.in:focus,.ta:focus{outline:none;border-color:var(--accent);background:var(--surface);box-shadow:0 0 0 4px var(--ring)}
+.ta{min-height:96px;resize:vertical;line-height:1.5}
+.ta.big{min-height:160px}
+.unit{display:flex;align-items:center;background:var(--field);border-radius:14px;border:1.5px solid transparent}
+.unit:focus-within{border-color:var(--accent);background:var(--surface);box-shadow:0 0 0 4px var(--ring)}
+.unit .in{background:transparent;border:0;box-shadow:none}
+.unit .in:focus{box-shadow:none}
+.unit span{padding:0 14px 0 4px;color:var(--muted);font-weight:600;white-space:nowrap;font-size:14px}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{border:1.5px solid var(--line);background:var(--surface);border-radius:999px;padding:9px 14px;font-size:14px;font-weight:600;cursor:pointer;color:var(--text);min-height:40px}
+.chip:hover{border-color:var(--accent)}
+.chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.ex{margin-top:8px;font-size:13px;color:var(--faint)}
+
+.pfoot{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;padding:20px 36px;border-top:1px solid var(--line);background:color-mix(in srgb,var(--field) 60%,var(--surface))}
+.btn{border:0;border-radius:999px;padding:14px 24px;font-weight:700;font-size:15px;cursor:pointer;min-height:48px;display:inline-flex;align-items:center;gap:8px}
+.btn.pri{background:linear-gradient(135deg,var(--accent),var(--accent-2));color:var(--accent-ink);box-shadow:0 12px 30px rgba(0,107,253,.28)}
+.btn.sec{background:var(--surface);color:var(--text);border:1.5px solid var(--line)}
+.btn.sec:hover{border-color:var(--accent)}
+.btn.ghost{background:none;color:var(--muted);padding-inline:8px}
+.left{font-size:14px;color:var(--muted)}
+
+/* Final */
+.fin{padding:32px 36px;display:flex;flex-direction:column;gap:24px}
+.score{display:flex;flex-wrap:wrap;gap:24px;align-items:center}
+.ring{--p:0;width:120px;height:120px;border-radius:50%;background:conic-gradient(var(--accent) calc(var(--p)*1%),var(--line) 0);display:grid;place-items:center;flex:0 0 auto}
+.ring b{width:96px;height:96px;border-radius:50%;background:var(--surface);display:grid;place-items:center;font-size:26px;font-weight:800;color:var(--ink)}
+.score h2{margin:0;font-size:30px;font-weight:800;letter-spacing:-.03em;color:var(--ink);text-wrap:balance}
+.score p{margin:6px 0 0;color:var(--muted);max-width:52ch}
+.miss{display:flex;flex-direction:column;gap:8px}
+.miss h3,.out h3{margin:0;font-size:17px;font-weight:700;color:var(--ink)}
+.miss ul{margin:0;padding:0;list-style:none;display:flex;flex-wrap:wrap;gap:8px}
+.miss button{border:0;background:var(--accent-soft);color:var(--accent-text);border-radius:10px;padding:8px 12px;font-size:14px;font-weight:600;cursor:pointer;text-align:left}
+.allok{background:var(--ok-soft);color:var(--ok);border-radius:14px;padding:14px 16px;font-weight:600}
+.out{display:flex;flex-direction:column;gap:10px}
+.out pre{margin:0;max-height:360px;overflow:auto;background:var(--field);border-radius:16px;padding:18px;font-size:13px;line-height:1.55;white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,'SF Mono',Menlo,monospace;color:var(--text)}
+.actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.toast{font-size:14px;font-weight:600;color:var(--ok)}
+.confirm{display:flex;flex-wrap:wrap;gap:10px;align-items:center;font-size:14px;color:var(--muted)}
+
+@media (max-width:960px){
+  .wrap{grid-template-columns:minmax(0,1fr);gap:24px;padding-top:20px}
+  .rail{display:contents}
+  .nav{order:0}
+  .main{order:1}
+  .nav{flex-direction:row;overflow-x:auto;gap:6px;padding-bottom:4px;scrollbar-width:none}
+  .nav button{white-space:nowrap;padding:8px 12px}
+  .nav .cnt{display:none}
+  .calc{order:2}
+  .nav{min-width:0}
+}
+@media (max-width:720px){
+  .q{grid-template-columns:minmax(0,1fr)}
+  .phead,.qs,.pfoot,.fin{padding-left:20px;padding-right:20px}
+  .phead h2{font-size:26px}
+  .saved{display:none}
+  .top-in{padding-inline:16px}
+  .wrap{padding-inline:16px}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<header class="top">
+  <div class="top-in">
+    <div class="brand">Step<span>To</span>Lead</div>
+    <div class="bar" aria-hidden="true"><i id="barFill"></i></div>
+    <div class="pct num" id="pct" aria-live="polite">0%</div>
+    <div class="saved" id="saved">Черновик сохраняется автоматически</div>
+  </div>
+</header>
+
+<div class="wrap">
+  <aside class="rail">
+    <ol class="nav" id="nav" aria-label="Разделы брифа"></ol>
+    <div class="calc" aria-live="polite">
+      <small>Предел цены заявки</small>
+      <strong class="num" id="calcVal">—</strong>
+      <p id="calcNote">Укажите средний чек, маржу и сколько заявок из 100 покупают — посчитаем, сколько можно платить за заявку без убытка.</p>
+      <div class="rows num" id="calcRows" hidden></div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <section class="intro" id="intro">
+      <h1>Бриф на запуск маркетинга<br><span>от заявки до продажи</span></h1>
+      <p>По вашим ответам мы посчитаем экономику рекламы, найдём, где теряются деньги, и настроим ИИ-помощника, который будет говорить с клиентами вашими словами.</p>
+      <div class="facts">
+        <span class="fact"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>30–40 минут</span>
+        <span class="fact"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l4 4L19 6"/></svg>Можно прерваться и вернуться</span>
+        <span class="fact"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="5" width="16" height="12" rx="3"/><path d="M9 21h6M12 17v4"/></svg>Ответы станут базой знаний ИИ</span>
+      </div>
+    </section>
+
+    <section class="panel" id="panel" aria-live="polite"></section>
+  </main>
+</div>
+
+<script>
+(function(){
+var S=[
+ {k:'company',t:'О компании',d:'Коротко о бизнесе и о том, с кем держим связь.',q:[
+  ['name','Название компании и сайт','text',1,'И ссылки на соцсети, если есть'],
+  ['what','Чем занимаетесь, одной фразой','area',1,'Как объяснили бы знакомому','Делаем кухни на заказ среднего и премиум-сегмента в Самаре'],
+  ['geo','Город и география работы','text',1,'Где продаёте и куда готовы выезжать или доставлять'],
+  ['years','Сколько лет на рынке','num',0,'',null,'лет'],
+  ['staff','Сколько сотрудников, из них в продажах','text',0,'Например: 25, в продажах 3'],
+  ['turnover','Оборот в месяц','text',0,'Можно диапазоном. Нужен, чтобы поставить реалистичные цели'],
+  ['season','Сезонность','area',0,'Какие месяцы сильные, какие провальные'],
+  ['decider','Кто принимает решения по маркетингу','text',1,'Имя, должность, телефон или Telegram'],
+  ['daily','Кто будет на связи каждый день','text',0,'Если это другой человек']]},
+ {k:'econ',t:'Продукт и экономика',d:'Из этих цифр считаем главное: сколько можно платить за клиента и оставаться в плюсе.',q:[
+  ['services','Основные услуги или товары','area',1,'В порядке важности для денег, а не по каталогу'],
+  ['priority','Что продавать в первую очередь','area',1,'Самое маржинальное или то, что нужно раскачать'],
+  ['check','Средний чек','num',1,'По основной услуге',null,'₽'],
+  ['margin','Маржа с одной продажи','num',1,'Сколько процентов от чека остаётся после себестоимости',null,'%'],
+  ['cycle','Сколько проходит от заявки до оплаты','one',0,'',['День','Неделя','Месяц','1–3 месяца','Дольше']],
+  ['pricing','Как формируется цена','one',0,'',['Фиксированный прайс','После замера или консультации','Индивидуально']],
+  ['repeat','Повторные покупки и рекомендации','area',0,'Как часто и на какую сумму за год'],
+  ['offers','Акции, рассрочка, гарантии','area',0,'Всё, что можно сделать предложением в рекламе'],
+  ['capacity','Сколько новых клиентов в месяц можете обслужить','num',0,'Потолок производства или команды',null,'в месяц']]},
+ {k:'clients',t:'Клиенты',d:'Нужны живые слова клиентов: их фразы потом становятся заголовками объявлений.',q:[
+  ['ideal','Кто ваш лучший клиент','area',1,'Возраст, доход, ситуация. Для бизнеса: отрасль, размер, кто покупает'],
+  ['anti','С кем работать не хотите','area',0,'Маленький бюджет, чужой регион, «просто спросить цену»'],
+  ['pain','С какой проблемой к вам приходят','area',1,'Дословно, как клиент говорит по телефону'],
+  ['why','Почему в итоге выбирают вас','area',1,'То, что называют сами клиенты, а не то, что написано на сайте'],
+  ['alt','Как решают задачу без вас','area',0,'Идут к конкуренту, делают сами, откладывают'],
+  ['objections','Три главных возражения и ваши ответы','area',1,'«Дорого», «подумаю», «у других быстрее»'],
+  ['fears','Чего клиент боится перед покупкой','area',0,'Обмана, срыва сроков, скрытых доплат'],
+  ['dm','Кто принимает решение о покупке','one',0,'',['Один человек','Семья','Руководитель и бухгалтерия','Комиссия']],
+  ['proof','Отзывы, кейсы, фото работ','area',0,'Ссылки']]},
+ {k:'comp',t:'Конкуренты',d:'Где вы сильнее и где в рекламе лучше не спорить.',q:[
+  ['list','3–5 главных конкурентов','area',1,'Сайты. С кем вас сравнивают чаще всего'],
+  ['better','Чем вы лучше каждого','area',1,'Фактами: цена, сроки, качество, сервис, гарантия'],
+  ['weaker','В чём конкуренты сильнее','area',0,'Честно — нам нужно знать, где не спорить'],
+  ['like','Чей маркетинг вам нравится','area',0,'В своей нише или в любой']]},
+ {k:'sales',t:'Продажи',d:'Реклама даёт заявки, а деньги приносят продажи. Чаще всего бюджет теряется между ними.',q:[
+  ['path','Путь клиента от заявки до оплаты','area',1,'Вашими этапами','Заявка → звонок → замер → расчёт → договор'],
+  ['target','Какие заявки считаете целевыми','area',1,'И какие точно нет: спам, не тот город, малый бюджет'],
+  ['conv','Сколько заявок из 100 становятся продажей','num',1,'Примерно. Нужна для расчёта цены заявки',null,'из 100'],
+  ['response','Как быстро отвечаете на новую заявку','one',0,'Честно, в среднем',['До 5 минут','До 15 минут','В течение часа','В течение дня','Не знаем']],
+  ['hours','Кто обрабатывает заявки и в какие часы','text',0,'Работаете ли вечером и в выходные'],
+  ['crm','Где хранятся заявки','many',1,'',['amoCRM','Битрикс24','Таблица','Мессенджеры','Нигде']],
+  ['rec','Записываются ли звонки','one',0,'',['Да','Частично','Нет']],
+  ['loss','Почему теряете клиентов после заявки','area',0,'Дорого, не дозвонились, ушли к конкуренту']]},
+ {k:'mkt',t:'Маркетинг сейчас',d:'Что уже работает, сколько стоит и что не сработало.',q:[
+  ['channels','Откуда приходят клиенты','many',1,'Отметьте все',['Яндекс Директ','VK Реклама','Авито','Яндекс Карты','2ГИС','SEO','Соцсети','Сарафан','Партнёры']],
+  ['budget','Рекламный бюджет','num',1,'Без оплаты подрядчикам',null,'₽ в месяц'],
+  ['leads','Заявок в месяц','num',0,'В среднем за последние три месяца',null,'в месяц'],
+  ['cpl','Стоимость заявки сейчас','num',0,'Если знаете',null,'₽'],
+  ['tried','Что пробовали и что не сработало','area',0,'И почему, по вашему мнению'],
+  ['who','Кто ведёт рекламу сейчас','one',0,'',['Сами','Фрилансер','Агентство','Никто']],
+  ['site','Сайт и посадочные страницы','text',0,'Ссылки и на чём сделан сайт'],
+  ['analytics','Что настроено в аналитике','many',0,'',['Яндекс Метрика','Цели','Коллтрекинг','Сквозная аналитика','Ничего']]]},
+ {k:'goals',t:'Цели и бюджет',d:'По какой цифре вы поймёте, что мы работаем хорошо.',q:[
+  ['g3','Чего хотите достичь за 3 месяца','area',1,'В цифрах: заявки, продажи, выручка'],
+  ['gy','А за год','area',0,'Рост, новый город, новое направление'],
+  ['kpi','Главная цифра успеха','one',1,'',['Стоимость продажи','Число продаж','Выручка','Число заявок','Стоимость заявки']],
+  ['budgetReady','Бюджет, который готовы вкладывать','num',1,'На старте, в месяц',null,'₽ в месяц'],
+  ['launch','Когда нужно запуститься','text',0,'И есть ли жёсткий срок: сезон, выставка, открытие'],
+  ['forbidden','Что нельзя делать в рекламе','area',0,'Демпинг, некоторые обещания, упоминание конкурентов']]},
+ {k:'ai',t:'ИИ-помощник',d:'ИИ в портале подсказывает менеджерам ответы и проверяет звонки. Он знает о бизнесе только то, что здесь написано.',q:[
+  ['address','Как обращаетесь к клиентам','one',1,'',['На «вы»','На «ты»']],
+  ['style','Стиль общения','many',1,'',['Строго','Дружелюбно','Коротко','Подробно','С эмодзи']],
+  ['intro','Как представляетесь','text',0,'Первая фраза менеджера в чате и по телефону'],
+  ['goal','Цель первого разговора','text',1,'Записать на замер, встречу, отправить расчёт, пригласить в шоурум'],
+  ['ask','Что нужно узнать у клиента','area',1,'Вопросы, чтобы понять задачу и бюджет'],
+  ['faq','Частые вопросы клиентов и ваши ответы','area',1,'5–10 штук: сроки, оплата, доставка, гарантия, материалы','Сколько делаете? — От 21 рабочего дня после замера.',null,1],
+  ['prices','Какие цены можно называть','area',1,'«От … ₽», вилки, или цену называет только менеджер'],
+  ['never','Что нельзя обещать и говорить','area',1,'Скидки без согласования, сроки, стоп-слова'],
+  ['escalate','Когда передать разговор руководителю','area',0,'Жалоба, крупный заказ, нестандартная задача'],
+  ['checklist','По каким пунктам оценивать звонок','area',1,'Поздоровался, выяснил задачу, назвал вилку, договорился о следующем шаге'],
+  ['contacts','Адрес, график, контакты для клиентов','area',0,'То, что ИИ может сообщать без проверки'],
+  ['examples','Примеры удачных переписок','area',0,'Вставьте 2–3 диалога — ИИ будет писать в том же стиле',null,null,1]]},
+ {k:'access',t:'Доступы',d:'Доступы вы выдаёте сами в настройках сервисов. Пароли сюда не пишите.',q:[
+  ['given','Что уже готовы открыть','many',0,'Отметьте, остальное подскажем на созвоне',['Яндекс Директ','Яндекс Метрика','VK Реклама','Авито','Яндекс Карты и 2ГИС','CRM','Телефония','Сайт']],
+  ['materials','Что пришлёте','many',0,'',['Логотип и цвета','Фото работ и команды','Прайс','Коммерческое предложение','Скрипты продаж']],
+  ['access_note','Комментарий','area',0,'Кто выдаст доступы и когда']]},
+ {k:'work',t:'Как работаем вместе',d:'Чтобы с первой недели всё было удобно.',q:[
+  ['channel','Где удобно общаться','many',0,'',['Telegram','WhatsApp','MAX','Созвоны']],
+  ['report','Как часто разбирать результаты','one',0,'Цифры в портале видны всегда',['Раз в неделю','Раз в две недели','Раз в месяц']],
+  ['approve','Кто согласует объявления и тексты','text',0,'И за какой срок'],
+  ['bad','Что было плохо с прошлыми подрядчиками','area',0,'Чтобы мы этого не повторили'],
+  ['more','Что ещё нам важно знать','area',0,'']]}
+];
+var KEY='stl-brief-v1', A={}, cur=0, timer;
+try{A=JSON.parse(localStorage.getItem(KEY)||'{}')||{}}catch(e){A={}}
+var $=function(id){return document.getElementById(id)};
+function el(tag,cls,txt){var e=document.createElement(tag);if(cls)e.className=cls;if(txt!=null)e.textContent=txt;return e}
+function id(s,q){return s.k+'.'+q[0]}
+function filled(v){return Array.isArray(v)?v.length>0:(v!=null&&String(v).trim()!=='')}
+function stats(s){var t=0,f=0,r=0,rf=0;s.q.forEach(function(q){t++;var ok=filled(A[id(s,q)]);if(ok)f++;if(q[3]){r++;if(ok)rf++}});return{t:t,f:f,r:r,rf:rf}}
+function total(){var t=0,f=0;S.forEach(function(s){var x=stats(s);t+=x.r;f+=x.rf});return t?Math.round(f/t*100):0}
+function save(){try{localStorage.setItem(KEY,JSON.stringify(A));$('saved').textContent='Черновик сохранён'}catch(e){$('saved').textContent='Черновик не сохраняется в этом браузере'}}
+function changed(){clearTimeout(timer);timer=setTimeout(save,400);progress();calc()}
+function fmt(n){return Math.round(n).toLocaleString('ru-RU')+' ₽'}
+function numv(k){var v=parseFloat(String(A[k]||'').replace(/\s/g,'').replace(',','.'));return isFinite(v)?v:null}
+function calc(){
+  var ch=numv('econ.check'),m=numv('econ.margin'),c=numv('sales.conv'),rows=$('calcRows');
+  if(ch&&m&&c){var prof=ch*m/100,cpl=prof*c/100;
+    $('calcVal').textContent='до '+fmt(cpl);
+    $('calcNote').textContent='Столько можно платить за одну заявку, чтобы реклама окупалась с первой продажи.';
+    rows.hidden=false;rows.textContent='';
+    [['Прибыль с продажи',fmt(prof)],['Цена заявки сейчас',numv('mkt.cpl')?fmt(numv('mkt.cpl')):'не указана']].forEach(function(r){var d=el('div');d.appendChild(el('span',null,r[0]));d.appendChild(el('b',null,r[1]));rows.appendChild(d)});
+  }else{$('calcVal').textContent='—';$('calcNote').textContent='Укажите средний чек, маржу и сколько заявок из 100 покупают — посчитаем, сколько можно платить за заявку без убытка.';rows.hidden=true}
+}
+function progress(){
+  var p=total();$('pct').textContent=p+'%';$('barFill').style.width=p+'%';
+  var items=$('nav').children;
+  S.forEach(function(s,i){var x=stats(s),b=items[i]&&items[i].firstChild;if(!b)return;b.classList.toggle('done',x.r?x.rf===x.r&&x.f>0:x.f>0);b.querySelector('.cnt').textContent=x.f+'/'+x.t});
+}
+function nav(){
+  var n=$('nav');n.textContent='';
+  S.concat([{k:'fin',t:'Готово'}]).forEach(function(s,i){
+    var li=el('li'),b=el('button');b.type='button';
+    var d=el('span','dot',i<S.length?String(i+1):'✓');b.appendChild(d);b.appendChild(el('span',null,s.t));b.appendChild(el('span','cnt',''));
+    if(i===cur)b.setAttribute('aria-current','step');
+    b.addEventListener('click',function(){go(i)});li.appendChild(b);n.appendChild(li)});
+  progress();
+}
+function control(s,q){
+  var k=id(s,q),type=q[2],box=el('div','ctl'),v=A[k];
+  if(type==='text'){var i=el('input','in');i.id='f-'+k;i.type='text';i.value=v||'';i.addEventListener('input',function(){A[k]=i.value;changed()});box.appendChild(i)}
+  else if(type==='area'){var t=el('textarea','ta'+(q[7]?' big':''));t.id='f-'+k;t.value=v||'';if(q[5])t.placeholder='Например: '+q[5];t.addEventListener('input',function(){A[k]=t.value;changed()});box.appendChild(t)}
+  else if(type==='num'){var u=el('div','unit'),n=el('input','in num');n.id='f-'+k;n.type='text';n.inputMode='decimal';n.value=v||'';n.addEventListener('input',function(){A[k]=n.value;changed()});u.appendChild(n);u.appendChild(el('span',null,q[6]||''));box.appendChild(u)}
+  else{var multi=type==='many',c=el('div','chips');c.setAttribute('role','group');c.id='f-'+k;
+    (q[5]||[]).forEach(function(o){var b=el('button','chip',o);b.type='button';
+      var on=multi?(Array.isArray(v)&&v.indexOf(o)>-1):v===o;b.setAttribute('aria-pressed',on?'true':'false');
+      b.addEventListener('click',function(){
+        if(multi){var arr=Array.isArray(A[k])?A[k].slice():[];var j=arr.indexOf(o);if(j>-1)arr.splice(j,1);else arr.push(o);A[k]=arr;b.setAttribute('aria-pressed',j>-1?'false':'true')}
+        else{A[k]=A[k]===o?'':o;Array.prototype.forEach.call(c.children,function(x){x.setAttribute('aria-pressed',x.textContent===A[k]?'true':'false')})}
+        changed()});c.appendChild(b)});box.appendChild(c)}
+  if(type!=='area'&&q[5]&&typeof q[5]==='string')box.appendChild(el('div','ex','Например: '+q[5]));
+  return box;
+}
+function section(i){
+  var s=S[i],p=$('panel');p.textContent='';
+  var h=el('div','phead');h.appendChild(el('div','step','Раздел '+(i+1)+' из '+S.length));h.appendChild(el('h2',null,s.t));h.appendChild(el('p',null,s.d));p.appendChild(h);
+  var ul=el('ol','qs');
+  s.q.forEach(function(q){var li=el('li','q'),l=el('div');
+    var lab=el(q[2]==='one'||q[2]==='many'?'div':'label',q[2]==='one'||q[2]==='many'?'lbl':null,q[1]);
+    if(lab.tagName==='LABEL')lab.htmlFor='f-'+id(s,q);
+    if(q[3]){var r=el('span','req','обязательно');lab.appendChild(r)}
+    l.appendChild(lab);if(q[4])l.appendChild(el('div','hint',q[4]));
+    li.appendChild(l);li.appendChild(control(s,q));ul.appendChild(li)});
+  p.appendChild(ul);
+  var f=el('div','pfoot'),lft=el('div','actions');
+  if(i>0){var bk=el('button','btn sec','Назад');bk.type='button';bk.addEventListener('click',function(){go(i-1)});lft.appendChild(bk)}
+  var x=stats(s);lft.appendChild(el('span','left',x.f+' из '+x.t+' ответов'));
+  var nx=el('button','btn pri',i===S.length-1?'Проверить и отправить':'Дальше: '+S[i+1].t);nx.type='button';nx.addEventListener('click',function(){go(i+1)});
+  f.appendChild(lft);f.appendChild(nx);p.appendChild(f);
+}
+function md(){
+  var name=(A['company.name']||'Компания').split(/[\n,]/)[0].trim();
+  var out=['# Бриф: '+name,'','Источник: бриф StepToLead. Заполнено обязательных: '+total()+'%.',''];
+  var ch=numv('econ.check'),m=numv('econ.margin'),c=numv('sales.conv');
+  if(ch&&m&&c)out.push('Расчёт: прибыль с продажи '+fmt(ch*m/100)+', предел цены заявки '+fmt(ch*m/100*c/100)+'.','');
+  S.forEach(function(s){var lines=[];s.q.forEach(function(q){var v=A[id(s,q)];if(!filled(v))return;
+    v=Array.isArray(v)?v.join(', '):String(v).trim();if(q[2]==='num'&&q[6])v+=' '+q[6];lines.push('**'+q[1]+':** '+v)});
+    if(lines.length){out.push('## '+s.t,'');lines.forEach(function(l){out.push(l,'')})}});
+  return out.join('\n').trim()+'\n';
+}
+function finish(){
+  var p=$('panel');p.textContent='';var w=el('div','fin'),pc=total();
+  var sc=el('div','score'),r=el('div','ring');r.style.setProperty('--p',pc);r.appendChild(el('b','num',pc+'%'));sc.appendChild(r);
+  var t=el('div');t.appendChild(el('h2',null,pc===100?'Бриф заполнен':'Почти готово'));
+  t.appendChild(el('p',null,pc===100?'Скопируйте или скачайте ответы и отправьте вашему менеджеру StepToLead. Этот же текст загружается в портал как база знаний ИИ.':'Можно отправить и так, но без обязательных ответов мы не сможем посчитать экономику и настроить ИИ. Нажмите на вопрос, чтобы вернуться к нему.'));
+  sc.appendChild(t);w.appendChild(sc);
+  var miss=[];S.forEach(function(s,i){s.q.forEach(function(q){if(q[3]&&!filled(A[id(s,q)]))miss.push([i,s,q])})});
+  var mb=el('div','miss');
+  if(miss.length){mb.appendChild(el('h3',null,'Не хватает обязательных ответов: '+miss.length));var ul=el('ul');
+    miss.forEach(function(m){var li=el('li'),b=el('button',null,m[1].t+': '+m[2][1]);b.type='button';b.addEventListener('click',function(){go(m[0]);setTimeout(function(){var f=$('f-'+id(m[1],m[2]));if(f){f.scrollIntoView({block:'center'});(f.focus&&f.focus())}},50)});li.appendChild(b);ul.appendChild(li)});mb.appendChild(ul)}
+  else mb.appendChild(el('div','allok','Все обязательные вопросы заполнены'));
+  w.appendChild(mb);
+  var o=el('div','out');o.appendChild(el('h3',null,'Ваши ответы'));var pre=el('pre');pre.id='mdOut';pre.textContent=md();o.appendChild(pre);
+  var a=el('div','actions'),cp=el('button','btn pri','Скопировать ответы'),msg=el('span','toast','');cp.type='button';
+  cp.addEventListener('click',function(){var txt=md();var done=function(){msg.textContent='Скопировано'};
+    try{navigator.clipboard.writeText(txt).then(done,function(){sel(pre);msg.textContent='Текст выделен — нажмите Ctrl+C'})}catch(e){sel(pre);msg.textContent='Текст выделен — нажмите Ctrl+C'}});
+  a.appendChild(cp);
+  var dl=el('button','btn sec','Скачать файл');dl.type='button';dl.hidden=true;a.appendChild(dl);
+  if(window.claude&&claude.use){claude.use('downloads').then(function(d){if(!d)return;dl.hidden=false;dl.onclick=function(){var nm=(A['company.name']||'бриф').split(/[\n,]/)[0].trim().replace(/[^\wа-яё -]/gi,'').slice(0,40)||'бриф';
+    d.save({filename:'Бриф '+nm+'.md',data:md()}).then(function(){msg.textContent='Файл сохранён'},function(){msg.textContent='Файл не сохранён'})}}).catch(function(){})}
+  a.appendChild(msg);o.appendChild(a);w.appendChild(o);
+  var cf=el('div','confirm'),clr=el('button','btn ghost','Очистить бриф');clr.type='button';
+  clr.addEventListener('click',function(){cf.textContent='';cf.appendChild(el('span',null,'Удалить все ответы из этого браузера?'));
+    var y=el('button','btn sec','Да, очистить');y.type='button';y.addEventListener('click',function(){A={};save();go(0)});
+    var n=el('button','btn ghost','Отмена');n.type='button';n.addEventListener('click',function(){finish()});cf.appendChild(y);cf.appendChild(n)});
+  cf.appendChild(clr);w.appendChild(cf);p.appendChild(w);
+}
+function sel(n){try{var r=document.createRange();r.selectNodeContents(n);var s=getSelection();s.removeAllRanges();s.addRange(r)}catch(e){}}
+function go(i){cur=Math.max(0,Math.min(S.length,i));$('intro').hidden=cur!==0;nav();if(cur===S.length)finish();else section(cur);
+  try{localStorage.setItem(KEY+'-step',String(cur))}catch(e){}
+  if(i!==undefined)window.scrollTo({top:0,behavior:'smooth'})}
+var st=0;try{st=parseInt(localStorage.getItem(KEY+'-step')||'0',10)||0}catch(e){}
+cur=st;$('intro').hidden=cur!==0;nav();if(cur===S.length)finish();else section(cur);calc();
+})();
+</script>

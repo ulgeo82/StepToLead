@@ -4,6 +4,7 @@ from app.api.routes import access, growth
 
 from app.api.routes import campaigns, leads, proxies, telegram_accounts, telegram_parser, marketing, portal, result, analytics, ads, team, settings, crm, website, tilda, telegram_bot, crm_pro, messaging, telephony, launch, push, documents, widget, care, amo_import, maps, monitor
 from app.api.routes import automation
+from app.api.routes import ai_admin
 
 internal_router = APIRouter(dependencies=[Depends(require_admin)])
 internal_router.include_router(campaigns.router)
@@ -14,6 +15,9 @@ internal_router.include_router(proxies.router)
 internal_router.include_router(automation.router)
 internal_router.include_router(marketing.router)
 api_router = APIRouter()
+from app.api.routes import brief
+api_router.include_router(brief.router)
+api_router.include_router(ai_admin.router)
 api_router.include_router(access.router)
 api_router.include_router(growth.public_router)
 api_router.include_router(growth.admin_router)

@@ -1,5 +1,5 @@
 "use client";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import "../../growth/growth.css";
@@ -10,6 +10,7 @@ const json = (body: unknown) => ({ method: "POST", headers: { "Content-Type": "a
 export default function PortalReset() {
   const [step, setStep] = useState<"login" | "code" | "done">("login");
   const [username, setUsername] = useState("");
+  useEffect(() => { setUsername(new URLSearchParams(window.location.search).get("username") || ""); }, []);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);

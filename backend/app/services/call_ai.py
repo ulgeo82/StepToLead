@@ -11,6 +11,7 @@ import base64
 import json
 import logging
 import re
+import time
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -66,7 +67,7 @@ def stt_configured() -> bool:
 
 
 def available() -> bool:
-    return stt_configured() and ai.configured()
+    return stt_configured() and ai.configured("calls")
 
 
 def project_settings(project: Project | None) -> dict:
@@ -81,17 +82,17 @@ def _yandex_headers() -> dict:
     return {"Authorization": f"Api-Key {stt_key()}", "x-folder-id": settings.yandex_folder_id}
 
 
-async def yandex_start(audio: bytes) -> str:
+async def _yandex_start(audio: bytes) -> str:
     if len(audio) > MAX_BYTES:
         raise STTError("Запись длиннее ~40 минут — такие звонки не распознаём")
     body = {"content": base64.b64encode(audio).decode(),
-            "recognitionModel": {"model": "general", "audioFormat": {"containerAudio": {"containerAudioType": "MP3"}},
+            "recognitionModel": {"model": "general", "audioFormat": {"containerAudio": {"containerAudioType": "WAV" if audio[:4] == b"RIFF" else "MP3"}},
                                  "textNormalization": {"textNormalization": "TEXT_NORMALIZATION_ENABLED", "literatureText": True},
                                  "languageRestriction": {"restrictionType": "WHITELIST", "languageCode": ["ru-RU"]}}}
     async with httpx.AsyncClient(timeout=60) as client:
         response = await client.post(f"{STT_URL}/recognizeFileAsync", headers=_yandex_headers(), json=body)
     if response.status_code >= 400:
-        logger.warning("speechkit start status=%s body=%s", response.status_code, response.text[:300])
+        logger.warning("speechkit start status=%s", response.status_code)
         raise STTError("SpeechKit отклонил запись" + (" — проверьте ключ и права ai.speechkit-stt.user" if response.status_code in {401, 403} else ""))
     op = (response.json() or {}).get("id")
     if not op:
@@ -122,7 +123,7 @@ def parse_yandex(raw: str) -> list[dict]:
     return sorted(segments, key=lambda s: s["start"])
 
 
-async def yandex_poll(op: str) -> list[dict] | None:
+async def _yandex_poll(op: str) -> list[dict] | None:
     """None while recognition is still running."""
     async with httpx.AsyncClient(timeout=60) as client:
         status = await client.get(f"{OPERATIONS_URL}/{op}", headers=_yandex_headers())
@@ -132,27 +133,82 @@ async def yandex_poll(op: str) -> list[dict] | None:
         if not data.get("done"):
             return None
         if data.get("error"):
-            raise STTError(f"SpeechKit: {str(data['error'].get('message') or 'ошибка распознавания')[:200]}")
+            raise STTError("SpeechKit не смог распознать запись: проверьте формат и доступ к сервису")
         result = await client.get(f"{STT_URL}/getRecognition", params={"operation_id": op}, headers=_yandex_headers())
     if result.status_code >= 400:
         raise STTError("SpeechKit не отдал результат распознавания")
     return parse_yandex(result.text)
 
 
-async def whisper(audio: bytes) -> list[dict]:
+async def yandex_poll(op, *, workspace_id=None):
+    """Account final STT result/errors, not every still-running status check."""
+    from app.services import ai_usage
+    started = time.monotonic(); output = None; error = None
+    try:
+        output = await _yandex_poll(op)
+        if output == []:
+            raise STTError("SpeechKit не распознал речь в записи")
+        return output
+    except httpx.HTTPError:
+        error = "SpeechKit недоступен или не ответил вовремя"
+        raise STTError(error) from None
+    except (STTError, ValueError, KeyError, TypeError) as exc:
+        error = str(exc) if isinstance(exc, STTError) else "SpeechKit вернул некорректный ответ"
+        raise STTError(error) from None
+    finally:
+        if output is not None or error:
+            # Retrieving an already-paid operation must not be blocked by a new daily limit.
+            uid = await ai_usage.reserve("stt", "yandex", "general", workspace_id, check_limits=False)
+            await ai_usage.finish(uid, duration_ms=int((time.monotonic() - started) * 1000), error=error,
+                                  tokens_out=ai_usage.estimate(transcript_text(output)) if output else 0)
+
+
+async def _whisper(audio: bytes) -> list[dict]:
     base = (settings.stt_base_url or settings.llm_base_url or "https://api.openai.com/v1").rstrip("/")
     async with httpx.AsyncClient(timeout=180) as client:
         response = await client.post(f"{base}/audio/transcriptions", headers={"Authorization": f"Bearer {stt_key()}"},
-                                     files={"file": ("call.mp3", audio, "audio/mpeg")},
+                                     files={"file": ("call.wav" if audio[:4] == b"RIFF" else "call.mp3", audio,
+                                                     "audio/wav" if audio[:4] == b"RIFF" else "audio/mpeg")},
                                      data={"model": settings.stt_model or "whisper-1", "language": "ru",
-                                           "response_format": "verbose_json"})
+                                           "response_format": settings.stt_response_format})
     if response.status_code >= 400:
-        logger.warning("whisper status=%s body=%s", response.status_code, response.text[:300])
-        raise STTError("Сервис распознавания речи отклонил запись")
+        logger.warning("whisper status=%s", response.status_code)
+        raise STTError(ai.failure(response.status_code))
     data = response.json() or {}
     segments = [{"ch": "0", "start": int(s.get("start") or 0), "text": (s.get("text") or "").strip()}
                 for s in data.get("segments") or [] if (s.get("text") or "").strip()]
     return segments or ([{"ch": "0", "start": 0, "text": data["text"].strip()}] if (data.get("text") or "").strip() else [])
+
+
+async def tracked_stt(operation, audio, workspace_id=None, audio_seconds=0):
+    from app.services import ai_usage
+    if not stt_configured():
+        raise STTError("Распознавание речи не подключено: укажите провайдера и ключ")
+    uid = await ai_usage.reserve("stt", stt_provider(), settings.stt_model or ("general" if stt_provider() == "yandex" else "whisper-1"),
+                                 workspace_id, audio_seconds=audio_seconds)
+    started = time.monotonic(); error = None; output = []
+    try:
+        output = await operation(audio)
+        if isinstance(output, list) and not output:
+            raise STTError("В записи не удалось распознать речь")
+        return output
+    except httpx.HTTPError:
+        error = "Сервис распознавания речи недоступен или не ответил вовремя"
+        raise STTError(error) from None
+    except (STTError, ValueError, KeyError, TypeError) as exc:
+        error = str(exc) if isinstance(exc, STTError) else "Сервис распознавания вернул некорректный ответ"
+        raise STTError(error) from None
+    finally:
+        await ai_usage.finish(uid, duration_ms=int((time.monotonic() - started) * 1000), error=error,
+                              tokens_out=ai_usage.estimate(transcript_text(output)) if isinstance(output, list) else 0)
+
+
+async def whisper(audio, *, workspace_id=None, audio_seconds=0):
+    return await tracked_stt(_whisper, audio, workspace_id, audio_seconds)
+
+
+async def yandex_start(audio, *, workspace_id=None, audio_seconds=0):
+    return await tracked_stt(_yandex_start, audio, workspace_id, audio_seconds)
 
 
 def transcript_text(segments: list[dict]) -> str:
@@ -176,19 +232,52 @@ def analysis_prompt(project_name: str, checklist: list[str], knowledge: str) -> 
             '"client_mood": "позитив | нейтрально | негатив", "checklist": [{"item": "пункт", "ok": true, "comment": "коротко почему"}], '
             '"advice": "1–2 конкретных совета менеджеру, что улучшить"}\n'
             f"Пункты чек-листа (оцени каждый, порядок сохрани):\n{items}\n"
+            "Оценивай только явно подтверждённые действия, не додумывай факты. "
+            "Для составного пункта ok=true только если подтверждены ВСЕ его части; иначе ok=false и укажи, чего не хватает. "
+            "Если возражений не было, пункт об их отработке ok=false, комментарий: «Не применимо: возражений не было». "
+            "Не считай отсутствие возражений доказательством их отработки.\n"
             "Если звонок не про продажу (ошибся номером, спам, автоответчик) — summary объясняет это, checklist пустой.\n"
             + (f"\nСправка о компании (для контекста):\n{knowledge[:3000]}\n" if knowledge else ""))
 
 
 def parse_json(text: str) -> dict:
-    match = re.search(r"\{.*\}", text or "", re.S)
-    if not match:
-        raise ai.AIError("ИИ вернул ответ не в том формате")
-    try:
-        data = json.loads(match.group(0))
-    except ValueError:
-        raise ai.AIError("ИИ вернул ответ не в том формате") from None
-    return data if isinstance(data, dict) else {}
+    value = re.sub(r"```(?:json)?", "", text or "", flags=re.I).strip()
+    for match in re.finditer(r"\{", value):
+        try:
+            data, _ = json.JSONDecoder().raw_decode(value[match.start():])
+        except ValueError:
+            continue
+        if isinstance(data, dict):
+            return data
+    raise ai.AIError("ИИ вернул некорректный JSON анализа звонка")
+
+
+def validate_analysis(raw):
+    data = parse_json(raw)
+    for key in ("summary", "need", "next_step", "client_mood", "advice"):
+        if not isinstance(data.get(key), str):
+            raise ai.AIError("ИИ вернул JSON без обязательных полей анализа звонка")
+    if not data["summary"].strip() or data["client_mood"].lower() not in {"позитив", "нейтрально", "негатив"}:
+        raise ai.AIError("ИИ вернул некорректный JSON: пустое резюме или неизвестное настроение")
+    if not isinstance(data.get("objections"), list) or not all(isinstance(x, str) for x in data["objections"]):
+        raise ai.AIError("ИИ вернул некорректный список возражений")
+    if not isinstance(data.get("checklist"), list) or not all(isinstance(x, dict) and isinstance(x.get("item"), str)
+            and isinstance(x.get("ok"), bool) and isinstance(x.get("comment"), str) for x in data["checklist"]):
+        raise ai.AIError("ИИ вернул некорректный чек-лист звонка")
+    return data
+
+
+async def analyze_text(prompt, messages, *, workspace_id=None, model=None):
+    for attempt in range(2):
+        try:
+            raw = await ai.complete(prompt, messages, max_tokens=1200, temperature=0.1, feature="calls",
+                                    workspace_id=workspace_id, model=model, validator=validate_analysis)
+            return validate_analysis(raw)
+        except ai.AIError as exc:
+            if attempt or not ("JSON" in str(exc) or "список возражений" in str(exc) or "чек-лист" in str(exc)):
+                raise
+            prompt = "Предыдущий ответ был некорректным. Верни только валидный JSON по указанной схеме, без обёрток и пояснений.\n" + prompt
+    raise ai.AIError("ИИ не смог сформировать корректный анализ звонка")
 
 
 def clean_analysis(data: dict, checklist: list[str]) -> dict:
@@ -221,10 +310,10 @@ async def analyze(db: AsyncSession, call: Call, segments: list[dict]) -> None:
         call.meta = meta
         return
     knowledge = str(((project.portal_state or {}).get("ai") or {}).get("knowledge") or "")
-    raw = await ai.complete(analysis_prompt(project.name, conf["checklist"], knowledge),
+    data = await analyze_text(analysis_prompt(project.name, conf["checklist"], knowledge),
                             [{"role": "user", "content": f"Расшифровка звонка ({call.duration_sec // 60} мин):\n{text[-14000:]}"}],
-                            max_tokens=1200, temperature=0.1)
-    result = clean_analysis(parse_json(raw), conf["checklist"])
+                            workspace_id=call.workspace_id)
+    result = clean_analysis(data, conf["checklist"])
     meta["ai"] = {**result, "transcript": segments[:600], "at": now().isoformat(), "provider": ai.provider_name()}
     call.meta, call.ai_status = meta, "done"
     if call.deal_id:
@@ -265,20 +354,22 @@ async def step(db: AsyncSession, call: Call) -> None:
         if call.ai_status == "stt":
             if datetime.fromisoformat(info.get("since") or now().isoformat()) < now() - timedelta(minutes=40):
                 raise STTError("Распознавание речи не завершилось за 40 минут")
-            segments = await yandex_poll(info["op"])
+            segments = await yandex_poll(info["op"], workspace_id=call.workspace_id)
             if segments is None:
                 return
             await analyze(db, call, segments)
             return
         audio = await _audio(call)
         if stt_provider() == "yandex":
-            op = await yandex_start(audio)
+            op = await yandex_start(audio, workspace_id=call.workspace_id, audio_seconds=call.duration_sec)
             call.meta = {**(call.meta or {}), "ai": {**info, "op": op, "since": now().isoformat(), "error": None}}
             call.ai_status = "stt"
             return
-        await analyze(db, call, await whisper(audio))
+        await analyze(db, call, await whisper(audio, workspace_id=call.workspace_id, audio_seconds=call.duration_sec))
     except (STTError, ai.AIError) as exc:
         _fail(call, str(exc))
+        if isinstance(exc, ai.AIError) or "Дневной лимит" in str(exc):
+            call.ai_status = "error"
     except httpx.HTTPError:
         _fail(call, "Сервис распознавания недоступен")
 

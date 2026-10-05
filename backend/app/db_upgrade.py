@@ -8,8 +8,14 @@ from app.models.crm import CrmContact, CrmDeal
 
 
 def upgrade_existing_schema(connection):
+    from app.models.ai import AiUsage
+    AiUsage.__table__.create(connection, checkfirst=True)
+    from app.models.brief import ClientBrief, ExpressAssessment
+    ClientBrief.__table__.create(connection, checkfirst=True)
+    ExpressAssessment.__table__.create(connection, checkfirst=True)
     inspector = inspect(connection)
     columns = {
+        "client_briefs": {"transcript": "TEXT", "ai_fields": "JSON"},
         "client_workspaces": {"plan": "VARCHAR(16)", "legal_name": "VARCHAR(240)", "contact_email": "VARCHAR(254)",
                               "contact_phone": "VARCHAR(64)", "website": "VARCHAR(500)",
                               "timezone": "VARCHAR(80) NOT NULL DEFAULT 'Europe/Moscow'",

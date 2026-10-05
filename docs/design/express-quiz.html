@@ -1,0 +1,245 @@
+<title>Экспресс-оценка StepToLead</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap">
+<style>
+/* Layout: one question per screen in a centred card; the result screen draws the client's ceiling vs current lead price as a single bar */
+:root{
+  --bg:#F4F8FF; --surface:#FFFFFF; --field:#F4F8FF; --field-hover:#EAF2FF;
+  --ink:#111820; --text:#17243A; --muted:#5C6C80; --faint:#8692A6;
+  --line:#E3EAF4; --accent:#006BFD; --accent-2:#167BFF; --accent-ink:#FFFFFF;
+  --accent-soft:#EDF5FF; --accent-text:#0052C2; --ring:rgba(0,107,253,.28);
+  --shadow:0 30px 80px rgba(23,36,58,.08); --ok:#0F8A5F; --ok-soft:#E7F6EF; --warn:#B4540A; --warn-soft:#FFF3E6;
+  --font:'Manrope',system-ui,-apple-system,'Segoe UI',sans-serif; color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0B1220; --surface:#121B2C; --field:#18233A; --field-hover:#1D2A45;
+  --ink:#F2F5FA; --text:#DCE3EE; --muted:#9AA8BE; --faint:#73819A;
+  --line:#24314A; --accent:#3D8BFF; --accent-2:#5A9DFF; --accent-ink:#FFFFFF;
+  --accent-soft:#16284A; --accent-text:#8CB8FF; --ring:rgba(61,139,255,.35);
+  --shadow:0 30px 80px rgba(0,0,0,.35); --ok:#4CC99A; --ok-soft:#123327; --warn:#F2A65A; --warn-soft:#3A2614; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0B1220; --surface:#121B2C; --field:#18233A; --field-hover:#1D2A45;
+  --ink:#F2F5FA; --text:#DCE3EE; --muted:#9AA8BE; --faint:#73819A;
+  --line:#24314A; --accent:#3D8BFF; --accent-2:#5A9DFF; --accent-ink:#FFFFFF;
+  --accent-soft:#16284A; --accent-text:#8CB8FF; --ring:rgba(61,139,255,.35);
+  --shadow:0 30px 80px rgba(0,0,0,.35); --ok:#4CC99A; --ok-soft:#123327; --warn:#F2A65A; --warn-soft:#3A2614; color-scheme:dark}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{background:var(--bg);color:var(--text);font-family:var(--font);font-size:16px;line-height:1.55;-webkit-font-smoothing:antialiased;background-image:radial-gradient(1200px 500px at 50% -10%,var(--accent-soft),transparent 70%)}
+button,input,textarea{font:inherit;color:inherit}
+:focus-visible{outline:3px solid var(--ring);outline-offset:2px}
+.num{font-variant-numeric:tabular-nums lining-nums}
+
+.page{max-width:760px;margin:0 auto;padding-block:28px 72px;padding-inline:20px;display:flex;flex-direction:column;gap:20px}
+.top{display:flex;align-items:center;justify-content:space-between;gap:16px}
+.brand{font-weight:800;font-size:18px;color:var(--ink)}
+.brand span{color:var(--accent)}
+.count{font-size:14px;font-weight:600;color:var(--muted)}
+.bar{height:6px;border-radius:3px;background:var(--line);overflow:hidden}
+.bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--accent),var(--accent-2));transition:width .35s ease}
+
+.card{background:var(--surface);border:1px solid var(--line);border-radius:32px;box-shadow:var(--shadow);padding:44px 44px 32px;display:flex;flex-direction:column;gap:28px}
+.card.anim{animation:in .28s ease}
+@keyframes in{from{opacity:.4;transform:translateY(6px)}to{opacity:1;transform:none}}
+.qh{display:flex;flex-direction:column;gap:10px}
+.qh h1,.qh h2{margin:0;font-size:clamp(26px,3.6vw,36px);line-height:1.15;font-weight:800;letter-spacing:-.03em;color:var(--ink);text-wrap:balance}
+.qh h1 span{color:var(--accent)}
+.qh p{margin:0;color:var(--muted);font-size:17px;max-width:56ch}
+.why{font-size:14px;color:var(--faint)}
+
+.opts{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px}
+.opt{border:1.5px solid var(--line);background:var(--surface);border-radius:18px;padding:16px 18px;text-align:left;font-weight:600;font-size:16px;cursor:pointer;min-height:56px;display:flex;align-items:center;gap:12px;transition:border-color .15s,background .15s}
+.opt:hover{border-color:var(--accent);background:var(--field)}
+.opt .mk{flex:0 0 20px;height:20px;border-radius:6px;border:1.5px solid var(--faint);display:grid;place-items:center}
+.opt.single .mk{border-radius:10px}
+.opt[aria-pressed="true"]{border-color:var(--accent);background:var(--accent-soft);color:var(--ink)}
+.opt[aria-pressed="true"] .mk{background:var(--accent);border-color:var(--accent)}
+.opt[aria-pressed="true"] .mk::after{content:"";width:8px;height:8px;border-radius:2px;background:var(--accent-ink)}
+.scale{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px}
+.scale .opt{justify-content:center;padding:14px 8px;font-size:20px;font-weight:800}
+.scale .opt .mk{display:none}
+.wide{grid-column:1/-1}
+
+.fields{display:grid;gap:16px}
+.field{display:flex;flex-direction:column;gap:8px}
+.field label{font-weight:700;color:var(--ink);font-size:15px}
+.in,.ta{width:100%;border:1.5px solid transparent;background:var(--field);border-radius:16px;padding:15px 16px;font-size:17px}
+.in:focus,.ta:focus{outline:none;border-color:var(--accent);background:var(--surface);box-shadow:0 0 0 4px var(--ring)}
+.ta{min-height:110px;resize:vertical;line-height:1.5}
+.unit{display:flex;align-items:center;background:var(--field);border-radius:16px;border:1.5px solid transparent}
+.unit:focus-within{border-color:var(--accent);background:var(--surface);box-shadow:0 0 0 4px var(--ring)}
+.unit .in{background:transparent;border:0}
+.unit .in:focus{box-shadow:none}
+.unit span{padding:0 16px 0 4px;color:var(--muted);font-weight:600;white-space:nowrap}
+.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px}
+.idk{align-self:flex-start;border:0;background:none;color:var(--accent-text);font-weight:600;font-size:14px;cursor:pointer;padding:4px 0}
+.idk[aria-pressed="true"]{color:var(--ok)}
+
+.foot{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;padding-top:8px}
+.btn{border:0;border-radius:999px;padding:15px 26px;font-weight:700;font-size:16px;cursor:pointer;min-height:52px;display:inline-flex;align-items:center;gap:8px}
+.btn.pri{background:linear-gradient(135deg,var(--accent),var(--accent-2));color:var(--accent-ink);box-shadow:0 14px 32px rgba(0,107,253,.28)}
+.btn.pri:disabled{opacity:.45;cursor:not-allowed;box-shadow:none}
+.btn.sec{background:var(--surface);color:var(--text);border:1.5px solid var(--line)}
+.btn.link{background:none;color:var(--muted);padding-inline:6px}
+.kbd{font-size:13px;color:var(--faint)}
+.facts{display:flex;flex-wrap:wrap;gap:8px}
+.fact{background:var(--field);border-radius:999px;padding:8px 14px;font-size:14px;font-weight:600;color:var(--text)}
+
+/* Result */
+.hero{border-radius:24px;padding:28px;background:linear-gradient(150deg,var(--accent),var(--accent-2));color:var(--accent-ink);display:flex;flex-direction:column;gap:6px}
+.hero small{font-size:14px;font-weight:600;opacity:.88}
+.hero strong{font-size:clamp(40px,7vw,60px);line-height:1;font-weight:800;letter-spacing:-.04em}
+.hero p{margin:6px 0 0;font-size:15px;opacity:.92;max-width:52ch}
+.cmp{display:flex;flex-direction:column;gap:12px}
+.cmp h3,.ins h3,.out h3{margin:0;font-size:18px;font-weight:800;color:var(--ink)}
+.track{position:relative;height:44px;border-radius:12px;background:var(--field);overflow:hidden}
+.track .fill{position:absolute;inset:0 auto 0 0;border-radius:12px}
+.track .lim{position:absolute;top:-4px;bottom:-4px;width:3px;background:var(--ink);border-radius:2px}
+.legend{display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px;font-size:14px;color:var(--muted)}
+.legend b{color:var(--ink)}
+.verdict{border-radius:16px;padding:14px 16px;font-weight:600;font-size:15px}
+.verdict.ok{background:var(--ok-soft);color:var(--ok)}
+.verdict.warn{background:var(--warn-soft);color:var(--warn)}
+.ins ul{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:12px}
+.ins li{display:flex;gap:14px;align-items:flex-start}
+.ins li i{flex:0 0 8px;height:8px;margin-top:9px;border-radius:2px;background:var(--accent)}
+.ins li b{color:var(--ink)}
+.out{display:flex;flex-direction:column;gap:10px}
+.out pre{margin:0;max-height:300px;overflow:auto;background:var(--field);border-radius:16px;padding:16px;font-size:13px;line-height:1.55;white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,'SF Mono',Menlo,monospace}
+.actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.toast{font-size:14px;font-weight:600;color:var(--ok)}
+.note{font-size:13px;color:var(--faint)}
+
+@media (max-width:600px){
+  .card{padding:28px 20px 22px;border-radius:24px}
+  .scale{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .kbd{display:none}
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+
+<div class="page">
+  <div class="top">
+    <div class="brand">Step<span>To</span>Lead</div>
+    <div class="count num" id="count"></div>
+  </div>
+  <div class="bar" aria-hidden="true"><i id="fill"></i></div>
+  <section class="card" id="card" aria-live="polite"></section>
+</div>
+
+<script>
+(function(){
+var Q=[
+ {k:'biz',type:'fields',t:'Чем занимаетесь и где?',why:'Чтобы понять, есть ли у нас опыт в вашей нише.',f:[['what','Ниша','text','Например: кухни на заказ'],['city','Город или регион','text','Например: Самара и область']],req:['what']},
+ {k:'pain',type:'many',t:'Что сейчас не устраивает в рекламе?',why:'Можно выбрать несколько.',o:['Мало заявок','Заявки дорогие','Заявки некачественные','Не понимаю, что работает','Реклама не окупается','Хочу масштабироваться'],other:'Своими словами, если хотите'},
+ {k:'channels',type:'many',t:'Откуда сейчас приходят клиенты?',o:['Яндекс Директ','VK Реклама','Авито','Яндекс Карты, 2ГИС','Соцсети','Сарафан и рекомендации','Пока ниоткуда']},
+ {k:'now',type:'fields',t:'Сколько заявок в месяц и почём?',why:'Это точка отсчёта: с ней будем сравнивать результат.',f:[['leads','Заявок в месяц','num','','в месяц'],['cpl','Цена одной заявки','num','','₽']],idk:'Не знаю точных цифр'},
+ {k:'check',type:'fields',t:'Какой у вас средний чек?',f:[['check','Средний чек','num','','₽']],req:['check']},
+ {k:'conv',type:'scale',t:'Из 10 заявок сколько становятся покупкой?',why:'Примерно — этого достаточно.',o:['1','2','3','4','5','6+'],idk:'Не знаю'},
+ {k:'pay',type:'fields',t:'Сколько вы готовы отдать за одного нового клиента?',why:'Сумма, при которой продажа ещё остаётся в плюс. По ней посчитаем предел цены заявки.',f:[['pay','За одного клиента','num','','₽']],idk:'Сложно сказать'},
+ {k:'budget',type:'one',t:'Какой бюджет на рекламу планируете в месяц?',o:['До 50 тыс. ₽','50–150 тыс. ₽','150–300 тыс. ₽','Больше 300 тыс. ₽','Пока не знаю']},
+ {k:'speed',type:'one',t:'Как быстро отвечаете на новую заявку?',why:'Честно, в среднем.',o:['До 5 минут','До 15 минут','В течение часа','В течение дня','Не знаю']},
+ {k:'goal',type:'fields',t:'Какой результат через 3 месяца будет для вас успехом?',f:[['goal','Цель','area','Например: 40 продаж в месяц при том же бюджете']],req:['goal']},
+ {k:'start',type:'one',t:'Когда хотите начать?',o:['В этом месяце','В ближайшие 3 месяца','Пока изучаю варианты'],extra:{k:'dm',t:'Кто принимает решение',o:['Я сам','Вместе с партнёром','Нужно согласование']}},
+ {k:'contact',type:'fields',t:'Куда прислать разбор?',why:'Менеджер посмотрит ответы и вернётся с предложением в течение рабочего дня.',f:[['name','Как к вам обращаться','text',''],['company','Компания или сайт','text',''],['contact','Телефон или Telegram','text','']],req:['name','contact']}
+];
+var KEY='stl-express-v1',A={},cur=-1;
+try{var sv=JSON.parse(localStorage.getItem(KEY)||'null');if(sv){A=sv.a||{};cur=typeof sv.c==='number'?sv.c:-1}}catch(e){}
+var $=function(i){return document.getElementById(i)};
+function el(t,c,x){var e=document.createElement(t);if(c)e.className=c;if(x!=null)e.textContent=x;return e}
+function save(){try{localStorage.setItem(KEY,JSON.stringify({a:A,c:cur}))}catch(e){}}
+function n(k){var v=parseFloat(String(A[k]||'').replace(/\s/g,'').replace(',','.'));return isFinite(v)&&v>0?v:null}
+function rub(v){return Math.round(v).toLocaleString('ru-RU')+' ₽'}
+function has(v){return Array.isArray(v)?v.length>0:v!=null&&String(v).trim()!==''}
+function ok(q){if(q.type==='fields')return (q.req||[]).every(function(k){return has(A[k])});if(q.type==='one')return has(A[q.k])&&(!q.extra||has(A[q.extra.k]));return true}
+
+function header(){var tot=Q.length;$('count').textContent=cur<0?'2 минуты':cur>=tot?'Ваш результат':'Вопрос '+(cur+1)+' из '+tot;$('fill').style.width=(cur<0?0:Math.min(100,cur/tot*100))+'%'}
+function render(){header();save();var c=$('card');c.textContent='';c.classList.remove('anim');void c.offsetWidth;c.classList.add('anim');
+  if(cur<0)return intro(c);if(cur>=Q.length)return result(c);question(c,Q[cur])}
+function go(i){cur=i;render();window.scrollTo({top:0,behavior:'smooth'})}
+
+function intro(c){
+  var h=el('div','qh'),h1=el('h1');h1.appendChild(document.createTextNode('Сколько вы можете платить '));h1.appendChild(el('span',null,'за одну заявку?'));h.appendChild(h1);
+  h.appendChild(el('p',null,'Ответьте на 12 коротких вопросов о вашем бизнесе. В конце покажем предельную цену заявки, при которой реклама окупается, и что стоит поправить в первую очередь.'));c.appendChild(h);
+  var f=el('div','facts');['2–3 минуты','Без регистрации','Результат сразу'].forEach(function(t){f.appendChild(el('span','fact',t))});c.appendChild(f);
+  var ft=el('div','foot'),b=el('button','btn pri',has(A.what)?'Продолжить':'Начать');b.type='button';b.addEventListener('click',function(){go(has(A.what)?firstOpen():0)});ft.appendChild(b);ft.appendChild(el('span','note','Ответы сохраняются в вашем браузере'));c.appendChild(ft);
+}
+function firstOpen(){for(var i=0;i<Q.length;i++){if(!ok(Q[i]))return i}return Q.length}
+
+function optionsBox(q,key,opts,multi,auto){
+  var box=el('div',q.type==='scale'?'scale':'opts');box.setAttribute('role','group');box.setAttribute('aria-label',q.t);
+  opts.forEach(function(o){var b=el('button','opt'+(multi?'':' single'));b.type='button';b.appendChild(el('span','mk'));b.appendChild(el('span',null,o));
+    var on=multi?(A[key]||[]).indexOf(o)>-1:A[key]===o;b.setAttribute('aria-pressed',on?'true':'false');
+    b.addEventListener('click',function(){
+      if(multi){var a=(A[key]||[]).slice(),j=a.indexOf(o);if(j>-1)a.splice(j,1);else a.push(o);A[key]=a;b.setAttribute('aria-pressed',j>-1?'false':'true')}
+      else{A[key]=o;Array.prototype.forEach.call(box.children,function(x){x.setAttribute('aria-pressed',x.lastChild.textContent===o?'true':'false')});if(q.idk)A[q.k+'_idk']=false}
+      save();sync();if(auto&&ok(q))setTimeout(function(){go(cur+1)},220)});
+    box.appendChild(b)});return box}
+
+var sync=function(){};
+function question(c,q){
+  var h=el('div','qh'),h2=el('h2',null,q.t);h2.id='qt';h.appendChild(h2);if(q.why)h.appendChild(el('p',null,q.why));c.appendChild(h);
+  if(q.type==='many')c.appendChild(optionsBox(q,q.k,q.o,true,false));
+  if(q.type==='one'||q.type==='scale')c.appendChild(optionsBox(q,q.k,q.o,false,!q.extra));
+  if(q.extra){var x=el('div','qh');x.appendChild(el('p',null,q.extra.t));c.appendChild(x);c.appendChild(optionsBox({type:'one',t:q.extra.t,k:q.extra.k},q.extra.k,q.extra.o,false,false))}
+  if(q.other){var fo=el('div','field'),ta=el('textarea','ta');ta.id='f-'+q.k+'_other';ta.placeholder=q.other;ta.value=A[q.k+'_other']||'';ta.style.minHeight='72px';ta.setAttribute('aria-label',q.other);ta.addEventListener('input',function(){A[q.k+'_other']=ta.value;save()});fo.appendChild(ta);c.appendChild(fo)}
+  if(q.type==='fields'){var fs=el('div',q.f.length===2?'two':'fields');
+    q.f.forEach(function(f,i){var w=el('div','field'),l=el('label',null,f[1]);l.htmlFor='f-'+f[0];w.appendChild(l);var inp;
+      if(f[2]==='area'){inp=el('textarea','ta')}else{inp=el('input','in'+(f[2]==='num'?' num':''));inp.type='text';if(f[2]==='num')inp.inputMode='numeric'}
+      inp.id='f-'+f[0];inp.value=A[f[0]]||'';if(f[3])inp.placeholder=f[3];
+      inp.addEventListener('input',function(){A[f[0]]=inp.value;if(q.idk&&inp.value)A[q.k+'_idk']=false;save();sync()});
+      inp.addEventListener('keydown',function(e){if(e.key==='Enter'&&f[2]!=='area'&&ok(q)){e.preventDefault();go(cur+1)}});
+      if(f[2]==='num'){var u=el('div','unit');u.appendChild(inp);u.appendChild(el('span',null,f[4]));w.appendChild(u)}else w.appendChild(inp);
+      fs.appendChild(w);if(i===0)setTimeout(function(){try{inp.focus({preventScroll:true})}catch(e){}},60)});c.appendChild(fs)}
+  if(q.idk){var ik=el('button','idk',q.idk);ik.type='button';ik.setAttribute('aria-pressed',A[q.k+'_idk']?'true':'false');
+    ik.addEventListener('click',function(){A[q.k+'_idk']=!A[q.k+'_idk'];if(A[q.k+'_idk']&&q.type==='scale'){A[q.k]='';}save();go(cur+1)});c.appendChild(ik)}
+  var ft=el('div','foot'),l=el('div','actions');
+  var bk=el('button','btn link','Назад');bk.type='button';bk.addEventListener('click',function(){go(cur-1)});l.appendChild(bk);
+  var nx=el('button','btn pri',cur===Q.length-1?'Показать результат':'Дальше');nx.type='button';nx.addEventListener('click',function(){go(cur+1)});
+  var r=el('div','actions');if(q.type!=='one'&&q.type!=='scale')r.appendChild(el('span','kbd','Enter — дальше'));r.appendChild(nx);
+  ft.appendChild(l);ft.appendChild(r);c.appendChild(ft);
+  sync=function(){nx.disabled=!ok(q)};sync();
+}
+
+function convRate(){var v=A.conv;if(!has(v)||A.conv_idk)return null;return (v==='6+'?6:parseFloat(v))/10}
+function calc(){var pay=n('pay'),cr=convRate();return{pay:pay,cr:cr,lim:pay&&cr?pay*cr:null,cpl:n('cpl'),leads:n('leads'),check:n('check')}}
+function insights(r){var L=[];
+  if(r.lim&&r.cpl){if(r.cpl>r.lim)L.push(['Заявка дороже предела на '+rub(r.cpl-r.lim)+'.','Реклама сейчас работает в минус. Первым делом нужно убрать каналы и запросы, которые не доводят до продажи.']);
+    else L.push(['Запас '+rub(r.lim-r.cpl)+' на каждой заявке.','Рекламу можно масштабировать: каждый дополнительный рубль в рекламе пока окупается.'])}
+  if(!r.cpl||!r.cr)L.push(['Нет точных цифр по заявкам или продажам.','Начать стоит со сквозной аналитики: без неё невозможно понять, какая реклама приносит деньги, а какая только звонки.']);
+  if(A.speed==='В течение дня'||A.speed==='Не знаю')L.push(['Заявки обрабатываются медленно.','Клиент, оставивший заявку, параллельно пишет конкурентам. Ответ в первые минуты часто даёт больше продаж, чем новый рекламный канал.']);
+  if((A.pain||[]).indexOf('Не понимаю, что работает')>-1&&L.length<3)L.push(['Вы не видите, что работает.','Это решается связкой рекламы, CRM и звонков: каждая продажа получает источник.']);
+  if(r.cr&&r.cr<=0.1&&L.length<3)L.push(['Покупает 1 из 10 заявок.','Стоит проверить качество заявок и работу с ними: иногда рост продаж дешевле найти в отделе продаж, чем в рекламе.']);
+  if(!L.length)L.push(['Цифры выглядят здоровыми.','Следующий шаг — найти, где масштабироваться: новые каналы и сегменты при той же цене продажи.']);
+  return L.slice(0,3)}
+function md(r){var o=['# Экспресс-оценка StepToLead',''];
+  var rows=[['Имя',A.name],['Компания',A.company],['Контакт',A.contact],['Ниша',A.what],['География',A.city],['Что не устраивает',(A.pain||[]).join(', ')+(A.pain_other?'; '+A.pain_other:'')],['Каналы сейчас',(A.channels||[]).join(', ')],['Заявок в месяц',A.now_idk?'не знает':A.leads],['Цена заявки, ₽',A.now_idk?'не знает':A.cpl],['Средний чек, ₽',A.check],['Покупают из 10 заявок',A.conv_idk?'не знает':A.conv],['Готов отдать за клиента, ₽',A.pay_idk?'сложно сказать':A.pay],['Бюджет в месяц',A.budget],['Скорость ответа',A.speed],['Цель на 3 месяца',A.goal],['Старт',A.start],['Решение принимает',A.dm]];
+  rows.forEach(function(x){if(has(x[1]))o.push('- **'+x[0]+':** '+String(x[1]).trim())});
+  if(r.lim)o.push('','**Предел цены заявки:** '+rub(r.lim)+(r.cpl?' (сейчас '+rub(r.cpl)+')':''));return o.join('\n')+'\n'}
+
+function result(c){var r=calc();
+  var h=el('div','qh');h.appendChild(el('h2',null,(A.name?A.name+', вот':'Вот')+' ваш результат'));c.appendChild(h);
+  var hero=el('div','hero');
+  if(r.lim){hero.appendChild(el('small',null,'Предельная цена заявки'));hero.appendChild(el('strong','num','до '+rub(r.lim)));hero.appendChild(el('p',null,'Если заявка стоит дешевле, реклама окупается уже с первой продажи. Расчёт: '+rub(r.pay)+' за клиента × '+Math.round(r.cr*10)+' покупки из 10 заявок.'))}
+  else{hero.appendChild(el('small',null,'Предельная цена заявки'));hero.appendChild(el('strong',null,'Нужны цифры'));hero.appendChild(el('p',null,'Для расчёта не хватает суммы, которую вы готовы отдать за клиента, или доли заявок, которые покупают. Менеджер поможет посчитать на звонке.'))}
+  c.appendChild(hero);
+  if(r.lim&&r.cpl){var cm=el('div','cmp');cm.appendChild(el('h3',null,'Ваша цена заявки и предел'));
+    var max=Math.max(r.lim,r.cpl)*1.15,tr=el('div','track'),fl=el('div','fill'),lim=el('div','lim');
+    fl.style.width=(r.cpl/max*100)+'%';fl.style.background=r.cpl>r.lim?'var(--warn)':'linear-gradient(90deg,var(--accent),var(--accent-2))';lim.style.left='calc('+(r.lim/max*100)+'% - 1px)';
+    tr.appendChild(fl);tr.appendChild(lim);tr.setAttribute('role','img');tr.setAttribute('aria-label','Цена заявки '+rub(r.cpl)+', предел '+rub(r.lim));cm.appendChild(tr);
+    var lg=el('div','legend num'),a=el('span'),b=el('span');a.appendChild(document.createTextNode('Сейчас: '));a.appendChild(el('b',null,rub(r.cpl)));b.appendChild(document.createTextNode('Предел (черта): '));b.appendChild(el('b',null,rub(r.lim)));lg.appendChild(a);lg.appendChild(b);cm.appendChild(lg);
+    cm.appendChild(el('div','verdict '+(r.cpl>r.lim?'warn':'ok'),r.cpl>r.lim?'Сейчас каждая заявка стоит дороже, чем вы можете себе позволить.':'Цена заявки в пределах нормы — есть запас для роста.'));c.appendChild(cm)}
+  var ins=el('div','ins');ins.appendChild(el('h3',null,'Что поправить в первую очередь'));var ul=el('ul');
+  insights(r).forEach(function(x){var li=el('li'),t=el('div');li.appendChild(el('i'));t.appendChild(el('b',null,x[0]+' '));t.appendChild(document.createTextNode(x[1]));li.appendChild(t);ul.appendChild(li)});ins.appendChild(ul);c.appendChild(ins);
+  var out=el('div','out');out.appendChild(el('h3',null,'Отправьте ответы менеджеру'));out.appendChild(el('p','note','Скопируйте текст и пришлите в Telegram или WhatsApp — разберём вашу рекламу на бесплатном звонке.'));
+  var pre=el('pre');pre.textContent=md(r);out.appendChild(pre);
+  var ac=el('div','actions'),cp=el('button','btn pri','Скопировать ответы'),msg=el('span','toast','');cp.type='button';
+  cp.addEventListener('click',function(){var t=md(r);try{navigator.clipboard.writeText(t).then(function(){msg.textContent='Скопировано'},function(){sel(pre);msg.textContent='Текст выделен, нажмите Ctrl+C'})}catch(e){sel(pre);msg.textContent='Текст выделен, нажмите Ctrl+C'}});
+  ac.appendChild(cp);var ed=el('button','btn sec','Изменить ответы');ed.type='button';ed.addEventListener('click',function(){go(0)});ac.appendChild(ed);ac.appendChild(msg);out.appendChild(ac);c.appendChild(out);
+  var rs=el('button','btn link','Начать заново');rs.type='button';rs.addEventListener('click',function(){A={};go(-1)});c.appendChild(rs);
+}
+function sel(n){try{var r=document.createRange();r.selectNodeContents(n);var s=getSelection();s.removeAllRanges();s.addRange(r)}catch(e){}}
+render();
+})();
+</script>

@@ -423,7 +423,7 @@ async def ai_suggest(conversation_id: int, request: Request, db: AsyncSession = 
     try:
         text = await ai.complete(ai.suggest_prompt(project.name, messaging.KINDS.get(channel.kind, "чате") if channel else "чате",
                                                    ai_settings(project), deal_line, limit),
-                                 ai.transcript(messages, row.title), max_tokens=400)
+                                 ai.transcript(messages, row.title), max_tokens=400, feature="chat", workspace_id=row.workspace_id)
     except ai.AIError as exc:
         raise HTTPException(422, str(exc)) from None
     return {"text": text[:limit]}
@@ -446,7 +446,8 @@ async def ai_summary(conversation_id: int, payload: SummaryIn, request: Request,
         raise HTTPException(422, "В диалоге ещё нет сообщений")
     lines = "\n".join(f"{'Клиент' if m.direction == 'in' else 'Менеджер'}: {m.text}" for m in messages if m.text)
     try:
-        text = await ai.complete(ai.SUMMARY_PROMPT, [{"role": "user", "content": lines[-12000:]}], max_tokens=500, temperature=0.1)
+        text = await ai.complete(ai.SUMMARY_PROMPT, [{"role": "user", "content": lines[-12000:]}], max_tokens=500, temperature=0.1,
+                                 feature="summary", workspace_id=row.workspace_id)
     except ai.AIError as exc:
         raise HTTPException(422, str(exc)) from None
     saved = False

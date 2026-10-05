@@ -13,7 +13,7 @@ import time
 from collections import deque
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -75,6 +75,13 @@ async def problems(db: AsyncSession) -> list[dict]:
 
     def add(key, title, detail="", workspace_id=None):
         found.append({"key": key, "title": title, "detail": (detail or "")[:400], "client": names.get(workspace_id)})
+
+    from app.models.ai import AiUsage
+    recent = (await db.scalars(select(AiUsage).where(AiUsage.created_at >= now() - timedelta(hours=1),
+                                                   or_(AiUsage.error.is_(None), AiUsage.error != "Запрос выполняется")))).all()
+    failures = sum(not r.ok for r in recent)
+    if failures >= 5 or (recent and failures / len(recent) > 0.5):
+        add("ai", "Сбои ИИ", f"За последний час: {failures} ошибок из {len(recent)} вызовов. Проверьте ключ, баланс и доступность провайдера.")
 
     for a in (await db.scalars(select(AdConnection).where(AdConnection.platform.in_(list(API_PLATFORMS)),
                                                           AdConnection.status != "disconnected"))).all():
@@ -176,6 +183,8 @@ async def run_worker() -> None:
     while True:
         try:
             async with SessionLocal() as db:
+                from app.services.brief import expire_demos
+                await expire_demos(db)
                 await run_once(db)
         except asyncio.CancelledError:
             raise

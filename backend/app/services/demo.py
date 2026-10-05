@@ -44,7 +44,7 @@ def _rng(seed: int) -> random.Random:
     return random.Random(seed)
 
 
-async def create_demo(db: AsyncSession) -> dict:
+async def create_demo(db: AsyncSession, *, commit: bool = True) -> dict:
     """Builds the demo company. Commits. Returns the owner's login and a one-time password."""
     now = datetime.now(timezone.utc)
     n = int(await db.scalar(select(func.count(ClientWorkspace.id)).where(ClientWorkspace.name.like("Демо · %"))) or 0) + 1
@@ -237,5 +237,6 @@ async def create_demo(db: AsyncSession) -> dict:
                            author_name=None if direction == "in" else "Анна Ковалёва"))
         conv.last_message_at, conv.last_message_preview, conv.last_direction = min(t, now), lines[-1][1], "in"
         conv.waiting_since = min(t, now)
-    await db.commit()
+    if commit:
+        await db.commit()
     return {"workspace_id": ws.id, "name": ws.name, "username": owner.username, "password": password, "deals": len(deals)}

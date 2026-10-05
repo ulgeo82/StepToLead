@@ -1,6 +1,7 @@
 FROM python:3.12-slim
 
 WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
 ENV PIP_DEFAULT_TIMEOUT=120 \
     PIP_RETRIES=5
 COPY requirements.txt .

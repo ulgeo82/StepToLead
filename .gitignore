@@ -8,6 +8,7 @@ work/
 frontend/node_modules/
 frontend/.next/
 frontend/*.tsbuildinfo
+backend/eval_reports/
 outputs/
 .DS_Store
 backend/data/

@@ -1,0 +1,1183 @@
+{
+  "sections": [
+    {
+      "key": "company",
+      "title": "О компании",
+      "description": "Коротко о бизнесе и о том, с кем держим связь.",
+      "questions": [
+        {
+          "key": "company.name",
+          "label": "Название компании и сайт",
+          "type": "text",
+          "required": true,
+          "hint": "И ссылки на соцсети, если есть",
+          "options": [],
+          "example": "",
+          "unit": "",
+          "large": false
+        },
+        {
+          "key": "company.what",
+          "label": "Чем занимаетесь, одной фразой",
+          "type": "area",
+          "required": true,
+          "hint": "Как объяснили бы знакомому",
+          "options": [],
+          "example": "Делаем кухни на заказ среднего и премиум-сегмента в Самаре",
+          "unit": "",
+          "large": false
+        },
+        {
+          "key": "company.geo",
+          "label": "Город и география работы",
+          "type": "text",
+          "required": true,
+          "hint": "Где продаёте и куда готовы выезжать или доставлять",
+          "options": [],
+          "example": "",
+          "unit": "",
+          "large": false
+        },
+        {
+          "key": "company.years",
+          "label": "Сколько лет на рынке",
+          "type": "num",
+          "required": false,
+          "hint": "",
+          "options": [],
+          "example": "",
+          "unit": "лет",
+          "large": false
+        },
+        {
+          "key": "company.staff",
+          "label": "Сколько сотрудников, из них в продажах",
+          "type": "text",
+          "required": false,
+          "hint": "Например: 25, в продажах 3",
+          "options": [],
+          "example": "",
+          "unit": "",
+          "large": false
+        },
+        {
+          "key": "company.turnover",
+          "label": "Оборот в месяц",
+          "type": "text",
+          "required": false,
+          "hint": "Можно диапазоном. Нужен, чтобы поставить реалистичные цели",
+          "options": [],
+          "example": "",
+          "unit": "",
+          "large": false
+        },
+        {
+          "key": "company.season",
+          "label": "Сезонность",
+          "type": "area",
+          "required": false,
+          "hint": "Какие месяцы сильные, какие провальные",
+          "options": [],
+          "example": "",
+          "unit": "",
+          "large": false
+        },
+        {
+          "key": "company.decider",
+          "label": "Кто принимает решения по маркетингу",
+          "type": "text",
+          "required": true,
+          "hint": "Имя, должность, телефон или Telegram",
+          "options": [],
+          "example": "",
+          "unit": "",
+          "large": false
+        },
+        {
+          "key": "company.daily",
+          "label": "Кто будет на связи каждый день",
+          "type": "text",
+          "required": false,
+          "hint": "Если это другой человек",
+          "options": [],
+          "example": "",
+          "unit": "",
+          "large": false
+        }
+      ]
+    },
+    {
+      "key": "econ",
+      "title": "Продукт и экономика",
+      "description": "Из этих цифр считаем главное: сколько можно платить за клиента и оставаться в плюсе.",
+      "questions": [
+        {
+          "key": "econ.services",
+          "label": "Основные услуги или товары",
+          "type": "area",
+          "required": true,
+          "hint": "В порядке важности для денег, а не по каталогу",
+          "options": [],
+          "example": "",
+          "unit": "",
+          "large": false
+        },
+        {
+          "key": "econ.priority",
+          "label": "Что продавать в первую очередь",
+          "type": "area",
+          "required": true,
+          "hint": "Самое маржинальное или то, что нужно раскачать",
+          "options": [],
+          "example": "",
+          "unit": "",
+          "large": false
+        },
+        {
+          "key": "econ.check",
+          "label": "Средний чек",
+          "type": "num",
+          "required": true,
+          "hint": "По основной услуге",
+          "options": [],
+          "example": "",
+          "unit": "₽",
+          "large": false
+        },
+        {
+          "key": "econ.margin",
+          "label": "Маржа с одной продажи",
+          "type": "num",
+          "required": true,
+          "hint": "Сколько процентов от чека остаётся после себестоимости",
+          "options": [],
+          "example": "",
+          "unit": "%",
+          "large": false
+        },
+        {
+          "key": "econ.cycle",
+          "label": "Сколько проходит от заявки до оплаты",
+          "type": "one",
+          "required": false,
+          "hint": "",
+          "options": [
+            "День",
+            "Неделя",
+            "Месяц",
+            "1–3 месяца",
+            "Дольше"
+          ],
+          "example": "",
+          "unit": "",
+          "large": false
+        },
+        {
+          "key": "econ.pricing",
+          "label": "Как формируется цена",
+          "type": "one",
+          "required": false,
+          "hint": "",
+          "options": [
+            "Фиксированный прайс",
+            "После замера или консультации",
+            "Индивидуально"
+          ],
+          "example": "",
+          "unit": "",
+          "large": false
+        },
+        {
+          "key": "econ.repeat",
+          "label": "Повторные покупки и рекомендации",
+          "type": "area",
+          "required": false,
+          "hint": "Как часто и на какую сумму за год",
+          "options": [],
+          "example": "",
+          "unit": "",
+          "large": false
+        },
+        {
+          "key": "econ.offers",
+          "label": "Акции, рассрочка, гарантии",
+          "type": "area",
+          "required": false,
+          "hint": "Всё, что можно сделать предложением в рекламе",
+          "options": [],
+          "example": "",
+          "unit": "",
+          "large": false
+        },
+        {
+          "key": "econ.capacity",
+          "label": "Сколько новых клиентов в месяц можете обслужить",
+          "type": "num",
+          "required": false,
+          "hint": "Потолок производства или команды",
+          "options": [],
+          "example": "",
+          "unit": "в месяц",
+          "large": false
+        }
+      ]
+    },
+    {
+      "key": "clients",
+      "title": "Клиенты",
+      "description": "Нужны живые слова клиентов: их фразы потом становятся заголовками объявлений.",
+      "questions": [
+        {
+          "key": "clients.ideal",
+          "label": "Кто ваш лучший клиент",
+          "type": "area",
+          "required": true,
+          "hint": "Возраст, доход, ситуация. Для бизнеса: отрасль, размер, кто покупает",
+          "options": [],
+          "example": "",
+          "unit": "",
+          "large": false
+        },
+        {
+          "key": "clients.anti",
+          "label": "С кем работать не хотите",
+          "type": "area",
+          "required": false,
+          "hint": "Маленький бюджет, чужой регион, «просто спросить цену»",
+          "options": [],
+          "example": "",
+          "unit": "",
+          "large": false
+        },
+        {
+          "key": "clients.pain",
+          "label": "С какой проблемой к вам приходят",
+          "type": "area",
+          "required": true,
+          "hint": "Дословно, как клиент говорит по телефону",
+          "options": [],
+          "example": "",
+          "unit": "",
+          "large": false
+        },
+        {
+          "key": "clients.why",
+          "label": "Почему в итоге выбирают вас",
+          "type": "area",
+          "required": true,
+          "hint": "То, что называют сами клиенты, а не то, что написано на сайте",
+          "options": [],
+          "example": "",
+          "unit": "",
+          "large": false
+        },
+        {
+          "key": "clients.alt",
+          "label": "Как решают задачу без вас",
+          "type": "area",
+          "required": false,
+          "hint": "Идут к конкуренту, делают сами, откладывают",
+          "options": [],
+          "example": "",
+          "unit": "",
+          "large": false
+        },
+        {
+          "key": "clients.objections",
+          "label": "Три главных возражения и ваши ответы",
+          "type": "area",
+          "required": true,
+          "hint": "«Дорого», «подумаю», «у других быстрее»",
+          "options": [],
+          "example": "",
+          "unit": "",
+          "large": false
+        },
+        {
+          "key": "clients.fears",
+          "label": "Чего клиент боится перед покупкой",
+          "type": "area",
+          "required": false,
+          "hint": "Обмана, срыва сроков, скрытых доплат",
+          "options": [],
+          "example": "",
+          "unit": "",
+          "large": false
+        },
+        {
+          "key": "clients.dm",
+          "label": "Кто принимает решение о покупке",
+          "type": "one",
+          "required": false,
+          "hint": "",
+          "options": [
+            "Один человек",
+            "Семья",
+            "Руководитель и бухгалтерия",
+            "Комиссия"
+          ],
+          "example": "",
+          "unit": "",
+          "large": false
+        },
+        {
+          "key": "clients.proof",
+          "label": "Отзывы, кейсы, фото работ",
+          "type": "area",
+          "required": false,
+          "hint": "Ссылки",
+          "options": [],
+          "example": "",
+          "unit": "",
+          "large": false
+        }
+      ]
+    },
+    {
+      "key": "comp",
+      "title": "Конкуренты",
+      "description": "Где вы сильнее и где в рекламе лучше не спорить.",
+      "questions": [
+        {
+          "key": "comp.list",
+          "label": "3–5 главных конкурентов",
+          "type": "area",
+          "required": true,
+          "hint": "Сайты. С кем вас сравнивают чаще всего",
+          "options": [],
+          "example": "",
+          "unit": "",
+          "large": false
+        },
+        {
+          "key": "comp.better",
+          "label": "Чем вы лучше каждого",
+          "type": "area",
+          "required": true,
+          "hint": "Фактами: цена, сроки, качество, сервис, гарантия",
+          "options": [],
+          "example": "",
+          "unit": "",
+          "large": false
+        },
+        {
+          "key": "comp.weaker",
+          "label": "В чём конкуренты сильнее",
+          "type": "area",
+          "required": false,
+          "hint": "Честно — нам нужно знать, где не спорить",
+          "options": [],
+          "example": "",
+          "unit": "",
+          "large": false
+        },
+        {
+          "key": "comp.like",
+          "label": "Чей маркетинг вам нравится",
+          "type": "area",
+          "required": false,
+          "hint": "В своей нише или в любой",
+          "options": [],
+          "example": "",
+          "unit": "",
+          "large": false
+        }
+      ]
+    },
+    {
+      "key": "sales",
+      "title": "Продажи",
+      "description": "Реклама даёт заявки, а деньги приносят продажи. Чаще всего бюджет теряется между ними.",
+      "questions": [
+        {
+          "key": "sales.path",
+          "label": "Путь клиента от заявки до оплаты",
+          "type": "area",
+          "required": true,
+          "hint": "Вашими этапами",
+          "options": [],
+          "example": "Заявка → звонок → замер → расчёт → договор",
+          "unit": "",
+          "large": false
+        },
+        {
+          "key": "sales.target",
+          "label": "Какие заявки считаете целевыми",
+          "type": "area",
+          "required": true,
+          "hint": "И какие точно нет: спам, не тот город, малый бюджет",
+          "options": [],
+          "example": "",
+          "unit": "",
+          "large": false
+        },
+        {
+          "key": "sales.conv",
+          "label": "Сколько заявок из 100 становятся продажей",
+          "type": "num",
+          "required": true,
+          "hint": "Примерно. Нужна для расчёта цены заявки",
+          "options": [],
+          "example": "",
+          "unit": "из 100",
+          "large": false
+        },
+        {
+          "key": "sales.response",
+          "label": "Как быстро отвечаете на новую заявку",
+          "type": "one",
+          "required": false,
+          "hint": "Честно, в среднем",
+          "options": [
+            "До 5 минут",
+            "До 15 минут",
+            "В течение часа",
+            "В течение дня",
+            "Не знаем"
+          ],
+          "example": "",
+          "unit": "",
+          "large": false
+        },
+        {
+          "key": "sales.hours",
+          "label": "Кто обрабатывает заявки и в какие часы",
+          "type": "text",
+          "required": false,
+          "hint": "Работаете ли вечером и в выходные",
+          "options": [],
+          "example": "",
+          "unit": "",
+          "large": false
+        },
+        {
+          "key": "sales.crm",
+          "label": "Где хранятся заявки",
+          "type": "many",
+          "required": true,
+          "hint": "",
+          "options": [
+            "amoCRM",
+            "Битрикс24",
+            "Таблица",
+            "Мессенджеры",
+            "Нигде"
+          ],
+          "example": "",
+          "unit": "",
+          "large": false
+        },
+        {
+          "key": "sales.rec",
+          "label": "Записываются ли звонки",
+          "type": "one",
+          "required": false,
+          "hint": "",
+          "options": [
+            "Да",
+            "Частично",
+            "Нет"
+          ],
+          "example": "",
+          "unit": "",
+          "large": false
+        },
+        {
+          "key": "sales.loss",
+          "label": "Почему теряете клиентов после заявки",
+          "type": "area",
+          "required": false,
+          "hint": "Дорого, не дозвонились, ушли к конкуренту",
+          "options": [],
+          "example": "",
+          "unit": "",
+          "large": false
+        }
+      ]
+    },
+    {
+      "key": "mkt",
+      "title": "Маркетинг сейчас",
+      "description": "Что уже работает, сколько стоит и что не сработало.",
+      "questions": [
+        {
+          "key": "mkt.channels",
+          "label": "Откуда приходят клиенты",
+          "type": "many",
+          "required": true,
+          "hint": "Отметьте все",
+          "options": [
+            "Яндекс Директ",
+            "VK Реклама",
+            "Авито",
+            "Яндекс Карты",
+            "2ГИС",
+            "SEO",
+            "Соцсети",
+            "Сарафан",
+            "Партнёры"
+          ],
+          "example": "",
+          "unit": "",
+          "large": false
+        },
+        {
+          "key": "mkt.budget",
+          "label": "Рекламный бюджет",
+          "type": "num",
+          "required": true,
+          "hint": "Без оплаты подрядчикам",
+          "options": [],
+          "example": "",
+          "unit": "₽ в месяц",
+          "large": false
+        },
+        {
+          "key": "mkt.leads",
+          "label": "Заявок в месяц",
+          "type": "num",
+          "required": false,
+          "hint": "В среднем за последние три месяца",
+          "options": [],
+          "example": "",
+          "unit": "в месяц",
+          "large": false
+        },
+        {
+          "key": "mkt.cpl",
+          "label": "Стоимость заявки сейчас",
+          "type": "num",
+          "required": false,
+          "hint": "Если знаете",
+          "options": [],
+          "example": "",
+          "unit": "₽",
+          "large": false
+        },
+        {
+          "key": "mkt.tried",
+          "label": "Что пробовали и что не сработало",
+          "type": "area",
+          "required": false,
+          "hint": "И почему, по вашему мнению",
+          "options": [],
+          "example": "",
+          "unit": "",
+          "large": false
+        },
+        {
+          "key": "mkt.who",
+          "label": "Кто ведёт рекламу сейчас",
+          "type": "one",
+          "required": false,
+          "hint": "",
+          "options": [
+            "Сами",
+            "Фрилансер",
+            "Агентство",
+            "Никто"
+          ],
+          "example": "",
+          "unit": "",
+          "large": false
+        },
+        {
+          "key": "mkt.site",
+          "label": "Сайт и посадочные страницы",
+          "type": "text",
+          "required": false,
+          "hint": "Ссылки и на чём сделан сайт",
+          "options": [],
+          "example": "",
+          "unit": "",
+          "large": false
+        },
+        {
+          "key": "mkt.analytics",
+          "label": "Что настроено в аналитике",
+          "type": "many",
+          "required": false,
+          "hint": "",
+          "options": [
+            "Яндекс Метрика",
+            "Цели",
+            "Коллтрекинг",
+            "Сквозная аналитика",
+            "Ничего"
+          ],
+          "example": "",
+          "unit": "",
+          "large": false
+        }
+      ]
+    },
+    {
+      "key": "goals",
+      "title": "Цели и бюджет",
+      "description": "По какой цифре вы поймёте, что мы работаем хорошо.",
+      "questions": [
+        {
+          "key": "goals.g3",
+          "label": "Чего хотите достичь за 3 месяца",
+          "type": "area",
+          "required": true,
+          "hint": "В цифрах: заявки, продажи, выручка",
+          "options": [],
+          "example": "",
+          "unit": "",
+          "large": false
+        },
+        {
+          "key": "goals.gy",
+          "label": "А за год",
+          "type": "area",
+          "required": false,
+          "hint": "Рост, новый город, новое направление",
+          "options": [],
+          "example": "",
+          "unit": "",
+          "large": false
+        },
+        {
+          "key": "goals.kpi",
+          "label": "Главная цифра успеха",
+          "type": "one",
+          "required": true,
+          "hint": "",
+          "options": [
+            "Стоимость продажи",
+            "Число продаж",
+            "Выручка",
+            "Число заявок",
+            "Стоимость заявки"
+          ],
+          "example": "",
+          "unit": "",
+          "large": false
+        },
+        {
+          "key": "goals.budgetReady",
+          "label": "Бюджет, который готовы вкладывать",
+          "type": "num",
+          "required": true,
+          "hint": "На старте, в месяц",
+          "options": [],
+          "example": "",
+          "unit": "₽ в месяц",
+          "large": false
+        },
+        {
+          "key": "goals.launch",
+          "label": "Когда нужно запуститься",
+          "type": "text",
+          "required": false,
+          "hint": "И есть ли жёсткий срок: сезон, выставка, открытие",
+          "options": [],
+          "example": "",
+          "unit": "",
+          "large": false
+        },
+        {
+          "key": "goals.forbidden",
+          "label": "Что нельзя делать в рекламе",
+          "type": "area",
+          "required": false,
+          "hint": "Демпинг, некоторые обещания, упоминание конкурентов",
+          "options": [],
+          "example": "",
+          "unit": "",
+          "large": false
+        }
+      ]
+    },
+    {
+      "key": "ai",
+      "title": "ИИ-помощник",
+      "description": "ИИ в портале подсказывает менеджерам ответы и проверяет звонки. Он знает о бизнесе только то, что здесь написано.",
+      "questions": [
+        {
+          "key": "ai.address",
+          "label": "Как обращаетесь к клиентам",
+          "type": "one",
+          "required": true,
+          "hint": "",
+          "options": [
+            "На «вы»",
+            "На «ты»"
+          ],
+          "example": "",
+          "unit": "",
+          "large": false
+        },
+        {
+          "key": "ai.style",
+          "label": "Стиль общения",
+          "type": "many",
+          "required": true,
+          "hint": "",
+          "options": [
+            "Строго",
+            "Дружелюбно",
+            "Коротко",
+            "Подробно",
+            "С эмодзи"
+          ],
+          "example": "",
+          "unit": "",
+          "large": false
+        },
+        {
+          "key": "ai.intro",
+          "label": "Как представляетесь",
+          "type": "text",
+          "required": false,
+          "hint": "Первая фраза менеджера в чате и по телефону",
+          "options": [],
+          "example": "",
+          "unit": "",
+          "large": false
+        },
+        {
+          "key": "ai.goal",
+          "label": "Цель первого разговора",
+          "type": "text",
+          "required": true,
+          "hint": "Записать на замер, встречу, отправить расчёт, пригласить в шоурум",
+          "options": [],
+          "example": "",
+          "unit": "",
+          "large": false
+        },
+        {
+          "key": "ai.ask",
+          "label": "Что нужно узнать у клиента",
+          "type": "area",
+          "required": true,
+          "hint": "Вопросы, чтобы понять задачу и бюджет",
+          "options": [],
+          "example": "",
+          "unit": "",
+          "large": false
+        },
+        {
+          "key": "ai.faq",
+          "label": "Частые вопросы клиентов и ваши ответы",
+          "type": "area",
+          "required": true,
+          "hint": "5–10 штук: сроки, оплата, доставка, гарантия, материалы",
+          "options": [],
+          "example": "Сколько делаете? — От 21 рабочего дня после замера.",
+          "unit": "",
+          "large": true
+        },
+        {
+          "key": "ai.prices",
+          "label": "Какие цены можно называть",
+          "type": "area",
+          "required": true,
+          "hint": "«От … ₽», вилки, или цену называет только менеджер",
+          "options": [],
+          "example": "",
+          "unit": "",
+          "large": false
+        },
+        {
+          "key": "ai.never",
+          "label": "Что нельзя обещать и говорить",
+          "type": "area",
+          "required": true,
+          "hint": "Скидки без согласования, сроки, стоп-слова",
+          "options": [],
+          "example": "",
+          "unit": "",
+          "large": false
+        },
+        {
+          "key": "ai.escalate",
+          "label": "Когда передать разговор руководителю",
+          "type": "area",
+          "required": false,
+          "hint": "Жалоба, крупный заказ, нестандартная задача",
+          "options": [],
+          "example": "",
+          "unit": "",
+          "large": false
+        },
+        {
+          "key": "ai.checklist",
+          "label": "По каким пунктам оценивать звонок",
+          "type": "area",
+          "required": true,
+          "hint": "Поздоровался, выяснил задачу, назвал вилку, договорился о следующем шаге",
+          "options": [],
+          "example": "",
+          "unit": "",
+          "large": false
+        },
+        {
+          "key": "ai.contacts",
+          "label": "Адрес, график, контакты для клиентов",
+          "type": "area",
+          "required": false,
+          "hint": "То, что ИИ может сообщать без проверки",
+          "options": [],
+          "example": "",
+          "unit": "",
+          "large": false
+        },
+        {
+          "key": "ai.examples",
+          "label": "Примеры удачных переписок",
+          "type": "area",
+          "required": false,
+          "hint": "Вставьте 2–3 диалога — ИИ будет писать в том же стиле",
+          "options": [],
+          "example": "",
+          "unit": "",
+          "large": true
+        }
+      ]
+    },
+    {
+      "key": "access",
+      "title": "Доступы",
+      "description": "Доступы вы выдаёте сами в настройках сервисов. Пароли сюда не пишите.",
+      "questions": [
+        {
+          "key": "access.given",
+          "label": "Что уже готовы открыть",
+          "type": "many",
+          "required": false,
+          "hint": "Отметьте, остальное подскажем на созвоне",
+          "options": [
+            "Яндекс Директ",
+            "Яндекс Метрика",
+            "VK Реклама",
+            "Авито",
+            "Яндекс Карты и 2ГИС",
+            "CRM",
+            "Телефония",
+            "Сайт"
+          ],
+          "example": "",
+          "unit": "",
+          "large": false
+        },
+        {
+          "key": "access.materials",
+          "label": "Что пришлёте",
+          "type": "many",
+          "required": false,
+          "hint": "",
+          "options": [
+            "Логотип и цвета",
+            "Фото работ и команды",
+            "Прайс",
+            "Коммерческое предложение",
+            "Скрипты продаж"
+          ],
+          "example": "",
+          "unit": "",
+          "large": false
+        },
+        {
+          "key": "access.access_note",
+          "label": "Комментарий",
+          "type": "area",
+          "required": false,
+          "hint": "Кто выдаст доступы и когда",
+          "options": [],
+          "example": "",
+          "unit": "",
+          "large": false
+        }
+      ]
+    },
+    {
+      "key": "work",
+      "title": "Как работаем вместе",
+      "description": "Чтобы с первой недели всё было удобно.",
+      "questions": [
+        {
+          "key": "work.channel",
+          "label": "Где удобно общаться",
+          "type": "many",
+          "required": false,
+          "hint": "",
+          "options": [
+            "Telegram",
+            "WhatsApp",
+            "MAX",
+            "Созвоны"
+          ],
+          "example": "",
+          "unit": "",
+          "large": false
+        },
+        {
+          "key": "work.report",
+          "label": "Как часто разбирать результаты",
+          "type": "one",
+          "required": false,
+          "hint": "Цифры в портале видны всегда",
+          "options": [
+            "Раз в неделю",
+            "Раз в две недели",
+            "Раз в месяц"
+          ],
+          "example": "",
+          "unit": "",
+          "large": false
+        },
+        {
+          "key": "work.approve",
+          "label": "Кто согласует объявления и тексты",
+          "type": "text",
+          "required": false,
+          "hint": "И за какой срок",
+          "options": [],
+          "example": "",
+          "unit": "",
+          "large": false
+        },
+        {
+          "key": "work.bad",
+          "label": "Что было плохо с прошлыми подрядчиками",
+          "type": "area",
+          "required": false,
+          "hint": "Чтобы мы этого не повторили",
+          "options": [],
+          "example": "",
+          "unit": "",
+          "large": false
+        },
+        {
+          "key": "work.more",
+          "label": "Что ещё нам важно знать",
+          "type": "area",
+          "required": false,
+          "hint": "",
+          "options": [],
+          "example": "",
+          "unit": "",
+          "large": false
+        }
+      ]
+    }
+  ],
+  "express": [
+    {
+      "k": "biz",
+      "type": "fields",
+      "t": "Чем занимаетесь и где?",
+      "why": "Чтобы понять, есть ли у нас опыт в вашей нише.",
+      "f": [
+        [
+          "what",
+          "Ниша",
+          "text",
+          "Например: кухни на заказ"
+        ],
+        [
+          "city",
+          "Город или регион",
+          "text",
+          "Например: Самара и область"
+        ]
+      ],
+      "req": [
+        "what"
+      ]
+    },
+    {
+      "k": "pain",
+      "type": "many",
+      "t": "Что сейчас не устраивает в рекламе?",
+      "why": "Можно выбрать несколько.",
+      "o": [
+        "Мало заявок",
+        "Заявки дорогие",
+        "Заявки некачественные",
+        "Не понимаю, что работает",
+        "Реклама не окупается",
+        "Хочу масштабироваться"
+      ],
+      "other": "Своими словами, если хотите"
+    },
+    {
+      "k": "channels",
+      "type": "many",
+      "t": "Откуда сейчас приходят клиенты?",
+      "o": [
+        "Яндекс Директ",
+        "VK Реклама",
+        "Авито",
+        "Яндекс Карты, 2ГИС",
+        "Соцсети",
+        "Сарафан и рекомендации",
+        "Пока ниоткуда"
+      ]
+    },
+    {
+      "k": "now",
+      "type": "fields",
+      "t": "Сколько заявок в месяц и почём?",
+      "why": "Это точка отсчёта: с ней будем сравнивать результат.",
+      "f": [
+        [
+          "leads",
+          "Заявок в месяц",
+          "num",
+          "",
+          "в месяц"
+        ],
+        [
+          "cpl",
+          "Цена одной заявки",
+          "num",
+          "",
+          "₽"
+        ]
+      ],
+      "idk": "Не знаю точных цифр"
+    },
+    {
+      "k": "check",
+      "type": "fields",
+      "t": "Какой у вас средний чек?",
+      "f": [
+        [
+          "check",
+          "Средний чек",
+          "num",
+          "",
+          "₽"
+        ]
+      ],
+      "req": [
+        "check"
+      ]
+    },
+    {
+      "k": "conv",
+      "type": "scale",
+      "t": "Из 10 заявок сколько становятся покупкой?",
+      "why": "Примерно — этого достаточно.",
+      "o": [
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6+"
+      ],
+      "idk": "Не знаю"
+    },
+    {
+      "k": "pay",
+      "type": "fields",
+      "t": "Сколько вы готовы отдать за одного нового клиента?",
+      "why": "Сумма, при которой продажа ещё остаётся в плюс. По ней посчитаем предел цены заявки.",
+      "f": [
+        [
+          "pay",
+          "За одного клиента",
+          "num",
+          "",
+          "₽"
+        ]
+      ],
+      "idk": "Сложно сказать"
+    },
+    {
+      "k": "budget",
+      "type": "one",
+      "t": "Какой бюджет на рекламу планируете в месяц?",
+      "o": [
+        "До 50 тыс. ₽",
+        "50–150 тыс. ₽",
+        "150–300 тыс. ₽",
+        "Больше 300 тыс. ₽",
+        "Пока не знаю"
+      ]
+    },
+    {
+      "k": "speed",
+      "type": "one",
+      "t": "Как быстро отвечаете на новую заявку?",
+      "why": "Честно, в среднем.",
+      "o": [
+        "До 5 минут",
+        "До 15 минут",
+        "В течение часа",
+        "В течение дня",
+        "Не знаю"
+      ]
+    },
+    {
+      "k": "goal",
+      "type": "fields",
+      "t": "Какой результат через 3 месяца будет для вас успехом?",
+      "f": [
+        [
+          "goal",
+          "Цель",
+          "area",
+          "Например: 40 продаж в месяц при том же бюджете"
+        ]
+      ],
+      "req": [
+        "goal"
+      ]
+    },
+    {
+      "k": "start",
+      "type": "one",
+      "t": "Когда хотите начать?",
+      "o": [
+        "В этом месяце",
+        "В ближайшие 3 месяца",
+        "Пока изучаю варианты"
+      ],
+      "extra": {
+        "k": "dm",
+        "t": "Кто принимает решение",
+        "o": [
+          "Я сам",
+          "Вместе с партнёром",
+          "Нужно согласование"
+        ]
+      }
+    },
+    {
+      "k": "contact",
+      "type": "fields",
+      "t": "Куда прислать разбор?",
+      "why": "Менеджер посмотрит ответы и вернётся с предложением в течение рабочего дня.",
+      "f": [
+        [
+          "name",
+          "Как к вам обращаться",
+          "text",
+          ""
+        ],
+        [
+          "company",
+          "Компания или сайт",
+          "text",
+          ""
+        ],
+        [
+          "contact",
+          "Телефон или Telegram",
+          "text",
+          ""
+        ]
+      ],
+      "req": [
+        "name",
+        "contact"
+      ]
+    }
+  ]
+}

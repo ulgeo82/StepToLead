@@ -1,4 +1,5 @@
 from app.models.campaign import Campaign
+from app.models.ai import AiUsage
 from app.models.access import AdminUser, AdminSession, GrowthCalculation
 from app.models.lead import Lead, LeadStatus
 from app.models.proxy import Proxy
@@ -14,3 +15,4 @@ __all__ = ["Campaign", "Lead", "LeadStatus", "Proxy", "TelegramAccount", "Campai
 from app.models.messaging import MessagingChannel, Conversation, Message, ReplyTemplate  # noqa: E402,F401
 from app.models.telephony import TelephonyConnection, Call  # noqa: E402,F401
 from app.models.system import AppSetting, PushSubscription  # noqa: E402,F401
+from app.models.brief import ClientBrief, ExpressAssessment  # noqa: E402,F401

@@ -1,4 +1,5 @@
 "use client";
+import BriefDemoBanner from "@/components/brief-demo-banner";
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
@@ -21,7 +22,7 @@ export function ProjectSidebar({ project, projectId, active, role }: {
   const allowed = (capability: string) => role === "admin" || permissions?.includes(capability);
   const suffix = projectId ? `?project_id=${projectId}` : "";
   return <aside className="resultSidebar"><Link className="resultBrand" href={`/result${suffix}`}><span>↗</span> StepToLead</Link>
-    <div className="resultProject"><small>ПРОЕКТ</small><strong>{project?.organization_name || "StepToLead"}</strong><span>{project?.name || "Выберите проект"}</span></div>
+    <div className="resultProject"><small>ПРОЕКТ</small><strong>{project?.organization_name || "StepToLead"}</strong><span>{project?.name || "Выберите проект"}</span></div><BriefDemoBanner projectId={projectId}/>
     <nav aria-label="Навигация"><small>АНАЛИТИКА</small>
       {allowed("view_result") && <Link className={active === "result" ? "active" : ""} href={`/result${suffix}`}><b>01</b> Результат</Link>}
       {allowed("view_analytics") && <Link className={active === "analytics" ? "active" : ""} href={`/analytics${suffix}`}><b>02</b> Аналитика</Link>}
