@@ -366,7 +366,9 @@ async def client_health(db: AsyncSession, workspace_id: int) -> dict:
         return value.replace(tzinfo=timezone.utc) if value is not None and value.tzinfo is None else value
     users = (await db.scalars(select(PortalUser).where(PortalUser.workspace_id == workspace_id, PortalUser.active.is_(True)))).all()
     last_seen = max((aware(u.last_activity_at) for u in users if u.last_activity_at), default=None)
-    deals = (await db.scalars(select(CrmDeal).where(CrmDeal.workspace_id == workspace_id, CrmDeal.created_at >= month))).all()
+    # Only the timestamps are needed; full deal rows (JSON fields included) made this page slow on large clients.
+    deals = (await db.execute(select(CrmDeal.id, CrmDeal.created_at, CrmDeal.first_response_at, CrmDeal.closed_at, CrmDeal.archived_at)
+                              .where(CrmDeal.workspace_id == workspace_id, CrmDeal.created_at >= month))).all()
     week_deals = [d for d in deals if aware(d.created_at) >= week]
     waits = [(aware(d.first_response_at) - aware(d.created_at)).total_seconds() / 60 for d in week_deals if d.first_response_at]
     unanswered = sum(1 for d in week_deals if d.first_response_at is None and d.closed_at is None and d.archived_at is None)

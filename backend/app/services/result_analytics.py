@@ -4,7 +4,7 @@ Ad platform lead totals are intentionally ignored: a lead is a ClientLead.
 Sales and revenue come only from confirmed ClientSale rows unless an explicitly
 aggregated source has no individual records for the selected period.
 """
-from collections import defaultdict
+from collections import defaultdict, namedtuple
 from datetime import date, datetime, timedelta
 
 from sqlalchemy import select
@@ -41,6 +41,25 @@ def _bucket(day: date, granularity: str):
     return day.isoformat()
 
 
+
+# Analytics read thousands of leads per request. Loading full ORM entities (every column plus
+# identity-map bookkeeping) dominated response time, so these reports read only the columns
+# they use into light tuples with the same attribute names.
+LeadRow = namedtuple("LeadRow", "id created_at qualified_at meeting_at source_id source full_name status quality quality_reason")
+AttributionRow = namedtuple("AttributionRow", "connection_id source_id external_campaign_id")
+
+
+async def load_lead_rows(db: AsyncSession, project_id: int) -> list[tuple[LeadRow, AttributionRow | None]]:
+    rows = await db.execute(select(
+        ClientLead.id, ClientLead.created_at, ClientLead.qualified_at, ClientLead.meeting_at, ClientLead.source_id,
+        ClientLead.source, ClientLead.full_name, ClientLead.status, ClientLead.quality, ClientLead.quality_reason,
+        ClientLeadAttribution.id, ClientLeadAttribution.connection_id, ClientLeadAttribution.source_id,
+        ClientLeadAttribution.external_campaign_id)
+        .outerjoin(ClientLeadAttribution, ClientLeadAttribution.lead_id == ClientLead.id)
+        .where(ClientLead.project_id == project_id))
+    return [(LeadRow(*r[:10]), AttributionRow(*r[11:]) if r[10] is not None else None) for r in rows]
+
+
 def manual_source_key(value: str | None) -> str | None:
     name = (value or "").strip()
     return f"manual:{name}" if name and name.casefold() not in {"unknown", "не определено"} else None
@@ -75,9 +94,7 @@ async def result_facts(db: AsyncSession, project: Project, start: date, end: dat
         sources[key] = {"id": key, "name": row.name, "kind": row.kind, "method": row.method,
                         "platform": None, "status": row.status}
 
-    lead_rows = (await db.execute(select(ClientLead, ClientLeadAttribution)
-                .outerjoin(ClientLeadAttribution, ClientLeadAttribution.lead_id == ClientLead.id)
-                .where(ClientLead.project_id == project.id))).all()
+    lead_rows = await load_lead_rows(db, project.id)
     lead_source = {}
     for lead, attribution in lead_rows:
         # A verified ad-account attribution takes precedence over the generic website

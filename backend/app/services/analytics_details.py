@@ -9,7 +9,7 @@ from app.models.marketing import (AdCampaignMetricDaily, AdConnection, AdHypothe
                                   AdHypothesisCampaign, AdMetricDaily, ClientLead,
                                   ClientLeadAttribution, ClientLeadEvent, ClientSale, Project,
                                   SourceMetricDaily)
-from app.services.result_analytics import _derived, _ratio, _sum, quality_fields
+from app.services.result_analytics import _derived, _ratio, _sum, load_lead_rows, quality_fields
 
 
 def defaultdict_count(values) -> dict:
@@ -110,9 +110,7 @@ async def analytics_details(db: AsyncSession, project: Project, start: date, end
     campaign_rows = (await db.scalars(select(AdCampaignMetricDaily).where(
         AdCampaignMetricDaily.connection_id.in_(connection_ids),
         AdCampaignMetricDaily.date >= start, AdCampaignMetricDaily.date <= end))).all() if connection_ids else []
-    lead_rows = (await db.execute(select(ClientLead, ClientLeadAttribution)
-                 .outerjoin(ClientLeadAttribution, ClientLeadAttribution.lead_id == ClientLead.id)
-                 .where(ClientLead.project_id == project.id))).all()
+    lead_rows = await load_lead_rows(db, project.id)
     attribution = {}
     campaign_leads = defaultdict(list)
     for lead, attr in lead_rows:

@@ -500,8 +500,13 @@ async def board(project_id: int, pipeline_id: int | None = None, page: int = Que
     counts = {}
     state_conditions = {"OVERDUE": due < midnight, "TODAY": (due >= midnight) & (due < tomorrow),
                         "PLANNED": due >= tomorrow, "NO_TASK": due.is_(None)}
-    for key, condition in state_conditions.items():
-        counts[key] = await db.scalar(select(func.count()).select_from(count_base.where(condition).subquery())) or 0
+    # One pass over the filtered deals instead of one query per task state.
+    due_of = count_base.add_columns(due.label("due")).subquery()
+    state_due = {"OVERDUE": due_of.c.due < midnight, "TODAY": (due_of.c.due >= midnight) & (due_of.c.due < tomorrow),
+                 "PLANNED": due_of.c.due >= tomorrow, "NO_TASK": due_of.c.due.is_(None)}
+    keys = list(state_due)
+    row = (await db.execute(select(*[func.count().filter(state_due[key]) for key in keys]).select_from(due_of))).one()
+    counts = {key: row[i] or 0 for i, key in enumerate(keys)}
     columns = []
     for stage in stages:
         base = own_filter(select(CrmDeal, CrmContact, ProjectSource.name, PortalUser.display_name)
@@ -513,8 +518,9 @@ async def board(project_id: int, pipeline_id: int | None = None, page: int = Que
         base = narrow(base)
         if state in state_conditions:
             base = base.where(state_conditions[state])
-        total = await db.scalar(select(func.count()).select_from(base.subquery())) or 0
-        amount_total = await db.scalar(select(func.coalesce(func.sum(base.subquery().c.amount), 0))) or 0
+        sub = base.subquery()
+        total, amount_total = (await db.execute(select(func.count(), func.coalesce(func.sum(sub.c.amount), 0)).select_from(sub))).one()
+        total, amount_total = total or 0, amount_total or 0
         rows = (await db.execute(base.order_by(CrmDeal.updated_at.desc(), CrmDeal.id.desc())
                                  .offset((page - 1) * per_stage).limit(per_stage))).all()
         ids = [deal.id for deal, *_ in rows]
