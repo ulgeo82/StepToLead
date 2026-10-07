@@ -16,3 +16,4 @@ from app.models.messaging import MessagingChannel, Conversation, Message, ReplyT
 from app.models.telephony import TelephonyConnection, Call  # noqa: E402,F401
 from app.models.system import AppSetting, PushSubscription  # noqa: E402,F401
 from app.models.brief import ClientBrief, ExpressAssessment  # noqa: E402,F401
+from app.domains.leadgen.models import LgCompany, LgCompanyKey, LgSourceRun, LgAd, LgSignal, LgContact, LgEnrichment, LgSegment, LgTouch, LgDnc  # noqa: E402,F401

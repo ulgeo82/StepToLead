@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import Sidebar from "@/components/Sidebar";
+import styles from "@/components/Sidebar.module.css";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "StepToLead — управление", robots: { index: false, follow: false } };
@@ -12,5 +13,5 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     headers: { Cookie: `stl_session=${token}` }, cache: "no-store", signal: AbortSignal.timeout(5000),
   }).catch(() => null);
   if (!response?.ok) redirect("/login");
-  return <div className="shell"><Sidebar /><main className="main">{children}</main></div>;
+  return <div className={`shell ${styles.shell}`}><Sidebar /><main className="main">{children}</main></div>;
 }

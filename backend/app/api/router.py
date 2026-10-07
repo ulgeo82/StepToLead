@@ -49,3 +49,6 @@ api_router.include_router(widget.router)
 api_router.include_router(website.router)
 api_router.include_router(tilda.router)
 api_router.include_router(internal_router)
+
+from app.domains.leadgen import routes as leadgen_routes  # noqa: E402
+api_router.include_router(leadgen_routes.router)

@@ -27,6 +27,8 @@ class BriefTests(unittest.TestCase):
         p = patch.object(ai, "configured", return_value=False); p.start(); self.addCleanup(p.stop)
         from app.api.routes import brief as route
         p = patch.object(route, "rate_limit", AsyncMock()); self.limiter=p.start(); self.addCleanup(p.stop)
+        # Вход в портал внутри теста тоже ограничен по частоте: без подмены тест требует живой Redis.
+        p = patch("app.api.routes.portal.rate_limit", AsyncMock()); p.start(); self.addCleanup(p.stop)
         self.original_alert=route.admin_alert
         p = patch.object(route, "admin_alert", AsyncMock()); self.alert=p.start(); self.addCleanup(p.stop)
         self.answers = {k: "Нет данных" for k,q in brief.QUESTIONS.items() if q["required"]}

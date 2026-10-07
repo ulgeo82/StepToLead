@@ -23,6 +23,9 @@ class WebsiteTests(unittest.TestCase):
             return None
         self.rate_limit_patch = patch("app.api.routes.access.rate_limit", no_rate_limit)
         self.rate_limit_patch.start()
+        # Приём заявки (/api/portal/inbound) ограничен по частоте отдельно: без подмены тест требует живой Redis.
+        self.portal_rate_limit_patch = patch("app.api.routes.portal.rate_limit", no_rate_limit)
+        self.portal_rate_limit_patch.start()
         fd, self.path = tempfile.mkstemp(suffix=".sqlite")
         os.close(fd)
         self.engine = create_async_engine(f"sqlite+aiosqlite:///{self.path}")
@@ -56,6 +59,7 @@ class WebsiteTests(unittest.TestCase):
         asyncio.run(self.engine.dispose())
         os.unlink(self.path)
         self.rate_limit_patch.stop()
+        self.portal_rate_limit_patch.stop()
 
     def test_site_scope_consent_event_and_no_fake_lead(self):
         created = self.client.post("/api/website/sites", headers=self.frontend_origin,
