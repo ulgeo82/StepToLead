@@ -9,6 +9,11 @@ class Settings(BaseSettings):
     telegram_api_id: int = 0
     telegram_api_hash: str = ""
     telegram_bot_token: str = ""  # Bot from @BotFather for lead/sale notifications.
+    # Telegram Bot API is blocked from many Russian networks. Point bots at a relay abroad:
+    # TELEGRAM_API_BASE — a reverse proxy to api.telegram.org (e.g. https://tg-relay.example.com),
+    # TELEGRAM_PROXY — an http(s):// or socks5:// proxy. Both apply to Telegram bots only.
+    telegram_api_base: str = "https://api.telegram.org"
+    telegram_proxy: str = ""
     encryption_secret: str = "change-this-before-production"
     account_status_interval: int = 20
     session_cookie_secure: bool = False  # В production HTTPS обязательно True.

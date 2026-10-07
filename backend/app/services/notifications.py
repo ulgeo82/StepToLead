@@ -132,8 +132,9 @@ async def telegram_api(method: str, payload: dict | None = None, timeout: float 
                 if len(_chat_sent) > 10000:
                     _chat_sent.clear()
         try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                response = await client.post(f"https://api.telegram.org/bot{settings.telegram_bot_token}/{method}", json=payload or {})
+            from app.services.telegram_http import bot_url, client_options
+            async with httpx.AsyncClient(timeout=timeout, **client_options()) as client:
+                response = await client.post(bot_url(settings.telegram_bot_token, method), json=payload or {})
                 data = response.json()
         except (httpx.HTTPError, ValueError):
             raise TelegramError(502) from None

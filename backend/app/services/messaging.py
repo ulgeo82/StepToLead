@@ -70,9 +70,9 @@ def secret(channel: MessagingChannel) -> str:
     return value
 
 
-async def _json(method: str, url: str, **kwargs) -> dict | list | None:
+async def _json(method: str, url: str, client_options: dict | None = None, **kwargs) -> dict | list | None:
     try:
-        async with httpx.AsyncClient(timeout=kwargs.pop("timeout", 30)) as client:
+        async with httpx.AsyncClient(timeout=kwargs.pop("timeout", 30), **(client_options or {})) as client:
             response = await client.request(method, url, **kwargs)
     except httpx.HTTPError:
         raise ChannelError("Сервис канала недоступен. Повторите позже.") from None
@@ -97,14 +97,16 @@ class Incoming(dict):
 class TelegramBot:
     def __init__(self, channel: MessagingChannel):
         self.channel = channel
-        self.base = f"https://api.telegram.org/bot{secret(channel)}"
+        from app.services.telegram_http import bot_url
+        self.base = bot_url(secret(channel))
 
     async def call(self, method: str, payload: dict | None = None):
         from app.core.config import settings
         import secrets
         if settings.telegram_bot_token and secrets.compare_digest(secret(self.channel).encode(), settings.telegram_bot_token.encode()):
             raise ChannelError("Служебный бот StepToLead нельзя использовать для клиентской переписки")
-        data = await _json("POST", f"{self.base}/{method}", json=payload or {})
+        from app.services.telegram_http import client_options
+        data = await _json("POST", f"{self.base}/{method}", client_options=client_options(), json=payload or {})
         if not isinstance(data, dict) or not data.get("ok"):
             raise ChannelError(str((data or {}).get("description") or "Telegram отклонил запрос"))
         return data["result"]
