@@ -112,6 +112,8 @@ class LeadgenApiTests(unittest.TestCase):
         self.assertIn("ad_direct", {s["kind"] for s in card["signals"]})
         self.assertEqual(self.client.get("/api/admin/leadgen/companies/9999").status_code, 404)
         self.assertEqual(len(self.client.get("/api/admin/leadgen/runs").json()["items"]), 1)
+        by_run = self.client.get("/api/admin/leadgen/companies", params={"run_id": run_id}).json()
+        self.assertEqual(by_run["total"], 2)
 
     def test_companies_filters_and_sort(self):
         self.run_search()

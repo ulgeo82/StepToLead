@@ -3,10 +3,10 @@
 Спецификация: документ «Лидогенерация StepToLead — модель данных». Существующие таблицы портала не меняются;
 в CRM компания попадает только при «В аутрич» (crm_contact_id / crm_deal_id).
 """
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import (
-    BigInteger, Boolean, DateTime, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint, func,
+    BigInteger, Boolean, Date, DateTime, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint, func,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -181,6 +181,14 @@ class LgTouch(Base):
     body: Mapped[str | None] = mapped_column(Text)
     external_id: Mapped[str | None] = mapped_column(String(300))
     user_id: Mapped[int | None] = mapped_column(ForeignKey("admin_users.id", ondelete="SET NULL"))
+    mailbox_id: Mapped[int | None] = mapped_column(ForeignKey("lg_mailboxes.id", ondelete="SET NULL"), index=True)
+    address: Mapped[str | None] = mapped_column(String(254))      # адрес собеседника (кому / от кого)
+    # Входящие: метка ответа (interested / question / later / not_interested / unsubscribe / auto / other),
+    # кто её поставил (rule / ai / user / rule_only), суть ответа от ИИ и когда ответ разобран.
+    label: Mapped[str | None] = mapped_column(String(16), index=True)
+    label_source: Mapped[str | None] = mapped_column(String(10))
+    summary: Mapped[str | None] = mapped_column(String(300))
+    handled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     happened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 
 
@@ -198,3 +206,63 @@ class LgDnc(Base):
     until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_by_id: Mapped[int | None] = mapped_column(ForeignKey("admin_users.id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class LgMailbox(Base):
+    """Почтовый ящик для аутрича (отдельный домен, не основной steptolead.ru). Пароль — зашифрован."""
+    __tablename__ = "lg_mailboxes"
+    __table_args__ = (UniqueConstraint("workspace_id", "email", name="uq_lg_mailbox_email"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    workspace_id: Mapped[int] = mapped_column(ForeignKey("client_workspaces.id", ondelete="CASCADE"), index=True)
+    email: Mapped[str] = mapped_column(String(254))
+    sender_name: Mapped[str | None] = mapped_column(String(120))
+    smtp_host: Mapped[str] = mapped_column(String(253))
+    smtp_port: Mapped[int] = mapped_column(Integer, default=465)
+    imap_host: Mapped[str] = mapped_column(String(253))
+    imap_port: Mapped[int] = mapped_column(Integer, default=993)
+    login: Mapped[str] = mapped_column(String(254))
+    password_encrypted: Mapped[str] = mapped_column(Text)
+    daily_limit: Mapped[int] = mapped_column(Integer, default=30)
+    warmup_started_on: Mapped[date | None] = mapped_column(Date)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    imap_last_uid: Mapped[int | None] = mapped_column(BigInteger)
+    last_error: Mapped[str | None] = mapped_column(Text)
+    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class LgSequence(Base):
+    """Цепочка: шаги [{channel, delay_days, subject, body, new_thread}] и окно отправки."""
+    __tablename__ = "lg_sequences"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    workspace_id: Mapped[int] = mapped_column(ForeignKey("client_workspaces.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(180))
+    steps: Mapped[list] = mapped_column(JSON, default=list)
+    window: Mapped[dict] = mapped_column(JSON, default=dict)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("admin_users.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class LgEnrollment(Base):
+    """Компания в цепочке. status: active / paused / finished / replied / bounced / stopped."""
+    __tablename__ = "lg_enrollments"
+    __table_args__ = (Index("ix_lg_enrollments_due", "status", "next_at"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    workspace_id: Mapped[int] = mapped_column(ForeignKey("client_workspaces.id", ondelete="CASCADE"), index=True)
+    sequence_id: Mapped[int] = mapped_column(ForeignKey("lg_sequences.id", ondelete="CASCADE"), index=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey("lg_companies.id", ondelete="CASCADE"), index=True)
+    contact_id: Mapped[int | None] = mapped_column(ForeignKey("lg_contacts.id", ondelete="SET NULL"))
+    mailbox_id: Mapped[int | None] = mapped_column(ForeignKey("lg_mailboxes.id", ondelete="SET NULL"))
+    status: Mapped[str] = mapped_column(String(12), default="active", index=True)
+    current_step: Mapped[int] = mapped_column(Integer, default=0)    # индекс следующего шага
+    next_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    thread_message_id: Mapped[str | None] = mapped_column(String(300))  # Message-ID первого письма ветки
+    thread_subject: Mapped[str | None] = mapped_column(String(300))
+    stop_reason: Mapped[str | None] = mapped_column(String(40))
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

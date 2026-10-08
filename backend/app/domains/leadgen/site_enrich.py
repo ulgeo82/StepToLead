@@ -16,7 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.leadgen import service
-from app.domains.leadgen.core.site_extract import SiteFacts, extract
+from app.domains.leadgen.core.site_extract import SiteFacts, extract, html_to_text
 from app.domains.leadgen.models import LgCompany, LgCompanyKey, LgContact, LgEnrichment, LgSignal
 
 USER_AGENT = "StepToLeadBot/1.0 (+https://steptolead.ru; contact collection from public company pages)"
@@ -34,6 +34,7 @@ class CrawlResult:
     fetched: list[str] = field(default_factory=list)
     errors: dict[str, str] = field(default_factory=dict)
     blocked_by_robots: bool = False
+    text: str = ""
 
     @property
     def ok(self) -> bool:
@@ -94,6 +95,7 @@ async def crawl(domain: str, *, transport: httpx.AsyncBaseTransport | None = Non
         result.errors.clear()
         result.fetched.append(root + "/")
         first = extract(html, root + "/")
+        result.text = html_to_text(html)[:4000]
         result.facts.merge(first)
         queue = [p for p in first.pages if urlsplit(p).hostname]
         seen = {root + "/"}
@@ -132,6 +134,7 @@ async def apply_result(db: AsyncSession, company: LgCompany, result: CrawlResult
         "phones": sorted(f.phones), "whatsapp": sorted(f.whatsapp), "telegram": sorted(f.telegram),
         "emails": sorted(f.emails), "inns": sorted(f.inns), "has_quiz": f.has_quiz, "crm": sorted(f.crm),
         "chats": sorted(f.chats), "has_metrika": f.has_metrika, "inn_status": None,
+        "text_excerpt": result.text[:3000],
     }
     if result.ok:
         existing = set((await db.execute(select(LgContact.kind, LgContact.value_norm)
@@ -197,7 +200,21 @@ async def _add_key(db: AsyncSession, company: LgCompany, kind: str, value: str) 
         db.add(LgCompanyKey(workspace_id=company.workspace_id, company_id=company.id, kind=kind, value_norm=value))
 
 
+# ИНН площадок и банков: попадают на сайты из виджетов, оферт и подвалов, к компании отношения не имеют.
+PLATFORM_INNS = {
+    "7736207543",  # Яндекс
+    "7743001840",  # VK
+    "7707083893",  # Сбербанк
+    "7710140679",  # Т-Банк
+    "7704217370",  # Ozon
+    "7721546864",  # Wildberries
+    "7710668349",  # Авито
+    "5405276278",  # 2ГИС
+}
+
+
 async def _apply_inn(db: AsyncSession, company: LgCompany, inns: set[str], url: str | None, now: datetime) -> str | None:
+    inns = {i for i in inns if i not in PLATFORM_INNS}
     if not inns:
         return None
     if len(inns) > 1:

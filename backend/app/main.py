@@ -18,6 +18,8 @@ from app.services.telephony import run_worker as run_telephony_worker
 from app.services.watchdog import run_worker as run_watchdog
 from app.services.ad_sync import run_worker as run_ad_sync
 from app.services.telegram_parser import run_parser_worker
+from app.domains.leadgen.scheduler import run_worker as run_leadgen_repeat
+from app.domains.leadgen.sequences import run_worker as run_leadgen_sequences
 
 
 @asynccontextmanager
@@ -33,6 +35,8 @@ async def lifespan(_: FastAPI):
     telephony_worker = asyncio.create_task(run_telephony_worker())
     watchdog = asyncio.create_task(run_watchdog())
     ad_sync = asyncio.create_task(run_ad_sync())
+    leadgen_repeat = asyncio.create_task(run_leadgen_repeat())
+    leadgen_sequences = asyncio.create_task(run_leadgen_sequences())
     from app.services import monitor
     monitor.install()
     from app.services.tg_bot import run_worker as run_tg_bot
@@ -41,7 +45,7 @@ async def lifespan(_: FastAPI):
         monitor.register("Telegram-бот", tg_worker)
     for name, task in (("Рассылки Telegram", runner), ("Сбор контактов", parser_worker), ("Авито", avito_worker),
                        ("Автоматизации CRM", crm_worker), ("Переписки", messaging_worker), ("Телефония", telephony_worker),
-                       ("Контроль заявок и отчёты", watchdog), ("Обновление рекламы", ad_sync)):
+                       ("Контроль заявок и отчёты", watchdog), ("Обновление рекламы", ad_sync), ("Лидогенерация: повтор поиска", leadgen_repeat), ("Аутрич: цепочки и почта", leadgen_sequences)):
         monitor.register(name, task)
     monitor_worker = asyncio.create_task(monitor.run_worker())
     try:
@@ -55,6 +59,8 @@ async def lifespan(_: FastAPI):
         telephony_worker.cancel()
         watchdog.cancel()
         ad_sync.cancel()
+        leadgen_repeat.cancel()
+        leadgen_sequences.cancel()
         monitor_worker.cancel()
         if tg_worker:
             tg_worker.cancel()

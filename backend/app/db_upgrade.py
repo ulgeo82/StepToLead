@@ -70,6 +70,9 @@ def upgrade_existing_schema(connection):
         "admin_users": {"telegram_chat_id": "VARCHAR(32)", "telegram_username": "VARCHAR(64)",
                         "telegram_link_code_hash": "VARCHAR(64)", "telegram_link_expires_at": "TIMESTAMP WITH TIME ZONE"},
         "website_sites": {"widget": "JSON"},
+        "lg_touches": {"mailbox_id": "INTEGER REFERENCES lg_mailboxes(id)", "address": "VARCHAR(254)",
+                       "label": "VARCHAR(16)", "label_source": "VARCHAR(10)", "summary": "VARCHAR(300)",
+                       "handled_at": "TIMESTAMP WITH TIME ZONE"},
     }
     for table, additions in columns.items():
         existing = {column["name"] for column in inspector.get_columns(table)}

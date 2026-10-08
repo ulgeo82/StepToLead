@@ -23,7 +23,7 @@ from app.models.access import AdminSession, AdminUser
 from app.models.marketing import ClientWorkspace
 
 NOW = datetime(2026, 10, 7, 12, 0, tzinfo=timezone.utc)
-INN = "7707083893"
+INN = "6315000005"
 
 HOME = """<html><head><script src="https://mc.yandex.ru/metrika/tag.js"></script>
 <script src="https://quiz.marquiz.ru/v2.js"></script><script src="//code.jivo.ru/widget/abc"></script></head>
@@ -35,7 +35,7 @@ HOME = """<html><head><script src="https://mc.yandex.ru/metrika/tag.js"></script
 <img src="/img/logo@2x.png"><p>Пишите: zakaz@kuhni-sever.ru</p></body></html>"""
 CONTACTS = """<html><body><h1>Контакты</h1><p>Телефон: 8 912 000-11-22, офис +7 343 200 10 20</p>
 <p>Директор: ivan.petrov@kuhni-sever.ru, общий: info@kuhni-sever.ru</p>
-<p>ООО «Северная мебель», ИНН/КПП 7707083893/770701001, ОГРН 1027700132195</p></body></html>"""
+<p>ООО «Северная мебель», ИНН/КПП 6315000005/770701001, ОГРН 1027700132195</p></body></html>"""
 AMO_PAGE = '<html><body><script src="https://gso.amocrm.ru/js/button.js"></script>ИНН 7707083894</body></html>'
 
 
@@ -256,3 +256,8 @@ class EnrichApiTests(DbBase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PlatformInnTests(unittest.TestCase):
+    def test_platform_inn_ignored(self):
+        self.assertIn("7736207543", site_enrich.PLATFORM_INNS)
