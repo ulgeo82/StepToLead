@@ -108,8 +108,8 @@ def upgrade_existing_schema(connection):
         ), {"workspace_id": workspace_id}).scalar()
         if project_id is None:
             project_id = connection.execute(text(
-                "INSERT INTO projects (workspace_id, name, is_default) "
-                "VALUES (:workspace_id, :name, true) RETURNING id"
+                "INSERT INTO projects (workspace_id, name, is_default, status, meeting_enabled, portal_state) "
+                "VALUES (:workspace_id, :name, true, 'active', false, '{}') RETURNING id"
             ), {"workspace_id": workspace_id, "name": name}).scalar_one()
         for table in ("ad_connections", "ad_hypotheses", "client_leads", "lead_inbound_sources"):
             connection.execute(text(

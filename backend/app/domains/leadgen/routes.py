@@ -15,7 +15,7 @@ from app.core.access import require_admin
 from app.core.config import settings as app_settings
 from app.db import SessionLocal, get_db
 from app.domains.leadgen import (
-    analytics, dadata, direct_search, fit_ai, importer, inbox, outreach, sequences, service, site_enrich,
+    analytics, dadata, direct_search, export, fit_ai, importer, inbox, outreach, sequences, service, site_enrich,
 )
 from app.domains.leadgen.core import table_import
 from app.domains.leadgen.core import sequence as seq_core
@@ -178,21 +178,14 @@ async def get_run(run_id: int, db: AsyncSession = Depends(get_db), admin: AdminU
 
 # ---------------------------------------------------------------- база компаний
 
-@router.get("/companies")
-async def list_companies(q: str | None = None, niche: str | None = None, city: list[str] = Query(default=[]),
-                         min_score: int | None = Query(None, ge=0, le=10), stage: list[str] = Query(default=[]),
-                         channel: list[str] = Query(default=[]), signal: list[str] = Query(default=[]),
-                         new_days: int | None = Query(None, ge=1, le=365), needs_review: bool | None = None,
-                         fit: str | None = Query(None, pattern="^(fit|maybe|no)$"),
-                         run_id: int | None = None,  # только компании, найденные этим запуском поиска
-                         segment_id: int | None = None, sort: str = Query("score", pattern="^(score|new|seen|name)$"),
-                         limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0),
-                         db: AsyncSession = Depends(get_db), admin: AdminUser = Depends(require_admin)):
-    ws = workspace_id()
+async def filtered_companies(db: AsyncSession, ws: int, *, q=None, niche=None, city=(), min_score=None, stage=(),
+                             channel=(), signal=(), new_days=None, needs_review=None, fit=None, run_id=None,
+                             segment_id=None):
+    """Запрос компаний по фильтрам базы (общий для списка и выгрузки в Excel)."""
     if await outreach.sync_from_crm(db, ws):
         await db.commit()
-    filters = {"q": q, "niche": niche, "cities": city, "min_score": min_score, "stages": stage,
-               "channels": channel, "signals": signal, "new_days": new_days, "needs_review": needs_review,
+    filters = {"q": q, "niche": niche, "cities": list(city), "min_score": min_score, "stages": list(stage),
+               "channels": list(channel), "signals": list(signal), "new_days": new_days, "needs_review": needs_review,
                "fit": fit}
     filters = {k: v for k, v in filters.items() if v not in (None, [], "")}
     if segment_id:
@@ -209,9 +202,49 @@ async def list_companies(q: str | None = None, niche: str | None = None, city: l
         if run is None or run.workspace_id != ws:
             raise HTTPException(404, "Запуск не найден")
         base = base.where(LgCompany.id.in_([int(i) for i in (run.stats or {}).get("company_ids") or []]))
+    return base
+
+
+@router.get("/companies")
+async def list_companies(q: str | None = None, niche: str | None = None, city: list[str] = Query(default=[]),
+                         min_score: int | None = Query(None, ge=0, le=10), stage: list[str] = Query(default=[]),
+                         channel: list[str] = Query(default=[]), signal: list[str] = Query(default=[]),
+                         new_days: int | None = Query(None, ge=1, le=365), needs_review: bool | None = None,
+                         fit: str | None = Query(None, pattern="^(fit|maybe|no)$"),
+                         run_id: int | None = None,  # только компании, найденные этим запуском поиска
+                         segment_id: int | None = None, sort: str = Query("score", pattern="^(score|new|seen|name)$"),
+                         limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0),
+                         db: AsyncSession = Depends(get_db), admin: AdminUser = Depends(require_admin)):
+    base = await filtered_companies(db, workspace_id(), q=q, niche=niche, city=city, min_score=min_score,
+                                    stage=stage, channel=channel, signal=signal, new_days=new_days,
+                                    needs_review=needs_review, fit=fit, run_id=run_id, segment_id=segment_id)
     total = await db.scalar(select(func.count()).select_from(base.subquery()))
     rows = (await db.execute(base.order_by(*SORTS[sort]).limit(limit).offset(offset))).scalars().all()
     return {"total": total, "items": [company_row(c) for c in rows]}
+
+
+@router.get("/companies/export")
+async def export_companies(q: str | None = None, niche: str | None = None, city: list[str] = Query(default=[]),
+                           min_score: int | None = Query(None, ge=0, le=10), stage: list[str] = Query(default=[]),
+                           channel: list[str] = Query(default=[]), signal: list[str] = Query(default=[]),
+                           new_days: int | None = Query(None, ge=1, le=365), needs_review: bool | None = None,
+                           fit: str | None = Query(None, pattern="^(fit|maybe|no)$"), run_id: int | None = None,
+                           segment_id: int | None = None, ids: list[int] = Query(default=[]),
+                           sort: str = Query("score", pattern="^(score|new|seen|name)$"),
+                           db: AsyncSession = Depends(get_db), admin: AdminUser = Depends(require_admin)):
+    """Выгрузка базы в Excel: по текущим фильтрам или только выбранные (ids)."""
+    from fastapi.responses import Response
+    ws = workspace_id()
+    base = await filtered_companies(db, ws, q=q, niche=niche, city=city, min_score=min_score, stage=stage,
+                                    channel=channel, signal=signal, new_days=new_days, needs_review=needs_review,
+                                    fit=fit, run_id=run_id, segment_id=segment_id)
+    if ids:
+        base = base.where(LgCompany.id.in_(ids))
+    companies = (await db.execute(base.order_by(*SORTS[sort]).limit(export.MAX_ROWS))).scalars().all()
+    data = await export.build_xlsx(db, companies, base_url=app_settings.frontend_origin)
+    name = f"baza-kompaniy-{service.utcnow():%Y-%m-%d}.xlsx"
+    return Response(data, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
 @router.get("/companies/{company_id}")

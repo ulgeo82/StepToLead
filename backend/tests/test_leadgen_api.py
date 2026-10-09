@@ -115,6 +115,21 @@ class LeadgenApiTests(unittest.TestCase):
         by_run = self.client.get("/api/admin/leadgen/companies", params={"run_id": run_id}).json()
         self.assertEqual(by_run["total"], 2)
 
+        # Выгрузка в Excel: те же фильтры, строка на компанию, контакты и объявление.
+        import io
+        from openpyxl import load_workbook
+        r = self.client.get("/api/admin/leadgen/companies/export", params={"run_id": run_id})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertIn("attachment", r.headers["content-disposition"])
+        sheet = load_workbook(io.BytesIO(r.content)).active
+        header = [c.value for c in sheet[1]]
+        rows = [dict(zip(header, [c.value for c in row])) for row in sheet.iter_rows(min_row=2)]
+        self.assertEqual([x["Сайт"] for x in rows], ["kuhni-sever.ru", "dub-mebel.ru"])
+        self.assertEqual(rows[0]["Что рекламирует"], "Кухни от 14 дней")
+        self.assertEqual(rows[0]["Спецразмещение"], "да")
+        only = self.client.get("/api/admin/leadgen/companies/export", params={"ids": [top["id"]]})
+        self.assertEqual(load_workbook(io.BytesIO(only.content)).active.max_row, 2)
+
     def test_companies_filters_and_sort(self):
         self.run_search()
         base = "/api/admin/leadgen/companies"

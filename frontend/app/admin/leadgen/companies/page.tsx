@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api } from "@/lib/api";
+import { api, API_URL } from "@/lib/api";
 import {
   Advertisement,
   base,
@@ -643,6 +643,14 @@ function CompaniesPage() {
     q.set("segment_id", String(segment.id));
     write(q);
   }
+  const exportHref = (() => {
+    const q = filtersQuery(filters);
+    if (segmentId) q.set("segment_id", segmentId);
+    if (runId) q.set("run_id", runId);
+    q.set("sort", sort);
+    selected.forEach((id) => q.append("ids", String(id)));
+    return `${API_URL}/api${base}/companies/export?${q}`;
+  })();
   const eligible = companies.filter((company) => !blocked(company.stage));
   const allSelected = !!eligible.length && eligible.every((company) => selected.includes(company.id));
   return (
@@ -869,6 +877,18 @@ function CompaniesPage() {
           <button type="button" className={styles.secondary} onClick={() => setRevision((n) => n + 1)}>
             Обновить
           </button>
+          <a
+            className={styles.secondary}
+            href={exportHref}
+            download
+            aria-disabled={!total}
+            onClick={(e) => {
+              if (!total) e.preventDefault();
+            }}
+            title={selected.length ? "Только выбранные компании" : "Все компании по текущим фильтрам"}
+          >
+            {selected.length ? `Скачать Excel · ${selected.length}` : `Скачать Excel · ${total}`}
+          </a>
         </div>
         <div className={styles.actions}>
           <span>Выбрано: {selected.length}</span>
