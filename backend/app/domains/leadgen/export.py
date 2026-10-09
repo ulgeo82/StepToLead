@@ -8,6 +8,7 @@ from collections import defaultdict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domains.leadgen.core.normalize import display_domain
 from app.domains.leadgen.models import LgAd, LgCompany, LgContact
 
 MAX_ROWS = 5000
@@ -73,8 +74,8 @@ def _render(companies, contacts, ads, base_url: str) -> bytes:
         top = ad_list[0] if ad_list else None
         keywords = {k for a in ad_list for k in (a.keywords or [])}
         ws.append([
-            c.display_name or c.domain,
-            c.domain,
+            c.display_name or display_domain(c.domain),
+            display_domain(c.domain),
             c.city,
             c.niche,
             c.score,

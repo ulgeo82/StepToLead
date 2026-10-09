@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
-import { Advertisement, base, date, message, money, PageHeader, post, Run, Score } from "../shared";
+import { Advertisement, base, companyName, date, message, money, PageHeader, post, Run, Score } from "../shared";
 import styles from "../leadgen.module.css";
 
 const statusNames: Record<string, string> = {
@@ -386,9 +386,9 @@ export default function SearchPage() {
                       <tr key={company.id}>
                         <td>
                           <Link href={`/admin/leadgen/companies?company=${company.id}`}>
-                            {company.display_name}
+                            {companyName(company)}
                           </Link>
-                          <small>{company.domain || "Домен не найден"}</small>
+                          <small>{company.domain_display || company.domain || "Домен не найден"}</small>
                         </td>
                         <td>
                           {company.ad ? (

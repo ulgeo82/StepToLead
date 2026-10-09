@@ -13,7 +13,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.db import Base
 
 # Стадии компании: двигают только сервисы.
-STAGES = ("new", "enriched", "ready", "in_outreach", "replied", "converted", "rejected", "dnc")
+STAGES = ("new", "enriched", "ready", "in_outreach", "replied", "converted", "rejected", "dnc", "hidden")
 
 
 class LgCompany(Base):

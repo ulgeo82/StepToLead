@@ -637,3 +637,11 @@
   color: #56657b;
   font-size: 12px;
 }
+
+.danger {
+  color: #ff9d8f !important;
+  border-color: #5c2a27 !important;
+}
+.danger:disabled {
+  opacity: 0.55;
+}

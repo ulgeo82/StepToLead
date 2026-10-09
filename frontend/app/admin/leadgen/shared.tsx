@@ -28,7 +28,11 @@ export const stages: Record<string, string> = {
   converted: "Клиент",
   rejected: "Отказ",
   dnc: "Стоп-лист",
+  hidden: "Скрыта",
 };
+/** Название компании, а если его нет — домен по-русски. */
+export const companyName = (c: { display_name?: string | null; domain?: string | null; domain_display?: string | null }) =>
+  c.display_name || c.domain_display || c.domain || "Без названия";
 export const fitLabels: Record<string, string> = { fit: "Подходит", maybe: "Возможно", no: "Не подходит" };
 export const signalLabels: Record<string, string> = {
   ad_direct: "В Директе по 3+ ключам",
@@ -66,6 +70,7 @@ export type Company = {
   display_name: string;
   legal_name?: string | null;
   domain?: string | null;
+  domain_display?: string | null;
   inn?: string | null;
   city?: string | null;
   niche?: string | null;

@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from .normalize import normalize_domain, normalize_phone
 
 DEFAULT_RECONTACT_DAYS = 90
-BLOCKED_STAGES = {"rejected", "dnc"}
+BLOCKED_STAGES = {"rejected", "dnc", "hidden"}
 
 
 @dataclass(frozen=True)

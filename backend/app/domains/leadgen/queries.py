@@ -87,6 +87,8 @@ def company_query(workspace_id: int, filters: dict, now: datetime) -> Select:
         q = q.where(LgCompany.score <= f["max_score"])
     if f.get("stages"):
         q = q.where(LgCompany.stage.in_(f["stages"]))
+    else:
+        q = q.where(LgCompany.stage != "hidden")  # скрытые видны только по фильтру «Скрытые»
     if f.get("channels"):
         kinds = sorted({k for ch in f["channels"] for k in CHANNELS[ch]})
         q = q.where(exists().where(LgContact.company_id == LgCompany.id, LgContact.kind.in_(kinds),

@@ -228,6 +228,47 @@ class LeadgenApiTests(unittest.TestCase):
         old = self.client.post(base, headers=ORIGIN, files={"file": ("old.xls", b"x", "application/vnd.ms-excel")})
         self.assertEqual(old.status_code, 422)
 
+    def test_hide_restore_delete_and_block(self):
+        base = "/api/admin/leadgen"
+        run_id = self.run_search()
+        items = self.client.get(f"{base}/companies").json()["items"]
+        ids = {c["domain"]: c["id"] for c in items}
+        sever, dub = ids["kuhni-sever.ru"], ids["dub-mebel.ru"]
+
+        r = self.post(f"{base}/companies/hide", {"company_ids": [sever]})
+        self.assertEqual(r.json()["done"], 1)
+        self.assertEqual([c["domain"] for c in self.client.get(f"{base}/companies").json()["items"]], ["dub-mebel.ru"])
+        hidden = self.client.get(f"{base}/companies", params={"stage": "hidden"}).json()["items"]
+        self.assertEqual([c["domain"] for c in hidden], ["kuhni-sever.ru"])
+        # повторный поиск не возвращает скрытую компанию в список
+        self.run_search()
+        self.assertNotIn("kuhni-sever.ru", [c["domain"] for c in self.client.get(f"{base}/companies").json()["items"]])
+        self.post(f"{base}/companies/hide", {"company_ids": [sever], "hidden": False})
+        card = self.client.get(f"{base}/companies/{sever}").json()
+        self.assertNotEqual(card["stage"], "hidden")
+
+        r = self.post(f"{base}/companies/delete", {"company_ids": [dub], "block_domains": True})
+        self.assertEqual((r.json()["deleted"], r.json()["blocked_domains"]), (1, 1))
+        self.assertEqual(self.client.get(f"{base}/companies/{dub}").status_code, 404)
+        self.assertIn("dub-mebel.ru", self.client.get(f"{base}/settings").json()["platform_domains"])
+        self.run_search()  # сайт в исключениях — больше не добавляется
+        self.assertNotIn("dub-mebel.ru", [c["domain"] for c in self.client.get(f"{base}/companies").json()["items"]])
+
+        # компанию с идущей цепочкой не удаляем и не скрываем
+        from app.domains.leadgen.models import LgEnrollment, LgSequence
+
+        async def busy():
+            async with self.sessions() as db:
+                seq = LgSequence(workspace_id=7, name="x", steps=[], window={})
+                db.add(seq); await db.flush()
+                db.add(LgEnrollment(workspace_id=7, sequence_id=seq.id, company_id=sever, status="active",
+                                    current_step=0))
+                await db.commit()
+        asyncio.run(busy())
+        r = self.post(f"{base}/companies/delete", {"company_ids": [sever]})
+        self.assertEqual((r.json()["deleted"], r.json()["skipped"][0]["reason_text"][:12]), (0, "идёт цепочка"))
+        self.assertEqual(self.post(f"{base}/companies/hide", {"company_ids": [sever]}).json()["done"], 0)
+
 
 class JobQueueTests(unittest.TestCase):
     def test_background_jobs_run_one_at_a_time(self):

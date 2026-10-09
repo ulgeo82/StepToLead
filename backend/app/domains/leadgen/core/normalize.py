@@ -125,3 +125,13 @@ def text_key(value: str | None) -> str | None:
         return None
     key = re.sub(r"\s+", " ", value.replace("ё", "е").replace("Ё", "Е")).strip().lower()
     return key or None
+
+
+def display_domain(domain: str | None) -> str | None:
+    """xn--...рф -> добрые-кухни.рф: кириллические домены показываем по-русски."""
+    if not domain or "xn--" not in domain:
+        return domain
+    try:
+        return domain.encode("ascii").decode("idna")
+    except (UnicodeError, ValueError):
+        return domain

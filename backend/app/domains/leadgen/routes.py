@@ -23,7 +23,7 @@ from app.domains.leadgen.core import table_import
 from app.domains.leadgen.core import sequence as seq_core
 from app.domains.leadgen.models import LgEnrollment, LgMailbox, LgSequence
 from app.core.crypto import encrypt_secret
-from app.domains.leadgen.core.normalize import normalize_domain, normalize_phone
+from app.domains.leadgen.core.normalize import display_domain, normalize_domain, normalize_phone
 from app.domains.leadgen.models import (
     LgAd, LgCompany, LgContact, LgDnc, LgEnrichment, LgSegment, LgSignal, LgSourceRun, LgTouch,
 )
@@ -106,6 +106,7 @@ def iso(dt: datetime | None) -> str | None:
 
 def company_row(c: LgCompany) -> dict:
     return {"id": c.id, "display_name": c.display_name, "legal_name": c.legal_name, "domain": c.domain,
+            "domain_display": display_domain(c.domain),
             "inn": c.inn, "city": c.city, "niche": c.niche, "score": c.score, "score_reasons": c.score_reasons,
             "stage": c.stage, "fit_label": c.fit_label, "needs_review": c.needs_review,
             "crm_deal_id": c.crm_deal_id, "first_seen_at": iso(c.first_seen_at), "last_seen_at": iso(c.last_seen_at)}
@@ -1108,3 +1109,90 @@ async def import_companies(tasks: BackgroundTasks, file: UploadFile | None = Fil
     if enrich_ids:
         tasks.add_task(_enrich, enrich_ids, only_stale=True)
     return {**run_row(run), "enrich_queued": len(enrich_ids)}
+
+
+# ---------------------------------------------------------------- чистка базы
+
+class CleanupIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    company_ids: list[int] = Field(min_length=1, max_length=1000)
+
+
+class HideIn(CleanupIn):
+    hidden: bool = True  # False — вернуть из скрытых
+
+
+class DeleteIn(CleanupIn):
+    block_domains: bool = False  # больше не добавлять эти сайты при новых поисках и импорте
+
+
+async def _busy_reason(db: AsyncSession, c: LgCompany) -> str | None:
+    active = await db.scalar(select(LgEnrollment.id).where(LgEnrollment.company_id == c.id,
+                                                           LgEnrollment.status.in_(("active", "paused"))))
+    if active:
+        return "идёт цепочка писем — сначала остановите её"
+    return None
+
+
+@router.post("/companies/hide")
+async def hide_companies(payload: HideIn, db: AsyncSession = Depends(get_db), admin: AdminUser = Depends(require_admin)):
+    """Скрыть из базы (не мешают в списке, не попадают в аутрич, при новых поисках остаются скрытыми) или вернуть."""
+    ws = workspace_id()
+    rows = (await db.execute(select(LgCompany).where(LgCompany.workspace_id == ws,
+                                                     LgCompany.id.in_(payload.company_ids)))).scalars().all()
+    done, skipped = 0, []
+    for c in rows:
+        if payload.hidden:
+            if c.stage == "hidden":
+                continue
+            reason = await _busy_reason(db, c)
+            if reason:
+                skipped.append({"company_id": c.id, "reason_text": reason})
+                continue
+            c.provenance = {**(c.provenance or {}), "stage_before_hide": c.stage}
+            c.stage = "hidden"
+        else:
+            if c.stage != "hidden":
+                continue
+            prov = dict(c.provenance or {})
+            c.stage = prov.pop("stage_before_hide", None) or "new"
+            c.provenance = prov
+        done += 1
+    await db.commit()
+    return {"done": done, "skipped": skipped}
+
+
+@router.post("/companies/delete")
+async def delete_companies(payload: DeleteIn, db: AsyncSession = Depends(get_db),
+                           admin: AdminUser = Depends(require_admin)):
+    """Удалить совсем. Компании с открытой сделкой в CRM или идущей цепочкой не удаляются."""
+    from sqlalchemy import delete as sa_delete
+    from app.domains.leadgen.models import LgCompanyKey
+    ws = workspace_id()
+    rows = (await db.execute(select(LgCompany).where(LgCompany.workspace_id == ws,
+                                                     LgCompany.id.in_(payload.company_ids)))).scalars().all()
+    ids, domains, skipped = [], [], []
+    for c in rows:
+        reason = await _busy_reason(db, c)
+        if not reason and c.crm_deal_id:
+            reason = "есть сделка в CRM — скройте компанию вместо удаления"
+        if reason:
+            skipped.append({"company_id": c.id, "reason_text": reason})
+            continue
+        ids.append(c.id)
+        if c.domain:
+            domains.append(c.domain)
+    if ids:
+        for model in (LgEnrollment, LgTouch, LgSignal, LgAd, LgContact, LgEnrichment, LgCompanyKey):
+            await db.execute(sa_delete(model).where(model.company_id.in_(ids)))
+        await db.execute(sa_delete(LgCompany).where(LgCompany.id.in_(ids)))
+    blocked = 0
+    if payload.block_domains and domains:
+        await service.ensure_settings(db)
+        row = await db.get(AppSetting, service.SETTINGS_KEY)
+        current = list((row.value or {}).get("platform_domains") or [])
+        new = [d for d in dict.fromkeys(domains) if d not in current]
+        row.value = {**row.value, "platform_domains": current + new}
+        blocked = len(new)
+    await db.commit()
+    return {"deleted": len(ids), "skipped": skipped, "blocked_domains": blocked}

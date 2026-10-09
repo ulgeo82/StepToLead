@@ -23,6 +23,7 @@ import {
   safeUrl,
   Score,
   Segment,
+  companyName,
   signalLabels,
   stages,
 } from "../shared";
@@ -37,7 +38,7 @@ const channels: Record<string, string> = {
   phone: "Телефон",
   messenger: "Мессенджер",
 };
-type Action = "enrich" | "outreach" | "dnc" | "assess";
+type Action = "enrich" | "outreach" | "dnc" | "assess" | "hide" | "restore";
 const touchStatus: Record<string, string> = {
   sent: "отправлено",
   delivered: "доставлено",
@@ -195,10 +196,10 @@ function CompanyCard({
       >
         <header>
           <div>
-            <h2 id="company-card-title">{company?.display_name || "Карточка компании"}</h2>
+            <h2 id="company-card-title">{company ? companyName(company) : "Карточка компании"}</h2>
             {company?.domain && safeUrl(company.domain) && (
               <a href={safeUrl(company.domain)} target="_blank" rel="noopener noreferrer">
-                {company.domain} ↗
+                {company.domain_display || company.domain} ↗
               </a>
             )}
           </div>
@@ -369,13 +370,21 @@ function CompanyCard({
                 onClick={() => {
                   if (
                     window.confirm(
-                      `Добавить «${company.display_name}» в стоп-лист? Компания будет исключена из аутрича.`,
+                      `Добавить «${companyName(company)}» в стоп-лист? Компания будет исключена из аутрича.`,
                     )
                   )
                     act("dnc", [id]);
                 }}
               >
                 В стоп-лист
+              </button>
+              <button
+                type="button"
+                className={styles.secondary}
+                disabled={busy}
+                onClick={() => act(company.stage === "hidden" ? "restore" : "hide", [id])}
+              >
+                {company.stage === "hidden" ? "Вернуть в базу" : "Скрыть"}
               </button>
             </div>
             {company.crm_deal_id && pipeline && safeUrl(pipeline.crm_url) && (
@@ -492,6 +501,8 @@ function CompaniesPage() {
   const [enrollIds, setEnrollIds] = useState<number[] | null>(null);
   const closeEnroll = useCallback(() => setEnrollIds(null), []);
   const [importOpen, setImportOpen] = useState(false);
+  const [deleteIds, setDeleteIds] = useState<number[] | null>(null);
+  const [blockDomains, setBlockDomains] = useState(false);
   const closeImport = useCallback(() => setImportOpen(false), []);
   const write = useCallback(
     (params: URLSearchParams) =>
@@ -596,6 +607,17 @@ function CompaniesPage() {
         setNotice(
           `ИИ-оценка поставлена в очередь: ${data.queued}${data.skipped ? `, пропущено ${data.skipped}` : ""}. Уже оценённые компании в массовой оценке пропускаются. Обновите базу через минуту.`,
         );
+      } else if (action === "hide" || action === "restore") {
+        const data = await post<{ done: number; skipped: { company_id: number; reason_text: string }[] }>(
+          "/companies/hide",
+          { company_ids: ids, hidden: action === "hide" },
+        );
+        const why = data.skipped.length ? ` Не тронули ${data.skipped.length}: ${data.skipped[0].reason_text}.` : "";
+        setNotice(
+          action === "hide"
+            ? `Скрыто: ${data.done}. Найти их можно фильтром «Стадия → Скрыта».${why}`
+            : `Возвращено в базу: ${data.done}.`,
+        );
       } else if (action === "dnc") {
         await post("/dnc", { kind: "company", value: String(ids[0]), reason: "refused" });
         setNotice("Компания добавлена в стоп-лист.");
@@ -612,6 +634,31 @@ function CompaniesPage() {
           });
         }
       }
+      setSelected([]);
+      setRevision((n) => n + 1);
+    } catch (e) {
+      setError(message(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function remove() {
+    if (!deleteIds || busy) return;
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const data = await post<{
+        deleted: number;
+        blocked_domains: number;
+        skipped: { company_id: number; reason_text: string }[];
+      }>("/companies/delete", { company_ids: deleteIds, block_domains: blockDomains });
+      const parts = [`Удалено: ${data.deleted}.`];
+      if (data.blocked_domains) parts.push(`В исключения поиска добавлено сайтов: ${data.blocked_domains}.`);
+      if (data.skipped.length) parts.push(`Не удалили ${data.skipped.length}: ${data.skipped[0].reason_text}.`);
+      setNotice(parts.join(" "));
+      setDeleteIds(null);
+      setBlockDomains(false);
       setSelected([]);
       setRevision((n) => n + 1);
     } catch (e) {
@@ -654,7 +701,8 @@ function CompaniesPage() {
     selected.forEach((id) => q.append("ids", String(id)));
     return `${API_URL}/api${base}/companies/export?${q}`;
   })();
-  const eligible = companies.filter((company) => !blocked(company.stage));
+  const eligible = companies;
+  const viewingHidden = !!filters.stages?.includes("hidden");
   const allSelected = !!eligible.length && eligible.every((company) => selected.includes(company.id));
   return (
     <div className={`page ${styles.page}`}>
@@ -695,7 +743,10 @@ function CompaniesPage() {
             .filter((result) => !result.ok)
             .map((result) => (
               <p key={result.company_id}>
-                {companies.find((company) => company.id === result.company_id)?.display_name ||
+                {(() => {
+                  const c = companies.find((company) => company.id === result.company_id);
+                  return c ? companyName(c) : "";
+                })() ||
                   `Компания #${result.company_id}`}
                 : {result.reason_text || result.reason || "Причина не указана"}
               </p>
@@ -932,7 +983,42 @@ function CompaniesPage() {
           >
             Оценить ИИ
           </button>
+          <button
+            type="button"
+            className={styles.secondary}
+            disabled={busy || loading || !selected.length}
+            onClick={() => act(viewingHidden ? "restore" : "hide", selected)}
+            title="Убрать из списка: компания не попадёт в аутрич и останется скрытой при новых поисках"
+          >
+            {viewingHidden ? "Вернуть в базу" : "Скрыть"}
+          </button>
+          <button
+            type="button"
+            className={`${styles.secondary} ${styles.danger}`}
+            disabled={busy || loading || !selected.length}
+            onClick={() => setDeleteIds([...selected])}
+          >
+            Удалить
+          </button>
         </div>
+        {deleteIds && (
+          <div className={styles.notice} role="dialog" aria-label="Удаление компаний">
+            <strong>Удалить {deleteIds.length} компаний из базы насовсем?</strong>
+            <p>Контакты, объявления и история по ним тоже удалятся. Компании с открытой сделкой в CRM не удаляются.</p>
+            <label className={styles.check}>
+              <input type="checkbox" checked={blockDomains} onChange={(e) => setBlockDomains(e.target.checked)} />
+              Больше не добавлять эти сайты при новых поисках и импорте (для сетей, агрегаторов, конкурентов)
+            </label>
+            <div className={styles.actions}>
+              <button type="button" className={`${styles.secondary} ${styles.danger}`} disabled={busy} onClick={() => remove()}>
+                {busy ? "Удаляем…" : "Удалить"}
+              </button>
+              <button type="button" className={styles.secondary} disabled={busy} onClick={() => setDeleteIds(null)}>
+                Отмена
+              </button>
+            </div>
+          </div>
+        )}
         {loading ? (
           <p role="status" className={styles.empty}>
             Загружаем компании…
@@ -983,9 +1069,9 @@ function CompaniesPage() {
                     <td onClick={(e) => e.stopPropagation()}>
                       <input
                         type="checkbox"
-                        aria-label={`Выбрать ${company.display_name}`}
+                        aria-label={`Выбрать ${companyName(company)}`}
                         checked={selected.includes(company.id)}
-                        disabled={busy || blocked(company.stage)}
+                        disabled={busy}
                         onChange={(e) =>
                           setSelected((ids) =>
                             e.target.checked ? [...ids, company.id] : ids.filter((id) => id !== company.id),
@@ -1002,9 +1088,11 @@ function CompaniesPage() {
                           change("company", String(company.id));
                         }}
                       >
-                        {company.display_name}
+                        {companyName(company)}
                       </button>
-                      <small>{company.domain || "Домен не найден"}</small>
+                      {company.display_name ? (
+                        <small>{company.domain_display || company.domain || "Домен не найден"}</small>
+                      ) : null}
                       {company.needs_review && <span className={styles.badge}>На проверке</span>}
                     </td>
                     <td>
