@@ -28,6 +28,7 @@ import {
 } from "../shared";
 import styles from "../leadgen.module.css";
 import EnrollDialog from "../../outreach/email/EnrollDialog";
+import ImportDialog from "../ImportDialog";
 
 const channels: Record<string, string> = {
   whatsapp: "WhatsApp",
@@ -490,6 +491,8 @@ function CompaniesPage() {
   const [segmentBusy, setSegmentBusy] = useState(false);
   const [enrollIds, setEnrollIds] = useState<number[] | null>(null);
   const closeEnroll = useCallback(() => setEnrollIds(null), []);
+  const [importOpen, setImportOpen] = useState(false);
+  const closeImport = useCallback(() => setImportOpen(false), []);
   const write = useCallback(
     (params: URLSearchParams) =>
       router.replace(`/admin/leadgen/companies${params.size ? `?${params}` : ""}`, { scroll: false }),
@@ -659,9 +662,14 @@ function CompaniesPage() {
         title="База компаний"
         subtitle="Компании, рекламные сигналы и публичные контакты — от поиска до аутрича."
       >
-        <Link className={styles.primary} href="/admin/leadgen/search">
-          Поиск компаний
-        </Link>
+        <div className={styles.actions}>
+          <button type="button" className={styles.secondary} onClick={() => setImportOpen(true)}>
+            Импорт из файла
+          </button>
+          <Link className={styles.primary} href="/admin/leadgen/search">
+            Поиск компаний
+          </Link>
+        </div>
       </PageHeader>
       {error && (
         <p className={styles.error} role="alert">
@@ -1095,6 +1103,7 @@ function CompaniesPage() {
       {segmentDialog && (
         <SegmentDialog close={closeSegment} save={saveSegment} busy={segmentBusy} error={error} />
       )}
+      {importOpen && <ImportDialog close={closeImport} completed={() => setRevision((n) => n + 1)} />}
       {enrollIds && (
         <EnrollDialog
           ids={enrollIds}

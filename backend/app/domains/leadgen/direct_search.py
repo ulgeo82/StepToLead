@@ -11,13 +11,18 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.leadgen import service
-from app.domains.leadgen.core.serp import DIRECT_MIN_KEYWORDS, SerpAd, aggregate, run_fingerprint
+from app.domains.leadgen.core.serp import (
+    DIRECT_MIN_KEYWORDS, SerpAd, SerpOrganic, aggregate, aggregate_organic, run_fingerprint,
+)
 from app.domains.leadgen.models import LgAd, LgCompany, LgSignal, LgSourceRun
 
 SOURCE = "yandex_direct"
 NEW_ADVERTISER_TTL = timedelta(days=14)
 AD_SIGNAL_TTL = timedelta(days=8)       # еженедельный перезапуск продлевает сигнал
 ADS_STOPPED_TTL = timedelta(days=30)
+ORGANIC_TTL = timedelta(days=30)
+ORGANIC_SOURCE = "yandex_organic"
+DEVICES = ("desktop", "mobile")
 
 
 class SerpProvider(Protocol):
@@ -37,9 +42,24 @@ def _clean_keywords(keywords: list[str]) -> list[str]:
     return out
 
 
-def estimate(keywords: list[str], provider: SerpProvider) -> dict:
-    n = len(_clean_keywords(keywords))
+def clean_devices(devices) -> list[str]:
+    out = [d for d in DEVICES if d in (devices or ())]
+    return out or ["desktop"]
+
+
+def estimate(keywords: list[str], provider: SerpProvider, devices=None) -> dict:
+    n = len(_clean_keywords(keywords)) * len(clean_devices(devices))
     return {"requests": n, "cost_rub": round(n * provider.cost_per_request_rub, 2)}
+
+
+async def _page(provider, keyword: str, region_code: int | None, device: str):
+    """Страница выдачи: у настоящего провайдера — реклама и органика, у простого — только реклама с ПК."""
+    from app.domains.leadgen.providers import SerpPage
+    if hasattr(provider, "search_page"):
+        return await provider.search_page(keyword, region_code, device)
+    if device != "desktop":
+        return SerpPage()
+    return SerpPage(await provider.search(keyword, region_code))
 
 
 async def create_run(db: AsyncSession, workspace_id: int, *, keywords: list[str], region_code: int | None,
@@ -81,15 +101,23 @@ async def execute_run(db: AsyncSession, run: LgSourceRun, provider: SerpProvider
     await db.flush()
 
     settings = await service.get_settings(db)
+    devices = clean_devices(params.get("devices"))
+    want_organic = bool(params.get("organic"))
     ads: list[SerpAd] = []
+    organic: list[SerpOrganic] = []
     failed: dict[str, str] = {}
     requests = 0
     for kw in params["keywords"]:
-        requests += 1
-        try:
-            ads.extend(await provider.search(kw, params.get("region_code")))
-        except Exception as exc:  # noqa: BLE001 — запуск продолжается, причина в отчёте
-            failed[kw] = f"{type(exc).__name__}: {exc}"[:300]
+        for device in devices:
+            requests += 1
+            try:
+                page = await _page(provider, kw, params.get("region_code"), device)
+                ads.extend(page.ads)
+                if want_organic and device == "desktop":
+                    organic.extend(page.organic)
+            except Exception as exc:  # noqa: BLE001 — запуск продолжается, причина в отчёте
+                key = kw if device == "desktop" else f"{kw} (телефон)"
+                failed[key] = f"{type(exc).__name__}: {exc}"[:300]
 
     advertisers = aggregate(ads, platforms=tuple(settings["platform_domains"]))
     company_ids: list[int] = []
@@ -128,6 +156,26 @@ async def execute_run(db: AsyncSession, run: LgSourceRun, provider: SerpProvider
                 await service.recalc_score(db, company, now=now)
                 stopped += 1
 
+    # Органика: компании из топ-10 поиска, которые (пока) не рекламируются по этим ключам.
+    organic_ids: list[int] = []
+    organic_new: list[int] = []
+    if organic:
+        hits = aggregate_organic(organic, platforms=tuple(settings["platform_domains"]))
+        for hit in sorted(hits.values(), key=lambda h: h.best_position or 99):
+            res = await service.upsert_company(db, run.workspace_id, service.FindingIn(
+                source=ORGANIC_SOURCE, domain=hit.domain, city=params.get("city"),
+                region_code=params.get("region_code"), niche=params.get("niche"), source_url=hit.url), now=now)
+            company = res.company
+            if company is None:
+                continue
+            await _signal(db, company, "organic_top", run, now, ORGANIC_TTL,
+                          {"keywords": sorted(hit.keywords), "position": hit.best_position, "title": hit.title})
+            await service.recalc_score(db, company, now=now)
+            if company.id not in company_ids and company.id not in organic_ids:
+                organic_ids.append(company.id)
+                if res.created:
+                    organic_new.append(company.id)
+
     run.stats = {
         "requests": requests,
         "cost_rub": round(requests * provider.cost_per_request_rub, 2),
@@ -139,9 +187,14 @@ async def execute_run(db: AsyncSession, run: LgSourceRun, provider: SerpProvider
         "failed": failed,
         "company_ids": company_ids,
         "new_company_ids": new_ids,
+        "organic_companies": len(organic_ids),
+        "organic_new": len(organic_new),
+        "organic_company_ids": organic_ids,
+        "organic_new_ids": organic_new,
+        "devices": devices,
         "provider": provider.name,
     }
-    run.status = "failed" if failed and not ads else "done"
+    run.status = "failed" if failed and not ads and not organic else "done"
     run.error = "all keywords failed" if run.status == "failed" else None
     run.finished_at = now
     await db.flush()

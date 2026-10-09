@@ -112,7 +112,8 @@ def company_row(c: LgCompany) -> dict:
 
 
 def run_row(r: LgSourceRun) -> dict:
-    stats = {k: v for k, v in (r.stats or {}).items() if k not in ("company_ids", "new_company_ids")}
+    stats = {k: v for k, v in (r.stats or {}).items()
+             if k not in ("company_ids", "new_company_ids", "organic_company_ids", "organic_new_ids")}
     return {"id": r.id, "source": r.source, "status": r.status, "params": r.params, "stats": stats,
             "error": r.error, "created_at": iso(r.created_at), "started_at": iso(r.started_at),
             "finished_at": iso(r.finished_at)}
@@ -128,16 +129,19 @@ class RunIn(BaseModel):
     city: str | None = Field(default=None, max_length=120)
     enrich: bool = True  # после поиска сразу собрать контакты с сайтов новых компаний
     repeat: bool = False  # повторять каждую неделю (новые и пропавшие рекламодатели)
+    organic: bool = False  # сохранить и компании из топ-10 поиска (в тех же запросах, бесплатно)
+    devices: list[str] = Field(default_factory=lambda: ["desktop"], max_length=2)  # desktop / mobile
 
 
 class EstimateIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     keywords: list[str] = Field(min_length=1, max_length=500)
+    devices: list[str] = Field(default_factory=lambda: ["desktop"], max_length=2)
 
 
 @router.post("/runs/estimate")
 async def estimate(payload: EstimateIn, admin: AdminUser = Depends(require_admin)):
-    return direct_search.estimate(payload.keywords, make_provider())
+    return direct_search.estimate(payload.keywords, make_provider(), payload.devices)
 
 
 async def _execute_now(run_id: int) -> list[int]:
@@ -149,7 +153,9 @@ async def _execute_now(run_id: int) -> list[int]:
         try:
             await direct_search.execute_run(db, run, make_provider())
             await db.commit()
-            enrich_ids = list((run.stats or {}).get("new_company_ids") or []) if (run.params or {}).get("enrich") else []
+            stats = run.stats or {}
+            enrich_ids = (list(stats.get("new_company_ids") or []) + list(stats.get("organic_new_ids") or [])
+                          if (run.params or {}).get("enrich") else [])
         except Exception as exc:  # noqa: BLE001 — запуск помечается упавшим, причина видна в интерфейсе
             await db.rollback()
             run = await db.get(LgSourceRun, run_id)
@@ -169,7 +175,8 @@ async def create_run(payload: RunIn, tasks: BackgroundTasks, db: AsyncSession = 
                                              niche=payload.niche, city=payload.city, created_by_id=admin.id)
     except ValueError as exc:
         raise HTTPException(422, str(exc))
-    run.params = {**run.params, "enrich": payload.enrich, "repeat": payload.repeat}
+    run.params = {**run.params, "enrich": payload.enrich, "repeat": payload.repeat, "organic": payload.organic,
+                  "devices": direct_search.clean_devices(payload.devices)}
     await db.commit()
     tasks.add_task(_execute, run.id)
     return run_row(run)
@@ -188,8 +195,10 @@ async def get_run(run_id: int, db: AsyncSession = Depends(get_db), admin: AdminU
     run = await db.get(LgSourceRun, run_id)
     if run is None or run.workspace_id != workspace_id():
         raise HTTPException(404, "Запуск не найден")
-    ids = (run.stats or {}).get("company_ids") or []
-    new = set((run.stats or {}).get("new_company_ids") or [])
+    stats = run.stats or {}
+    organic_ids = set(stats.get("organic_company_ids") or [])
+    ids = list(stats.get("company_ids") or []) + [i for i in stats.get("organic_company_ids") or []]
+    new = set(stats.get("new_company_ids") or []) | set(stats.get("organic_new_ids") or [])
     rows = (await db.execute(select(LgCompany).where(LgCompany.id.in_(ids)))).scalars().all() if ids else []
     ads = {}
     if rows:
@@ -201,6 +210,7 @@ async def get_run(run_id: int, db: AsyncSession = Depends(get_db), admin: AdminU
         ad = ads.get(c.id)
         item = company_row(c)
         item["is_new"] = c.id in new
+        item["found_in"] = "organic" if c.id in organic_ids else "ads"
         item["ad"] = {"title": ad.title, "text": ad.text, "keywords": ad.keywords,
                       "placement": ad.placement} if ad else None
         companies.append(item)
@@ -232,7 +242,9 @@ async def filtered_companies(db: AsyncSession, ws: int, *, q=None, niche=None, c
         run = await db.get(LgSourceRun, run_id)
         if run is None or run.workspace_id != ws:
             raise HTTPException(404, "Запуск не найден")
-        base = base.where(LgCompany.id.in_([int(i) for i in (run.stats or {}).get("company_ids") or []]))
+        stats = run.stats or {}
+        ids = list(stats.get("company_ids") or []) + list(stats.get("organic_company_ids") or [])
+        base = base.where(LgCompany.id.in_([int(i) for i in ids]))
     return base
 
 

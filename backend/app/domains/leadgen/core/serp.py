@@ -77,6 +77,38 @@ def aggregate(ads: list[SerpAd], platforms=DEFAULT_PLATFORM_DOMAINS) -> dict[str
     return result
 
 
+@dataclass
+class SerpOrganic:
+    keyword: str
+    url: str
+    title: str | None = None
+    text: str | None = None
+    position: int | None = None
+
+
+@dataclass
+class OrganicHit:
+    domain: str
+    url: str
+    title: str | None
+    keywords: set[str] = field(default_factory=set)
+    best_position: int | None = None
+
+
+def aggregate_organic(items: list[SerpOrganic], platforms=DEFAULT_PLATFORM_DOMAINS) -> dict[str, OrganicHit]:
+    """Органика по доменам: агрегаторы, маркетплейсы и ссылки Яндекса отбрасываются."""
+    result: dict[str, OrganicHit] = {}
+    for item in items:
+        domain = normalize_domain(item.url)
+        if not domain or is_platform_domain(domain, platforms):
+            continue
+        hit = result.setdefault(domain, OrganicHit(domain, item.url, item.title))
+        hit.keywords.add(item.keyword.strip().lower())
+        if item.position and (hit.best_position is None or item.position < hit.best_position):
+            hit.best_position, hit.url, hit.title = item.position, item.url, item.title or hit.title
+    return result
+
+
 def run_fingerprint(source: str, region_code: int | None, keywords: list[str]) -> str:
     """Одинаковые запуски (источник + регион + набор ключей) сравниваются между собой."""
     kws = "|".join(sorted({k.strip().lower() for k in keywords if k.strip()}))

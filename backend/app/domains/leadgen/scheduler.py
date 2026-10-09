@@ -46,7 +46,8 @@ async def schedule_due(db: AsyncSession, now: datetime | None = None) -> list[in
         p = prev.params or {}
         run = await direct_search.create_run(db, prev.workspace_id, keywords=p.get("keywords") or [],
                                              region_code=p.get("region_code"), niche=p.get("niche"), city=p.get("city"))
-        run.params = {**run.params, "repeat": True, "enrich": p.get("enrich", True), "repeat_of": prev.id}
+        run.params = {**run.params, "repeat": True, "enrich": p.get("enrich", True), "repeat_of": prev.id,
+                      "organic": p.get("organic", False), "devices": p.get("devices") or ["desktop"]}
         created.append(run.id)
     await db.flush()
     return created

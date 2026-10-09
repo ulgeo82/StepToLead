@@ -123,7 +123,15 @@ export type Run = {
   id: number;
   source: string;
   status: string;
-  params: { keywords?: string[]; niche?: string; city?: string; region_code?: number };
+  params: {
+    keywords?: string[];
+    niche?: string;
+    city?: string;
+    region_code?: number;
+    organic?: boolean;
+    devices?: string[];
+    filename?: string;
+  };
   stats: {
     requests?: number;
     cost_rub?: number;
@@ -131,12 +139,16 @@ export type Run = {
     new_advertisers?: number;
     already_in_base?: number;
     stopped?: number;
+    organic_companies?: number;
+    organic_new?: number;
+    created?: number;
+    invalid?: number;
     failed?: Record<string, string>;
   };
   error?: string | null;
   created_at: string;
   finished_at?: string | null;
-  companies?: (Company & { is_new: boolean; ad?: Ad | null })[];
+  companies?: (Company & { is_new: boolean; found_in?: "ads" | "organic"; ad?: Ad | null })[];
 };
 export type Filters = {
   q?: string;

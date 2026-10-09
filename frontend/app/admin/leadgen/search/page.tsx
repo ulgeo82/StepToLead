@@ -21,6 +21,9 @@ export default function SearchPage() {
   const [region, setRegion] = useState("");
   const [enrich, setEnrich] = useState(true);
   const [repeat, setRepeat] = useState(false);
+  const [organic, setOrganic] = useState(true);
+  const [mobile, setMobile] = useState(false);
+  const devices = useMemo(() => (mobile ? ["desktop", "mobile"] : ["desktop"]), [mobile]);
   const keywords = useMemo(
     () => [
       ...new Set(
@@ -57,7 +60,7 @@ export default function SearchPage() {
       api<{ requests: number; cost_rub: number }>(`${base}/runs/estimate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ keywords }),
+        body: JSON.stringify({ keywords, devices }),
         signal: controller.signal,
       })
         .then((value) => {
@@ -74,7 +77,7 @@ export default function SearchPage() {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [keywords]);
+  }, [keywords, devices]);
   useEffect(() => {
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout>;
@@ -150,6 +153,8 @@ export default function SearchPage() {
         ...(city.trim() ? { city: city.trim() } : {}),
         enrich,
         repeat,
+        organic,
+        devices,
       });
       setSelected(run.id);
       setRefresh((n) => n + 1);
@@ -182,7 +187,7 @@ export default function SearchPage() {
             <button type="button" className={styles.source} aria-pressed="true">
               Яндекс Директ
             </button>
-            {["Органика", "2ГИС", "HH"].map((source) => (
+            {["2ГИС", "HH"].map((source) => (
               <button key={source} type="button" className={styles.source} disabled>
                 {source} <span className={styles.badge}>скоро</span>
               </button>
@@ -233,6 +238,14 @@ export default function SearchPage() {
           <label className={styles.check}>
             <input type="checkbox" checked={enrich} onChange={(e) => setEnrich(e.target.checked)} />
             Сразу собрать контакты с сайтов
+          </label>
+          <label className={styles.check}>
+            <input type="checkbox" checked={organic} onChange={(e) => setOrganic(e.target.checked)} />
+            Сохранить и компании из топ-10 поиска (органика) — в тех же запросах, бесплатно
+          </label>
+          <label className={styles.check}>
+            <input type="checkbox" checked={mobile} onChange={(e) => setMobile(e.target.checked)} />
+            Искать рекламу и на телефонах — другие рекламодатели, запросов ×2
           </label>
           <label className={styles.check}>
             <input type="checkbox" checked={repeat} onChange={(e) => setRepeat(e.target.checked)} />
@@ -292,7 +305,10 @@ export default function SearchPage() {
               >
                 <span className={styles.row}>
                   <strong>
-                    #{run.id} · {run.params.niche || "Поиск компаний"}
+                    #{run.id} ·{" "}
+                    {run.source === "import"
+                      ? `Импорт${run.params.filename ? `: ${run.params.filename}` : ""}`
+                      : run.params.niche || "Поиск компаний"}
                   </strong>
                   <span className={`${styles.badge} ${styles[run.status] || ""}`}>
                     {statusNames[run.status] || run.status}
@@ -302,9 +318,16 @@ export default function SearchPage() {
                   {date(run.created_at)}
                   {run.params.city ? ` · ${run.params.city}` : ""}
                 </small>
-                {run.status === "done" && (
+                {run.status === "done" && run.source === "import" && (
                   <span>
-                    {run.stats.companies || 0} компаний · {run.stats.new_advertisers || 0} новых ·{" "}
+                    {run.stats.companies || 0} компаний · {run.stats.created || 0} новых
+                    {run.stats.invalid ? ` · ${run.stats.invalid} строк пропущено` : ""}
+                  </span>
+                )}
+                {run.status === "done" && run.source !== "import" && (
+                  <span>
+                    {run.stats.companies || 0} в рекламе · {run.stats.new_advertisers || 0} новых
+                    {run.stats.organic_companies ? ` · ${run.stats.organic_companies} из поиска` : ""} ·{" "}
                     {run.stats.stopped || 0} пропали
                   </span>
                 )}
@@ -371,7 +394,11 @@ export default function SearchPage() {
                           {company.ad ? (
                             <Advertisement ad={company.ad} />
                           ) : (
-                            <span className={styles.muted}>Объявление не получено</span>
+                            <span className={styles.muted}>
+                              {company.found_in === "organic"
+                                ? "Не рекламируется по этим ключам — найдена в поиске"
+                                : "Объявление не получено"}
+                            </span>
                           )}
                         </td>
                         <td>{company.ad?.keywords?.length || 0}</td>
@@ -379,6 +406,7 @@ export default function SearchPage() {
                           <span className={`${styles.badge} ${company.is_new ? styles.new : ""}`}>
                             {company.is_new ? "Новый" : "Уже был"}
                           </span>
+                          {company.found_in === "organic" && <span className={styles.chip}>из поиска</span>}
                         </td>
                         <td>
                           <Score value={company.score} />

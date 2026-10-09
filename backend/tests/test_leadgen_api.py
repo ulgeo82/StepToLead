@@ -195,8 +195,38 @@ class LeadgenApiTests(unittest.TestCase):
         self.assertEqual(bad.status_code, 422)
 
 
-if __name__ == "__main__":
-    unittest.main()
+    def test_import_csv_and_xlsx(self):
+        import io
+        from openpyxl import Workbook
+        base = "/api/admin/leadgen/companies/import"
+        csv_text = ("Название;Сайт;Телефон;Email;Город\n"
+                    "Ромакс;https://romax63.ru/;8 905 303-66-00;info@romax63.ru;Самара\n"
+                    "Авито;avito.ru;;;\n"
+                    "Без сайта;;;;\n"
+                    "Ромакс дубль;www.romax63.ru;;;\n")
+        r = self.client.post(base, headers=ORIGIN, data={"text": csv_text, "niche": "Кухни", "enrich": "false"})
+        self.assertEqual(r.status_code, 201, r.text)
+        st = r.json()["stats"]
+        self.assertEqual((st["companies"], st["created"], st["invalid"]), (1, 1, 2))  # дубль склеен, Авито и пустая — мимо
+        self.assertEqual(r.json()["enrich_queued"], 0)
+        card = self.client.get("/api/admin/leadgen/companies", params={"run_id": r.json()["id"]}).json()
+        self.assertEqual([c["domain"] for c in card["items"]], ["romax63.ru"])
+        self.assertEqual(card["items"][0]["niche"], "Кухни")
+
+        wb = Workbook(); ws = wb.active
+        ws.append(["Сайт компании", "Телефон 1", "ИНН"])
+        ws.append(["agata63.ru", "+7 846 111-22-33", None])
+        ws.append(["romax63.ru", None, None])
+        buf = io.BytesIO(); wb.save(buf)
+        r = self.client.post(base, headers=ORIGIN, data={"enrich": "false"},
+                             files={"file": ("baza.xlsx", buf.getvalue(), "application/octet-stream")})
+        self.assertEqual(r.status_code, 201, r.text)
+        self.assertEqual((r.json()["stats"]["created"], r.json()["stats"]["already_in_base"]), (1, 1))
+        self.assertEqual(r.json()["params"]["filename"], "baza.xlsx")
+        bad = self.client.post(base, headers=ORIGIN, data={"text": "просто текст без сайтов"})
+        self.assertEqual(bad.status_code, 422)
+        old = self.client.post(base, headers=ORIGIN, files={"file": ("old.xls", b"x", "application/vnd.ms-excel")})
+        self.assertEqual(old.status_code, 422)
 
 
 class JobQueueTests(unittest.TestCase):
@@ -221,3 +251,6 @@ class JobQueueTests(unittest.TestCase):
         finally:
             routes._enrich_now = original
         self.assertEqual((state["max"], sorted(state["order"])), (1, [1, 2, 3]))
+
+if __name__ == "__main__":
+    unittest.main()

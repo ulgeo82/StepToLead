@@ -254,10 +254,10 @@ class EnrichApiTests(DbBase):
         self.assertIn("telegram", {c["kind"] for c in company["contacts"]})
         self.assertEqual(company["score"], 8)  # реклама: премиум 2 + новый 2; сайт: мессенджер 2 + квиз 1 + нет CRM 1
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class PlatformInnTests(unittest.TestCase):
     def test_platform_inn_ignored(self):
         self.assertIn("7736207543", site_enrich.PLATFORM_INNS)
+
+if __name__ == "__main__":
+    unittest.main()

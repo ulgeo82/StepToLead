@@ -88,7 +88,7 @@ class ProviderTests(unittest.TestCase):
                 super().__init__(user="u", key="k", url="https://x")
                 self.answers, self.calls = list(answers), 0
 
-            async def fetch_raw(self, keyword, region_code):
+            async def fetch_raw(self, keyword, region_code, device="desktop"):
                 self.calls += 1
                 answer = self.answers.pop(0)
                 if isinstance(answer, Exception):
@@ -101,6 +101,9 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(len(asyncio.run(p.search("кухни", 51))), 10)
         p = P([no_ads, no_ads])
         self.assertEqual((asyncio.run(p.search("кухни", 51)), p.calls), ([], 2))
+        p = P([no_ads, httpx.ConnectError("boom"), httpx.ConnectError("boom")])
+        page = asyncio.run(p.search_page("кухни", 51))
+        self.assertEqual((page.has_ad_blocks, p.calls), (False, 3))  # первый ответ не теряем
         p = P([no_money, good])
         with self.assertRaises(ProviderError):
             asyncio.run(p.search("кухни", 51))
@@ -184,6 +187,41 @@ class DirectRunTests(unittest.TestCase):
         self.assertIn(("dub-mebel.ru", "new_advertiser"), kinds)
         self.assertEqual(ads, 2)
         self.assertEqual((run.stats["companies"], run.stats["new_advertisers"], run.stats["ads"]), (2, 2, 6))
+
+    def test_organic_and_mobile(self):
+        from app.domains.leadgen.core.serp import SerpOrganic
+        org = {KEYS[0]: [SerpOrganic("", "https://kuhni-sever.ru/", "Кухни Север", position=1),
+                         SerpOrganic("", "https://lamita.ru/kuhni", "Ламита", position=2),
+                         SerpOrganic("", "https://www.avito.ru/samara/kuhni", "Авито", position=3)],
+               KEYS[1]: [SerpOrganic("", "https://lamita.ru/", "Ламита", position=5)]}
+        mobile = {KEYS[2]: [ad("https://mob-kuhni.ru/", title="Кухни с телефона")]}
+        provider = StaticProvider(FIRST, organic=org, mobile=mobile)
+
+        async def fn(db):
+            run = await direct_search.create_run(db, 1, keywords=KEYS, region_code=51, niche="Кухни", city="Самара")
+            run.params = {**run.params, "organic": True, "devices": ["desktop", "mobile"]}
+            await direct_search.execute_run(db, run, provider, now=NOW)
+            lamita = (await db.execute(select(LgCompany).where(LgCompany.domain == "lamita.ru"))).scalar_one()
+            kinds = {k for (k,) in (await db.execute(select(LgSignal.kind).where(LgSignal.company_id == lamita.id)))}
+            sever = (await db.execute(select(LgCompany).where(LgCompany.domain == "kuhni-sever.ru"))).scalar_one()
+            return run, lamita, kinds, sever
+        run, lamita, kinds, sever = self.run_db(fn)
+        self.assertEqual(run.stats["requests"], 8)  # 4 ключа × ПК и телефон
+        self.assertEqual(provider.devices.count("mobile"), 4)
+        self.assertEqual((run.stats["companies"], run.stats["organic_companies"]), (3, 1))  # + mob-kuhni.ru; Авито — площадка
+        self.assertEqual((kinds, lamita.score), ({"organic_top"}, 1))
+        self.assertIn("В топ-10 поиска", [r["label"] for r in sever.score_reasons])  # рекламодатель и в органике
+        self.assertEqual(direct_search.estimate(KEYS, provider, ["desktop", "mobile"])["requests"], 8)
+
+    def test_parse_real_page_organic(self):
+        from pathlib import Path
+        from app.domains.leadgen.providers import parse_xmlstock_page
+        raw = (Path(__file__).parent / "fixtures" / "xmlstock_live_kuhni_samara.xml").read_text(encoding="utf-8")
+        page = parse_xmlstock_page(raw, "кухни на заказ самара")
+        urls = [o.url for o in page.organic]
+        self.assertEqual(len(page.organic), 10)  # одна позиция — реклама yabs, отброшена
+        self.assertIn("https://lamita.ru/", urls)
+        self.assertTrue(page.organic[0].title.startswith("Кухни на заказ"))
 
     def test_second_run_marks_stopped_and_not_new(self):
         async def fn(db):

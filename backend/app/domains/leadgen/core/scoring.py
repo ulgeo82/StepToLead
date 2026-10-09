@@ -17,6 +17,7 @@ DEFAULT_WEIGHTS: dict[str, int] = {
     "twogis_card": 1,
     "slow_response": 1,
     "chain": -3,
+    "organic_top": 1,     # в топ-10 органики по ключам ниши (вкладываются в сайт)
     "merged": 0,
 }
 
@@ -33,6 +34,7 @@ REASON_LABELS: dict[str, str] = {
     "twogis_card": "Есть в 2ГИС",
     "slow_response": "Медленно отвечают на заявки",
     "chain": "Федеральная сеть",
+    "organic_top": "В топ-10 поиска",
 }
 
 MIN_SCORE, MAX_SCORE, FIT_NO_CAP = 0, 10, 2
