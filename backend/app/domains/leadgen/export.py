@@ -1,6 +1,7 @@
 """Выгрузка базы компаний в Excel: одна строка = одна компания, все контакты и контекст рекламы."""
 from __future__ import annotations
 
+import asyncio
 import io
 from collections import defaultdict
 
@@ -30,10 +31,7 @@ def _join(values) -> str:
 
 
 async def build_xlsx(db: AsyncSession, companies: list[LgCompany], *, base_url: str = "") -> bytes:
-    from openpyxl import Workbook
-    from openpyxl.styles import Alignment, Font, PatternFill
-    from openpyxl.utils import get_column_letter
-
+    """Данные — из базы (асинхронно), сам файл — в отдельном потоке: не блокирует ответы портала."""
     ids = [c.id for c in companies]
     contacts: dict[int, list[LgContact]] = defaultdict(list)
     ads: dict[int, list[LgAd]] = defaultdict(list)
@@ -45,6 +43,13 @@ async def build_xlsx(db: AsyncSession, companies: list[LgCompany], *, base_url: 
         for row in (await db.execute(select(LgAd).where(LgAd.company_id.in_(chunk))
                                      .order_by(LgAd.last_seen_at.desc()))).scalars():
             ads[row.company_id].append(row)
+    return await asyncio.to_thread(_render, companies, contacts, ads, base_url)
+
+
+def _render(companies, contacts, ads, base_url: str) -> bytes:
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.utils import get_column_letter
 
     wb = Workbook()
     ws = wb.active

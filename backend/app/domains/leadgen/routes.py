@@ -4,6 +4,8 @@
 """
 from __future__ import annotations
 
+import asyncio
+
 from datetime import datetime
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile
@@ -44,6 +46,35 @@ inbox_complete = None          # подмена ai.complete для размет�
 inbox_available = inbox.available
 site_delay = site_enrich.DELAY_SECONDS
 ENRICH_FRESH_DAYS = 30
+
+# Фоновые задачи лидогенерации идут по одной на вид: повторные нажатия встают в очередь,
+# а не запускают параллельные обходы сайтов — портал у клиентов не должен проседать.
+_locks: dict[tuple[int, str], asyncio.Lock] = {}
+
+
+def job_lock(kind: str) -> asyncio.Lock:
+    """Очередь на вид задачи (search / enrich / ai) в текущем цикле событий."""
+    key = (id(asyncio.get_running_loop()), kind)
+    if key not in _locks:
+        _locks[key] = asyncio.Lock()
+    return _locks[key]
+
+
+async def _execute(run_id: int) -> None:
+    async with job_lock("search"):
+        enrich_ids = await _execute_now(run_id)
+    if enrich_ids:
+        await _enrich(enrich_ids, only_stale=True)  # уже после того, как очередь поиска освободилась
+
+
+async def _enrich(company_ids: list[int], *, only_stale: bool) -> None:
+    async with job_lock("enrich"):
+        await _enrich_now(company_ids, only_stale=only_stale)
+
+
+async def _assess(company_ids: list[int], force: bool) -> None:
+    async with job_lock("ai"):
+        await _assess_now(company_ids, force)
 
 DNC_KINDS = ("company", "domain", "email", "phone", "telegram")
 DNC_REASONS = ("unsubscribed", "refused", "client", "competitor", "bounced", "legal")
@@ -109,11 +140,12 @@ async def estimate(payload: EstimateIn, admin: AdminUser = Depends(require_admin
     return direct_search.estimate(payload.keywords, make_provider())
 
 
-async def _execute(run_id: int) -> None:
+async def _execute_now(run_id: int) -> list[int]:
+    """Поиск. Возвращает компании, по которым затем собрать контакты."""
     async with session_factory() as db:
         run = await db.get(LgSourceRun, run_id)
         if run is None or run.status != "queued":
-            return
+            return []
         try:
             await direct_search.execute_run(db, run, make_provider())
             await db.commit()
@@ -123,9 +155,8 @@ async def _execute(run_id: int) -> None:
             run = await db.get(LgSourceRun, run_id)
             run.status, run.error, run.finished_at = "failed", f"{type(exc).__name__}: {exc}"[:500], service.utcnow()
             await db.commit()
-            return
-    if enrich_ids:
-        await _enrich(enrich_ids, only_stale=True)
+            return []
+    return enrich_ids
 
 
 @router.post("/runs", status_code=202)
@@ -482,7 +513,7 @@ class EnrichIn(BaseModel):
     only_stale: bool = True  # пропускать компании, сайт которых проверяли за последние 30 дней
 
 
-async def _enrich(company_ids: list[int], *, only_stale: bool) -> None:
+async def _enrich_now(company_ids: list[int], *, only_stale: bool) -> None:
     from datetime import timedelta
     try:
         provider = dadata_factory()
@@ -890,7 +921,7 @@ class AssessIn(BaseModel):
     force: bool = False  # переоценить, даже если оценка уже есть
 
 
-async def _assess(company_ids: list[int], force: bool) -> None:
+async def _assess_now(company_ids: list[int], force: bool) -> None:
     for cid in company_ids:
         async with session_factory() as db:
             company = await db.get(LgCompany, cid)
@@ -1034,7 +1065,7 @@ async def import_companies(tasks: BackgroundTasks, file: UploadFile | None = Fil
             if len(data) > IMPORT_MAX_BYTES:
                 raise HTTPException(413, "Файл больше 5 МБ — разбейте его на части")
             if filename.lower().endswith((".xlsx", ".xlsm")):
-                parsed = table_import.parse(xlsx=data)
+                parsed = await asyncio.to_thread(table_import.parse, xlsx=data)
             elif filename.lower().endswith(".xls"):
                 raise HTTPException(422, "Старый формат .xls не поддерживается — сохраните файл как .xlsx или .csv")
             else:
@@ -1046,9 +1077,9 @@ async def import_companies(tasks: BackgroundTasks, file: UploadFile | None = Fil
                         continue
                 else:
                     raise HTTPException(422, "Не удалось прочитать файл: сохраните его в UTF-8 или как .xlsx")
-                parsed = table_import.parse(text=content)
+                parsed = await asyncio.to_thread(table_import.parse, text=content)
         elif text and text.strip():
-            parsed = table_import.parse(text=text[:IMPORT_MAX_BYTES])
+            parsed = await asyncio.to_thread(table_import.parse, text=text[:IMPORT_MAX_BYTES])
         else:
             raise HTTPException(422, "Загрузите файл или вставьте список сайтов")
     except HTTPException:

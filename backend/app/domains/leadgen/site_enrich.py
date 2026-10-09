@@ -94,8 +94,9 @@ async def crawl(domain: str, *, transport: httpx.AsyncBaseTransport | None = Non
             return result
         result.errors.clear()
         result.fetched.append(root + "/")
-        first = extract(html, root + "/")
-        result.text = html_to_text(html)[:4000]
+        # Разбор HTML — в отдельном потоке, чтобы тяжёлая страница не тормозила ответы портала клиентам.
+        first = await asyncio.to_thread(extract, html, root + "/")
+        result.text = (await asyncio.to_thread(html_to_text, html))[:4000]
         result.facts.merge(first)
         queue = [p for p in first.pages if urlsplit(p).hostname]
         seen = {root + "/"}
@@ -113,7 +114,7 @@ async def crawl(domain: str, *, transport: httpx.AsyncBaseTransport | None = Non
                 result.errors[url] = perr or "error"
                 continue
             result.fetched.append(url)
-            result.facts.merge(extract(page, url))
+            result.facts.merge(await asyncio.to_thread(extract, page, url))
     return result
 
 

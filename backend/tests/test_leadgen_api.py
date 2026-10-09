@@ -197,3 +197,27 @@ class LeadgenApiTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class JobQueueTests(unittest.TestCase):
+    def test_background_jobs_run_one_at_a_time(self):
+        """Повторные нажатия «Собрать контакты» не запускают параллельные обходы сайтов."""
+        state = {"now": 0, "max": 0, "order": []}
+        original = routes._enrich_now
+
+        async def fake(ids, *, only_stale):
+            state["now"] += 1
+            state["max"] = max(state["max"], state["now"])
+            await asyncio.sleep(0.01)
+            state["order"].append(ids[0])
+            state["now"] -= 1
+
+        async def go():
+            await asyncio.gather(*(routes._enrich([i], only_stale=True) for i in (1, 2, 3)),
+                                 routes._assess_now([], False))  # другая очередь — не ждёт
+        routes._enrich_now = fake
+        try:
+            asyncio.run(go())
+        finally:
+            routes._enrich_now = original
+        self.assertEqual((state["max"], sorted(state["order"])), (1, [1, 2, 3]))
