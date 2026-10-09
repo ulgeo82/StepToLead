@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,7 +14,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.access import require_admin
 from app.core.config import settings as app_settings
 from app.db import SessionLocal, get_db
-from app.domains.leadgen import analytics, dadata, direct_search, fit_ai, inbox, outreach, sequences, service, site_enrich
+from app.domains.leadgen import (
+    analytics, dadata, direct_search, fit_ai, importer, inbox, outreach, sequences, service, site_enrich,
+)
+from app.domains.leadgen.core import table_import
 from app.domains.leadgen.core import sequence as seq_core
 from app.domains.leadgen.models import LgEnrollment, LgMailbox, LgSequence
 from app.core.crypto import encrypt_secret
@@ -976,3 +979,56 @@ async def inbox_reply(touch_id: int, payload: InboxReply, db: AsyncSession = Dep
         raise HTTPException(exc.status, str(exc))
     await db.commit()
     return {"ok": True, "touch_id": out.id, "item": await inbox.row_out(db, touch, company, full=True)}
+
+
+# ---------------------------------------------------------------- импорт базы из файла
+
+IMPORT_MAX_BYTES = 5 * 1024 * 1024
+
+
+@router.post("/companies/import", status_code=201)
+async def import_companies(tasks: BackgroundTasks, file: UploadFile | None = File(default=None),
+                           text: str | None = Form(default=None), niche: str | None = Form(default=None, max_length=120),
+                           city: str | None = Form(default=None, max_length=120), enrich: bool = Form(default=True),
+                           db: AsyncSession = Depends(get_db), admin: AdminUser = Depends(require_admin)):
+    """CSV / Excel / список доменов -> компании. Затем (по умолчанию) сбор контактов с сайтов новых компаний."""
+    ws = workspace_id()
+    filename = None
+    try:
+        if file is not None and file.filename:
+            filename = file.filename[:200]
+            data = await file.read(IMPORT_MAX_BYTES + 1)
+            if len(data) > IMPORT_MAX_BYTES:
+                raise HTTPException(413, "Файл больше 5 МБ — разбейте его на части")
+            if filename.lower().endswith((".xlsx", ".xlsm")):
+                parsed = table_import.parse(xlsx=data)
+            elif filename.lower().endswith(".xls"):
+                raise HTTPException(422, "Старый формат .xls не поддерживается — сохраните файл как .xlsx или .csv")
+            else:
+                for enc in ("utf-8-sig", "cp1251"):
+                    try:
+                        content = data.decode(enc)
+                        break
+                    except UnicodeDecodeError:
+                        continue
+                else:
+                    raise HTTPException(422, "Не удалось прочитать файл: сохраните его в UTF-8 или как .xlsx")
+                parsed = table_import.parse(text=content)
+        elif text and text.strip():
+            parsed = table_import.parse(text=text[:IMPORT_MAX_BYTES])
+        else:
+            raise HTTPException(422, "Загрузите файл или вставьте список сайтов")
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001 — битый файл
+        raise HTTPException(422, f"Не удалось разобрать файл: {type(exc).__name__}")
+    if not parsed.rows:
+        raise HTTPException(422, "Не нашли ни одной компании: нужен хотя бы сайт, ИНН или телефон в строке")
+    run = await importer.import_parsed(db, ws, parsed, niche=(niche or "").strip() or None,
+                                       city=(city or "").strip() or None, filename=filename, user_id=admin.id)
+    run.params = {**run.params, "enrich": enrich}
+    enrich_ids = list(run.stats.get("company_ids") or []) if enrich else []  # only_stale пропустит свежие
+    await db.commit()
+    if enrich_ids:
+        tasks.add_task(_enrich, enrich_ids, only_stale=True)
+    return {**run_row(run), "enrich_queued": len(enrich_ids)}

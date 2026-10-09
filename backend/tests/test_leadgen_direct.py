@@ -3,6 +3,8 @@ import asyncio
 import os
 import tempfile
 import unittest
+import httpx
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, select
@@ -14,7 +16,7 @@ from app.domains.leadgen import direct_search
 from app.domains.leadgen.core.serp import SerpAd, aggregate, ad_hash, run_fingerprint
 from app.domains.leadgen.models import LgAd, LgCompany, LgSignal
 from app.domains.leadgen.providers import (
-    FormatNotVerified, ProviderNotConfigured, StaticProvider, XmlStockLiveProvider, parse_xmlstock_live,
+    ProviderNotConfigured, StaticProvider, XmlStockLiveProvider, parse_xmlstock_live,
 )
 from app.models.marketing import ClientWorkspace
 
@@ -58,9 +60,66 @@ class ProviderTests(unittest.TestCase):
         with self.assertRaises(ProviderNotConfigured):
             XmlStockLiveProvider()
 
-    def test_parser_refuses_until_verified(self):
-        with self.assertRaises(FormatNotVerified):
-            parse_xmlstock_live("<xml/>", "кухни")
+    def test_parse_real_xmlstock_live_sample(self):
+        """Реальный ответ XMLStock Live: «кухни на заказ самара», lr=51, 09.10.2026."""
+        from pathlib import Path
+        from app.domains.leadgen.core.serp import aggregate
+        raw = (Path(__file__).parent / "fixtures" / "xmlstock_live_kuhni_samara.xml").read_text(encoding="utf-8")
+        ads = parse_xmlstock_live(raw, "кухни на заказ самара")
+        self.assertEqual((len(ads), sum(a.premium for a in ads)), (10, 5))
+        self.assertEqual(ads[0].title, "Кухни на заказ в Самаре от производителя")
+        self.assertTrue(ads[0].text.startswith("Кухни на заказ напрямую"))
+        advertisers = aggregate(ads)
+        self.assertIn("kuhni.modernova.ru", advertisers)
+        self.assertTrue(advertisers["kuhni.modernova.ru"].premium)  # был и сверху, и снизу
+        self.assertIn("ka2-design.ru", advertisers)
+        self.assertEqual(len(advertisers), 9)
+
+    def test_retries_on_glitches(self):
+        from app.domains.leadgen.providers import ProviderError
+        good = (Path(__file__).parent / "fixtures" / "xmlstock_live_kuhni_samara.xml").read_text(encoding="utf-8")
+        no_ads = '<?xml version="1.0"?><yandexsearch><response><found>5</found><results/></response></yandexsearch>'
+        no_money = '<yandexsearch><response><error code="32">Недостаточно средств</error></response></yandexsearch>'
+
+        class P(XmlStockLiveProvider):
+            retry_pause, min_interval = 0, 0
+
+            def __init__(self, answers):
+                super().__init__(user="u", key="k", url="https://x")
+                self.answers, self.calls = list(answers), 0
+
+            async def fetch_raw(self, keyword, region_code):
+                self.calls += 1
+                answer = self.answers.pop(0)
+                if isinstance(answer, Exception):
+                    raise answer
+                return answer
+
+        p = P([httpx.ConnectError("boom"), "", good])
+        self.assertEqual((len(asyncio.run(p.search("кухни", 51))), p.calls), (10, 3))
+        p = P([no_ads, good])
+        self.assertEqual(len(asyncio.run(p.search("кухни", 51))), 10)
+        p = P([no_ads, no_ads])
+        self.assertEqual((asyncio.run(p.search("кухни", 51)), p.calls), ([], 2))
+        p = P([no_money, good])
+        with self.assertRaises(ProviderError):
+            asyncio.run(p.search("кухни", 51))
+        self.assertEqual(p.calls, 1)  # нет денег — не повторяем
+
+    def test_parse_errors(self):
+        from app.domains.leadgen.providers import ProviderError
+        with self.assertRaises(ProviderError) as ctx:
+            parse_xmlstock_live('<?xml version="1.0"?><yandexsearch><response><error code="32">'
+                                'Недостаточно средств</error></response></yandexsearch>', "кухни")
+        self.assertIn("Недостаточно средств (код 32)", str(ctx.exception))
+        with self.assertRaises(ProviderError):
+            parse_xmlstock_live("Bad gateway", "кухни")
+        empty = '<?xml version="1.0"?><yandexsearch><response><found>0</found></response></yandexsearch>'
+        from app.domains.leadgen.providers import NoAdBlocks
+        with self.assertRaises(NoAdBlocks):  # провайдер повторит запрос
+            parse_xmlstock_live(empty, "кухни")
+        only_top = '<yandexsearch><response><topads/></response></yandexsearch>'
+        self.assertEqual(parse_xmlstock_live(only_top, "кухни"), [])
 
 
 class DirectRunTests(unittest.TestCase):
