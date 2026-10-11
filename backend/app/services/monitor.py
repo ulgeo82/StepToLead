@@ -6,11 +6,13 @@ filling up. A problem is reported once when it appears, again every 24 hours whi
 when it is gone. A dead server cannot report itself: keep an external uptime check on https://<domain>/api/health.
 """
 import asyncio
+import hashlib
 import html
 import logging
 import shutil
 import time
-from collections import deque
+import traceback
+from collections import Counter, deque
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select, or_
@@ -39,15 +41,49 @@ _errors: deque = deque(maxlen=200)
 _tasks: dict[str, asyncio.Task] = {}
 
 
+REPEATED_ERROR = 3       # одна и та же ошибка столько раз за окно — отдельное уведомление
+
+
+def _where(tb) -> str | None:
+    """Последнее место в нашем коде (не в библиотеках), где упало: services/x.py:120 (func)."""
+    frames = [f for f in traceback.extract_tb(tb)
+              if "site-packages" not in f.filename and "/lib/python" not in f.filename.replace("\\", "/")
+              and f.name != "remember_failures"]
+    if not frames:
+        return None
+    f = frames[-1]
+    path = f.filename.replace("\\", "/")
+    path = path.split("/app/", 1)[-1] if "/app/" in path else path.rsplit("/", 1)[-1]
+    return f"{path}:{f.lineno} ({f.name})"
+
+
+def _error_text(exc: BaseException) -> str:
+    text = " ".join(str(exc).split())
+    return f"{type(exc).__name__}: {text[:180]}" if text else type(exc).__name__
+
+
+def record_exception(method: str, path: str, project_id, exc: BaseException) -> None:
+    """Ошибка 500 на запросе: что за адрес, какой проект, что и где упало (вызывает middleware в main.py)."""
+    pid = int(project_id) if str(project_id or "").isdigit() else None
+    _errors.append({"t": time.time(), "route": f"{method} {path}", "project_id": pid,
+                    "error": _error_text(exc), "where": _where(exc.__traceback__)})
+
+
 class ErrorCollector(logging.Handler):
     """Remembers ERROR records of the app (uvicorn.error and its children) for the burst check."""
     def emit(self, record: logging.LogRecord) -> None:
-        if record.levelno >= logging.ERROR and not record.name.endswith(".monitor"):
-            try:
-                text = record.getMessage().splitlines()[0][:200]
-            except Exception:
-                text = record.msg if isinstance(record.msg, str) else "ошибка"
-            _errors.append((time.time(), record.name, text))
+        if record.levelno < logging.ERROR or record.name.endswith(".monitor"):
+            return
+        try:
+            message = record.getMessage().splitlines()[0][:200]
+        except Exception:
+            message = record.msg if isinstance(record.msg, str) else "ошибка"
+        if message.startswith("Exception in ASGI application"):
+            return  # такие ошибки уже записал record_exception с адресом запроса и местом в коде
+        exc = record.exc_info[1] if record.exc_info else None
+        _errors.append({"t": time.time(), "route": f"фоновая задача · {record.name.removeprefix('uvicorn.error.')}",
+                        "project_id": None, "error": _error_text(exc) if exc else message,
+                        "where": _where(exc.__traceback__) if exc else None})
 
 
 def install() -> None:
@@ -74,7 +110,7 @@ async def problems(db: AsyncSession) -> list[dict]:
     found: list[dict] = []
 
     def add(key, title, detail="", workspace_id=None):
-        found.append({"key": key, "title": title, "detail": (detail or "")[:400], "client": names.get(workspace_id)})
+        found.append({"key": key, "title": title, "detail": (detail or "")[:900], "client": names.get(workspace_id)})
 
     from app.models.ai import AiUsage
     recent = (await db.scalars(select(AiUsage).where(AiUsage.created_at >= now() - timedelta(hours=1),
@@ -115,10 +151,28 @@ async def problems(db: AsyncSession) -> list[dict]:
             if not task.cancelled() and task.exception():
                 reason = str(task.exception())[:200]
             add(f"worker:{name}", f"Фоновая задача «{name}» не работает — нужен перезапуск бэкенда", reason)
-    recent = [e for e in _errors if e[0] > time.time() - ERROR_WINDOW * 60]
-    if len(recent) >= ERROR_BURST:
-        sample = "\n".join(f"{e[1]}: {e[2]}" for e in recent[-3:])
-        add("errors", f"Много ошибок сервера: {len(recent)} за {ERROR_WINDOW} мин", sample)
+    recent = [e for e in _errors if isinstance(e, dict) and e["t"] > time.time() - ERROR_WINDOW * 60]
+    groups = Counter((e["route"], e["error"], e["where"], e["project_id"]) for e in recent)
+    project_ids = {pid for (_, _, _, pid) in groups if pid}
+    projects = {p.id: p for p in (await db.scalars(select(Project).where(Project.id.in_(project_ids)))).all()} \
+        if project_ids else {}
+    shown = 0
+    for (route, error, where, pid), count in groups.most_common():
+        if count < REPEATED_ERROR or shown >= 5:
+            break
+        project = projects.get(pid)
+        detail = "\n".join(x for x in (
+            f"Ошибка: {error}",
+            f"Где в коде: {where}" if where else None,
+            f"Проект: «{project.name}» (id {pid})" if project else (f"Проект id {pid}" if pid else None),
+        ) if x)
+        sig = hashlib.sha1(f"{route}|{error}|{where}".encode()).hexdigest()[:10]
+        add(f"err:{sig}", f"Ошибка на «{route}» — {count} раз за {ERROR_WINDOW} мин", detail,
+            project.workspace_id if project else None)
+        shown += 1
+    if len(recent) >= ERROR_BURST and not shown:
+        lines = [f"{n}× {route} — {error}" for (route, error, _, _), n in groups.most_common(3)]
+        add("errors", f"Много разных ошибок сервера: {len(recent)} за {ERROR_WINDOW} мин", "\n".join(lines))
     try:
         usage = shutil.disk_usage(settings.recordings_dir if __import__("os").path.isdir(settings.recordings_dir) else "/")
         if usage.free / usage.total < DISK_FREE_MIN:
@@ -128,9 +182,13 @@ async def problems(db: AsyncSession) -> list[dict]:
     return found
 
 
+LOG_HINT = ("Полный текст ошибки на сервере:\n<code>cd /opt/steptolead &amp;&amp; docker compose --env-file .env.prod "
+            "-f compose.prod.yml logs backend --since 30m | grep -A60 Traceback | tail -80</code>")
+
+
 def _line(p: dict) -> str:
     head = f"<b>{html.escape(p['title'])}</b>" + (f"\nКлиент: {html.escape(p['client'])}" if p.get("client") else "")
-    return head + (f"\n<i>{html.escape(p['detail'])}</i>" if p.get("detail") else "")
+    return head + (f"\n{html.escape(p['detail'])}" if p.get("detail") else "")
 
 
 async def recipients(db: AsyncSession) -> list[str]:
@@ -168,7 +226,8 @@ async def run_once(db: AsyncSession) -> dict:
         resolved.append(state.pop(key))
     messages = []
     if fresh:
-        messages.append("⚠️ <b>StepToLead: сбой</b>\n\n" + "\n\n".join(_line(p) for p in fresh))
+        hint = "\n\n" + LOG_HINT if any(p["key"].startswith(("err:", "errors")) for p in fresh) else ""
+        messages.append("⚠️ <b>StepToLead: сбой</b>\n\n" + "\n\n".join(_line(p) for p in fresh) + hint)
     if repeat:
         messages.append("⏳ <b>Всё ещё не работает</b>\n\n" + "\n\n".join(_line(p) for p in repeat))
     if resolved:

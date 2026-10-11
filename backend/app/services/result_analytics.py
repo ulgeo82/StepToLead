@@ -277,8 +277,10 @@ async def result_facts(db: AsyncSession, project: Project, start: date, end: dat
     stages.append(("Продажи", "sales"))
     for index, (label, field) in enumerate(stages):
         denominator = total.get(stages[index - 1][1]) if index else None
+        # Этапа может не быть в данных (лиды есть, квалификации нет): тогда конверсии нет, а не ошибка 500.
+        ratio = _ratio(total.get(field), denominator) if denominator else None
         funnel.append({"label": label, "value": total.get(field),
-                       "conversion": _ratio(total.get(field), denominator) * 100 if denominator else None})
+                       "conversion": ratio * 100 if ratio is not None else None})
     recent = sorted((lead for lead, _ in lead_rows if start <= _dt_date(lead.created_at) <= end),
                     key=lambda lead: (lead.created_at, lead.id), reverse=True)[:5]
     recent_leads = [{"id": lead.id, "name": lead.full_name,
