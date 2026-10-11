@@ -6,6 +6,8 @@ import { api } from "@/lib/api";
 type Profile = { id: number; name: string; status: string; last_error: string | null };
 type ClientProxy = { id: number; host: string; port: number; username: string | null; status: string;
   last_error: string | null; last_checked_at: string | null; max_accounts: number; profiles: Profile[] };
+type PoolProxy = { id: number; host: string; port: number; label: string | null; pool: string; max_accounts: number;
+  dedicated_workspace_id: number | null; client_accounts: number };
 type Payload = { proxies: ClientProxy[]; shared_pool_profiles: number; waiting: { id: number; name: string }[] };
 
 const statusLabel: Record<string, string> = { working: "работает", error: "нет связи", untested: "не проверен" };
@@ -18,7 +20,11 @@ export function DedicatedTelegramProxy({ workspaceId }: { workspaceId: number })
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [replacing, setReplacing] = useState<number | null>(null);
-  const load = useCallback(() => api<Payload>(`/proxies/workspace/${workspaceId}`).then(setData).catch(e => setError((e as Error).message)), [workspaceId]);
+  const [free, setFree] = useState<PoolProxy[]>([]);
+  const load = useCallback(() => Promise.all([
+    api<Payload>(`/proxies/workspace/${workspaceId}`).then(setData),
+    api<PoolProxy[]>("/proxies").then(rows => setFree(rows.filter(p => p.pool === "client" && !p.dedicated_workspace_id && !p.client_accounts))),
+  ]).catch(e => setError((e as Error).message)), [workspaceId]);
   useEffect(() => { void load(); }, [load]);
 
   async function run(action: () => Promise<Payload>, done: string, form?: HTMLFormElement) {
@@ -40,6 +46,16 @@ export function DedicatedTelegramProxy({ workspaceId }: { workspaceId: number })
     if (proxy.profiles.length && !window.confirm("Профили переподключатся через новый IP. Telegram может попросить подтвердить вход заново. Заменить?")) return;
     void run(() => api<Payload>(`/proxies/${proxy.id}/replace`, json("PUT", {
       line: String(form.get("line") || ""), confirm_ip_change: true })), "Прокси заменён — профили переподключаются", event.currentTarget);
+  }
+  async function attach(id: string) {
+    const proxy = free.find(p => String(p.id) === id);
+    if (!proxy) return;
+    setBusy(true); setError(""); setNotice("");
+    try {
+      await api(`/proxies/${proxy.id}`, json("PATCH", { pool: "client", max_accounts: proxy.max_accounts, dedicated_workspace_id: workspaceId }));
+      await load(); setNotice(`Прокси ${proxy.host} закреплён за компанией`);
+    } catch (e) { setError((e as Error).message); }
+    finally { setBusy(false); }
   }
   async function remove(proxy: ClientProxy) {
     if (!window.confirm(`Удалить прокси ${proxy.host}:${proxy.port}?`)) return;
@@ -70,6 +86,9 @@ export function DedicatedTelegramProxy({ workspaceId }: { workspaceId: number })
         <input name="line" required placeholder="host:port:логин:пароль" autoComplete="off"/>
         <button className="button primary" disabled={busy}>{busy ? "Проверяем…" : "Проверить и заменить"}</button></form>}
     </div>)}
+    {free.length > 0 && <div className="clientProxyForm"><label>Закрепить свободный прокси из общего пула
+      <select disabled={busy} value="" onChange={e => void attach(e.target.value)}><option value="">Выбрать…</option>
+        {free.map(p => <option key={p.id} value={p.id}>{p.label || `${p.host}:${p.port}`}</option>)}</select></label></div>}
     <form className="clientProxyForm" onSubmit={add}>
       <input name="line" required placeholder="host:port:логин:пароль, socks5://логин:пароль@host:port или http://логин:пароль@host:port" autoComplete="off"/>
       <label>Профилей на прокси<input name="max_accounts" type="number" min={1} max={100} defaultValue={3}/></label>
