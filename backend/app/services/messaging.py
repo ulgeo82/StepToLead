@@ -25,7 +25,7 @@ from app.services.notifications import direct as notify_direct, flush_telegram
 
 logger = logging.getLogger("uvicorn.error.messaging")
 KINDS = {"avito": "Авито", "telegram_bot": "Telegram", "whatsapp": "WhatsApp", "max": "MAX",
-         "telegram_user": "Telegram-профиль"}
+         "telegram_user": "Telegram-профиль", "email": "Почта"}
 POLL_SECONDS = 15
 AVITO_POLL_SECONDS = 60
 
@@ -392,6 +392,9 @@ class AvitoMessenger:
 
 
 def adapter(channel: MessagingChannel, db: AsyncSession):
+    if channel.kind == "email":
+        from app.services.email_channel import EmailChannel
+        return EmailChannel(channel)
     if channel.kind == "telegram_user":
         from app.services.telegram_profiles import TelegramProfile
         return TelegramProfile(channel)
@@ -440,6 +443,12 @@ async def _link_existing(db: AsyncSession, channel: MessagingChannel, conversati
             conversation.contact_id = inbound.contact_id
             conversation.deal_id = inbound.deal_id
     digits = norm_phone(conversation.phone)
+    address = (conversation.meta or {}).get("email")
+    if conversation.contact_id is None and address:
+        contact = await db.scalar(select(CrmContact).where(CrmContact.project_id == channel.project_id,
+                                                          CrmContact.email_normalized == address.lower()).limit(1))
+        if contact:
+            conversation.contact_id = contact.id
     if conversation.contact_id is None and digits:
         contact = await db.scalar(select(CrmContact).where(CrmContact.project_id == channel.project_id,
                                                            CrmContact.phone_normalized == digits).limit(1))
@@ -464,10 +473,13 @@ async def _new_lead(db: AsyncSession, channel: MessagingChannel, conversation: C
     from app.services.inbound_lead import create_inbound
     source = await ensure_source(db, channel)
     username = (conversation.meta or {}).get("username")
-    contact = conversation.phone or (f"@{username}" if username else f"{KINDS[channel.kind]} · {conversation.title}")
+    email_address = (conversation.meta or {}).get("email")
+    contact = conversation.phone or email_address or (
+        f"@{username}" if username else f"{KINDS[channel.kind]} · {conversation.title}")
     title = conversation.title if len(conversation.title) >= 2 else f"Клиент {KINDS[channel.kind]}"
     payload = InboundLead.model_validate({
         "external_id": f"conv:{conversation.id}", "full_name": title[:180], "phone": conversation.phone,
+        "email": email_address,
         "source": channel.kind, "external_source": channel.kind, "contact_method": KINDS[channel.kind],
         "contact": contact, "notes": first_text[:3000], "conversation_id": conversation.id, "contact_consent": False})
     result = await create_inbound(db, source, payload, commit=False, allow_raw_contact=True)
@@ -608,7 +620,7 @@ async def run_worker() -> None:
                     MessagingChannel.project_id.not_in(select(Project.id).where(Project.status == "demo"))))).all()
                 ids = [(c.id, c.kind, aware(c.last_polled_at)) for c in channels]
             for channel_id, kind, polled in ids:
-                if kind == "avito" and polled and polled > now() - timedelta(seconds=AVITO_POLL_SECONDS):
+                if kind in {"avito", "email"} and polled and polled > now() - timedelta(seconds=AVITO_POLL_SECONDS):
                     continue
                 try:
                     async with SessionLocal() as db:

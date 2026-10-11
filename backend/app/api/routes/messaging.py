@@ -119,6 +119,8 @@ async def create_channel(project_id: int, payload: ChannelIn, request: Request, 
     project = await project_for(db, user, project_id)
     if payload.kind not in messaging.KINDS:
         raise HTTPException(422, "Неизвестный тип канала")
+    if payload.kind in {"email", "telegram_user"}:
+        raise HTTPException(422, "Используйте отдельную форму подключения почты или Telegram-профиля")
     if payload.kind == "telegram_bot":
         reject_notification_token(payload.kind, payload.token)
         await plans.require(db, project.workspace_id, "all_chats")
@@ -169,6 +171,8 @@ async def edit_channel(channel_id: int, payload: ChannelPatch, request: Request,
     reject_notification_token(channel.kind, payload.token)
     if payload.name: channel.name = payload.name.strip()
     if payload.active is not None: channel.active = payload.active
+    if payload.token and channel.kind in {"email", "telegram_user"}:
+        raise HTTPException(422, "Переподключите канал через его форму подключения")
     if payload.token: channel.secret_encrypted = encrypt_secret(payload.token.strip())
     if payload.token or payload.active:
         try:

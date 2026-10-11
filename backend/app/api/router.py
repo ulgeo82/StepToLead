@@ -39,6 +39,8 @@ from app.api.routes import telegram_profiles
 api_router.include_router(telegram_profiles.router)
 from app.api.routes import reach
 api_router.include_router(reach.router)
+from app.api.routes import email_channels
+api_router.include_router(email_channels.router)
 api_router.include_router(telephony.webhook_router)
 api_router.include_router(telephony.router)
 api_router.include_router(launch.router)

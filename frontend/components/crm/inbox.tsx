@@ -4,6 +4,7 @@ import { FormEvent, KeyboardEvent, useCallback, useEffect, useRef, useState } fr
 import { request, Team, when } from "./shared";
 import { TelegramProfileConnect } from "./telegram-profile-connect";
 import { ReachContact } from "./reach-contact";
+import { EmailChannelConnect } from "./email-channel-connect";
 
 export type Conversation = { id: number; channel_id: number; channel_kind: string | null; channel_name: string | null; title: string;
   phone: string | null; contact_id: number | null; contact_name: string | null; deal_id: number | null; deal_name: string | null;
@@ -19,11 +20,12 @@ type Channel = { id: number; kind: string; kind_name: string; name: string; acti
 type Template = { id: number; title: string; text: string };
 
 export const channelBadge: Record<string, { label: string; cls: string }> = {
+  email: { label: "@", cls: "email" },
   telegram_user: { label: "TG", cls: "telegram" },
   avito: { label: "А", cls: "avito" }, telegram_bot: { label: "TG", cls: "telegram" }, whatsapp: { label: "WA", cls: "whatsapp" }, max: { label: "MAX", cls: "max" } };
 
 const channelNames: Record<string, string> = { avito: "Авито", telegram_bot: "Telegram", whatsapp: "WhatsApp", max: "MAX",
-  telegram_user: "Telegram-профиль" };
+  telegram_user: "Telegram-профиль", email: "Почта" };
 const ago = (value: string | null) => {
   if (!value) return "";
   const minutes = Math.max(0, Math.round((Date.now() - new Date(value).getTime()) / 60000));
@@ -130,12 +132,15 @@ function Channels({ projectId, onClose, onChanged }: { projectId: number; onClos
       <div><b>{c.name}</b><small>{c.kind_name}{c.bot_username ? ` · @${c.bot_username}` : ""} · {c.status === "connected" ? "работает" : c.status === "error" ? "ошибка" : "не проверен"}{c.last_polled_at ? ` · проверка ${when(c.last_polled_at)}` : ""}</small>
         {c.last_error && <small className="chatError">{c.last_error}</small>}</div>
       {data.can_manage && <div className="chatChannelActions"><button disabled={busy} onClick={() => run(() => request(`/crm/channels/${c.id}/sync`, "POST", {}), "Проверено")}>Проверить</button>
+        {c.kind === "email" && <button disabled={busy} onClick={() => run(() => request(
+          `/crm/channels/${c.id}/email-check`, "POST", {}), "Вход в IMAP и SMTP проверен")}>IMAP / SMTP</button>}
         {c.kind === "telegram_user" && <select aria-label="Режим Telegram-профиля" value={c.mode || "corporate"}
           disabled={busy} onChange={e => run(() => request(`/crm/channels/${c.id}/telegram-mode`, "PATCH",
             { mode: e.target.value }), "Режим сохранён")}><option value="corporate">Корпоративный</option>
           <option value="personal">Личный</option></select>}
         <button disabled={busy} onClick={() => run(() => request(`/crm/channels/${c.id}`, "PATCH", { active: !c.active }), c.active ? "Канал выключен" : "Канал включён")}>{c.active ? "Выключить" : "Включить"}</button></div>}</div>)}
       {data && !data.channels.length && <p className="crmMuted">Каналы ещё не подключены.</p>}</div>
+    {data?.can_manage && <EmailChannelConnect projectId={projectId} onChanged={() => { void load(); onChanged(); }}/ >}
     {data?.can_manage && <TelegramProfileConnect projectId={projectId} onChanged={() => { void load(); onChanged(); }}/ >}
     {data?.can_manage && <form className="chatAddChannel" onSubmit={add}><h3 className="crmSub">Подключить канал</h3>
       <div className="crmChips">{[["telegram_bot", "Telegram-бот"], ["whatsapp", "WhatsApp"], ["max", "MAX"], ["avito", "Чаты Авито"]].map(([k, l]) => <button type="button" key={k} className={kind === k ? "active" : ""} onClick={() => setKind(k)}>{l}</button>)}</div>

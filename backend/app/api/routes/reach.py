@@ -117,6 +117,8 @@ async def open_chat(deal_id: int, payload: OpenIn, request: Request,
     row.contact_id, row.deal_id = contact.id, deal.id
     row.assigned_user_id = deal.responsible_user_id
     for item in history:
+        if item.get("meta"):
+            row.meta = {**(row.meta or {}), **item["meta"]}
         if await db.scalar(select(Message.id).where(Message.conversation_id == row.id,
                                                     Message.external_id == item["external_id"])):
             continue
