@@ -46,10 +46,12 @@ class MonitorTests(unittest.TestCase):
         import logging, time
         monitor.install()
         for _ in range(monitor.ERROR_BURST):
-            logging.getLogger("uvicorn.error.crm").error("Exception in ASGI application")
-        keys = {p["key"] for p in self.run_db(monitor.problems)}
+            logging.getLogger("uvicorn.error.crm").error("sync failed")
+        found = self.run_db(monitor.problems)
+        keys = {p["key"] for p in found}
         self.assertIn("worker:Телефония", keys)
-        self.assertIn("errors", keys)
+        burst = [p for p in found if p["key"].startswith("err:")]
+        self.assertEqual(burst[0]["title"], f"Ошибка на «фоновая задача · crm» — {monitor.ERROR_BURST} раз за 15 мин")
         monitor._tasks.clear(); monitor._errors.clear()
         self.client.cookies.clear(); self.client.cookies.set(COOKIE, "a" * 43)
         overview = self.client.get("/api/admin/monitor").json()
