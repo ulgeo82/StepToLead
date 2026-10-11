@@ -60,6 +60,12 @@ async def load_lead_rows(db: AsyncSession, project_id: int) -> list[tuple[LeadRo
     return [(LeadRow(*r[:10]), AttributionRow(*r[11:]) if r[10] is not None else None) for r in rows]
 
 
+def channel_group(name: str | None) -> str | None:
+    """«Telegram-профиль: Михаил» → «Telegram-профиль»: каналы одного вида сворачиваются в группу."""
+    head, sep, rest = (name or "").partition(": ")
+    return head.strip() if sep and head.strip() and rest.strip() else None
+
+
 def manual_source_key(value: str | None) -> str | None:
     name = (value or "").strip()
     return f"manual:{name}" if name and name.casefold() not in {"unknown", "не определено"} else None
@@ -84,7 +90,13 @@ async def result_facts(db: AsyncSession, project: Project, start: date, end: dat
         connection_key[row.id] = key
         sources[key] = {"id": key, "name": row.name, "kind": "INTEGRATION", "method": "API",
                         "platform": row.platform, "status": row.status}
+    # Входящий источник (Tilda, Telegram-профиль…) почти всегда имеет «зеркальный» канал проекта:
+    # считаем их одним каналом, иначе в таблицах он показывается дважды.
+    mirrored = {row.inbound_source_id: f"source:{row.id}" for row in custom if row.inbound_source_id}
     for row in inbound:
+        if row.id in mirrored:
+            inbound_key[row.id] = mirrored[row.id]
+            continue
         key = f"webhook:{row.id}"
         inbound_key[row.id] = key
         sources[key] = {"id": key, "name": row.name, "kind": "CUSTOM", "method": "WEBHOOK",
@@ -215,6 +227,7 @@ async def result_facts(db: AsyncSession, project: Project, start: date, end: dat
             entry = {**sources.get(key, {"id": key, "name": "Не определено", "kind": "UNKNOWN", "method": None,
                                             "platform": None, "status": None}), **values,
                      "data_mode": "aggregated/manual" if key in aggregated else "individual"}
+            entry["group"] = channel_group(entry.get("name"))
             entry.update(_derived(values, margin))
             entry.update(quality_fields(quality[key]["target"], quality[key]["non_target"], values["spend"]))
             by_source.append(entry)

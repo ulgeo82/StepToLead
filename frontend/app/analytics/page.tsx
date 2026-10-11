@@ -16,6 +16,7 @@ type Source = Totals & {
   id: string; name: string; kind: string; method: string | null; platform: string | null;
   impressions: number | null; clicks: number | null; cpc: number | null; ctr: number | null;
   click_to_lead: number | null; lead_to_qualified: number | null; qualified_to_sale: number | null;
+  group?: string | null;
 };
 type Exposure = { impressions: number | null; clicks: number | null; cpc: number | null;
   ctr: number | null; click_to_lead: number | null; lead_to_qualified: number | null;
@@ -40,6 +41,38 @@ type Analytics = {
 /** Share of target leads among the ones sales marked; "—" until someone marks. */
 const quality = (row: { target?: number; non_target?: number; target_share?: number | null }) =>
   row.target_share == null ? "—" : `${Math.round(row.target_share)}% (${row.target}/${(row.target || 0) + (row.non_target || 0)})`;
+
+/** Conversion rate without the "+" sign used for period-over-period differences. */
+const rate = (n: number | null | undefined) => n == null ? "—" : `${new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 1 }).format(n)}%`;
+const pct = (a: number, b: number) => b > 0 ? a / b * 100 : null;
+const hasActivity = (s: Source) => Boolean(s.leads || s.clicks || s.qualified || s.sales || s.target || s.non_target);
+type ConversionRow = { key: string; name: string; values: Pick<Source, "click_to_lead" | "lead_to_qualified" | "qualified_to_sale" | "target" | "non_target" | "target_share">; members?: Source[] };
+
+/** Channels of one kind («Telegram-профиль: …», «Tilda: …») fold into one row with summed conversions. */
+function conversionRows(list: Source[]): ConversionRow[] {
+  const active = list.filter(hasActivity);
+  const groups = new Map<string, Source[]>();
+  active.forEach(s => { if (s.group) groups.set(s.group, [...(groups.get(s.group) || []), s]); });
+  const done = new Set<string>();
+  const rows: ConversionRow[] = [];
+  for (const s of active) {
+    const members = s.group ? groups.get(s.group) || [] : [];
+    if (members.length < 2) { rows.push({ key: s.id, name: s.name, values: s }); continue; }
+    if (done.has(s.group!)) continue;
+    done.add(s.group!);
+    const sum = (f: (m: Source) => number | null | undefined, only = members) => only.reduce((t, m) => t + Number(f(m) || 0), 0);
+    const clickable = members.filter(m => m.clicks != null);
+    const target = sum(m => m.target), nonTarget = sum(m => m.non_target);
+    rows.push({ key: `group:${s.group}`, name: s.group!, members, values: {
+      click_to_lead: clickable.length ? pct(sum(m => m.leads, clickable), sum(m => m.clicks, clickable)) : null,
+      lead_to_qualified: pct(sum(m => m.qualified), sum(m => m.leads)),
+      qualified_to_sale: pct(sum(m => m.sales), sum(m => m.qualified)),
+      target, non_target: nonTarget, target_share: pct(target, target + nonTarget) } });
+  }
+  return rows;
+}
+
+const channelsWord = (n: number) => n % 10 === 1 && n % 100 !== 11 ? "канал" : [2, 3, 4].includes(n % 10) && ![12, 13, 14].includes(n % 100) ? "канала" : "каналов";
 
 type Tab = "overview" | "marketing" | "sales" | "accounts" | "hypotheses" | "campaigns" | "website";
 const TABS: { key: Tab; label: string }[] = [
@@ -78,6 +111,8 @@ function KpiCard({ label, icon, value, prior, note, inverse = false, display = c
 
 export default function AnalyticsPage() {
   const today = useMemo(() => new Date(), []);
+  const [openGroups, setOpenGroups] = useState<string[]>([]);
+  const toggleGroup = (key: string) => setOpenGroups(list => list.includes(key) ? list.filter(k => k !== key) : [...list, key]);
   const [start, setStart] = useState(dateInput(new Date(today.getFullYear(), today.getMonth(), today.getDate() - 29)));
   const [end, setEnd] = useState(dateInput(today));
   const [projects, setProjects] = useState<ReportingProject[]>([]);
@@ -164,7 +199,15 @@ export default function AnalyticsPage() {
     return <div className="analyticsSourceGrid"><section className="resultPanel analyticsSources"><div className="resultPanelHead"><h2>Источники лидов</h2></div><div className="resultTabs analyticsTabs">{SOURCE_METRICS.map(item => <button key={item.key} className={sourceMetric === item.key ? "active" : ""} onClick={() => setSourceMetric(item.key)}>{item.label}</button>)}</div>
       {sourceValues.length ? <div className="analyticsDistribution"><div className="analyticsDonut" style={{ background: distribution ? `conic-gradient(${distribution})` : "#eaf0f8" }}><div><strong>{sourceMetric === "romi" ? "ROMI" : metricText(sourceMetric, sourceTotal)}</strong><span>за период</span></div></div><div className="analyticsDistributionRows">{sourceValues.map((source, index) => <div key={source.id}><i style={{ background: COLORS[index % COLORS.length] }}/><span>{source.name}</span><strong>{metricText(sourceMetric, source[sourceMetric])}</strong><small>{sourceTotal && sourceMetric !== "romi" ? `${(Number(source[sourceMetric]) / sourceTotal * 100).toFixed(1)}%` : "—"}</small></div>)}</div></div> : <p className="resultTableEmpty">Для этой метрики пока нет данных по источникам.</p>}
     </section><section className="resultPanel analyticsCosts"><div className="resultPanelHead"><h2>Стоимость этапов</h2><span className="analyticsLegend"><i className="cpl"/> CPL <i className="cpql"/> CPQL <i className="cac"/> CAC</span></div>{costSources.length ? <div className="analyticsCostRows">{costSources.map(source => { return <div className="analyticsCostRow" key={source.id}><strong>{source.name}</strong><div><div title={`CPL: ${money(source.cpl)}`}><i className="cpl" style={{ width: `${(source.cpl || 0) / maxCost * 100}%` }}/><span>{money(source.cpl)}</span></div><div title={`CPQL: ${money(source.cpql)}`}><i className="cpql" style={{ width: `${(source.cpql || 0) / maxCost * 100}%` }}/><span>{money(source.cpql)}</span></div><div title={`CAC: ${money(source.cac)}`}><i className="cac" style={{ width: `${(source.cac || 0) / maxCost * 100}%` }}/><span>{money(source.cac)}</span></div></div></div>; })}</div> : <p className="resultTableEmpty">Для сравнения пока нет расходов и подтверждённых этапов.</p>}</section>
-      <section className="resultPanel analyticsConversions"><div className="resultPanelHead"><h2>Конверсии по каналам</h2></div><div className="resultTableScroll"><table><thead><tr><th>Канал</th><th>Клик → Лид</th><th>Целевые</th><th>Лид → Квал.</th><th>Квал. → Прод.</th></tr></thead><tbody>{sources.map(source => <tr key={source.id}><td><strong>{source.name}</strong></td><td>{percent(source.click_to_lead)}</td><td>{quality(source)}</td><td>{percent(source.lead_to_qualified)}</td><td>{percent(source.qualified_to_sale)}</td></tr>)}</tbody></table>{!sources.length && <p className="resultTableEmpty">Источников за выбранный период нет.</p>}</div></section></div>;
+      <section className="resultPanel analyticsConversions"><div className="resultPanelHead"><h2>Конверсии по каналам</h2></div><div className="resultTableScroll"><table><thead><tr><th>Канал</th><th>Клик → Лид</th><th>Целевые</th><th>Лид → Квал.</th><th>Квал. → Прод.</th></tr></thead><tbody>{conversionRows(sources).flatMap(row => {
+        const open = openGroups.includes(row.key);
+        const cells = (v: ConversionRow["values"]) => <><td>{rate(v.click_to_lead)}</td><td>{quality(v)}</td><td>{rate(v.lead_to_qualified)}</td><td>{rate(v.qualified_to_sale)}</td></>;
+        if (!row.members) return [<tr key={row.key}><td><strong>{row.name}</strong></td>{cells(row.values)}</tr>];
+        return [<tr key={row.key} className="analyticsClickableRow analyticsGroupRow" tabIndex={0} aria-expanded={open}
+          onClick={() => toggleGroup(row.key)} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); toggleGroup(row.key); } }}>
+          <td><strong><span className="analyticsGroupArrow">{open ? "▾" : "▸"}</span>{row.name}</strong><small>{row.members.length} {channelsWord(row.members.length)}</small></td>{cells(row.values)}</tr>,
+          ...(open ? row.members.map(member => <tr key={member.id} className="analyticsGroupChild"><td>{member.name.slice((member.group || "").length).replace(/^:\s*/, "")}</td>{cells(member)}</tr>) : [])];
+      })}</tbody></table>{!conversionRows(sources).length && <p className="resultTableEmpty">За выбранный период по каналам нет лидов и кликов.</p>}</div></section></div>;
   }
 
   return <div className="resultShell analyticsShell"><ProjectSidebar project={selectedProject} projectId={projectId} active="analytics" role={data?.viewer.role}/><main className="resultMain"><div className="resultBreadcrumb">StepToLead <span>/</span> Аналитика</div>

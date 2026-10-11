@@ -45,3 +45,5 @@
 @media(max-width:1100px){.analyticsHero{grid-template-columns:1fr}.analyticsEntityGrid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:750px){.analyticsSourceGrid{grid-template-columns:1fr}.analyticsConversions{grid-column:auto}.analyticsFunnelBody{grid-template-columns:1fr}.analyticsDistribution{grid-template-columns:120px minmax(0,1fr)}.analyticsDonut{width:120px;height:120px}.analyticsDonut>div{width:75px;height:75px}.analyticsEntityGrid{grid-template-columns:1fr}.analyticsCampaignFilters>*{flex:1;min-width:130px}}
 .analyticsVkDeepLink { display: inline-flex; margin-top: 8px; padding: 10px 14px; border-radius: 9px; background: #006bfd; color: #fff; font-size: 12px; font-weight: 700; text-decoration: none; }
+
+.analyticsGroupRow td:first-child strong{display:inline-flex;align-items:center;gap:6px}.analyticsGroupRow td:first-child small{display:block;margin-top:2px;color:#91a1b5;font-weight:500}.analyticsGroupArrow{display:inline-block;width:10px;color:#006bfd}.analyticsGroupChild td{background:#fafcff;color:#4b5b70}.analyticsGroupChild td:first-child{padding-left:22px}
