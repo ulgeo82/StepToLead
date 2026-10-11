@@ -1,13 +1,14 @@
 """Customer Telegram sessions: login and one Redis-fenced persistent connection owner."""
 import asyncio
 import json
+import re
 import secrets
 from contextlib import suppress
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from redis.asyncio import Redis
-from sqlalchemy import select
+from sqlalchemy import func, select
 from telethon import events, functions, types
 from telethon.errors import FloodWaitError, PeerFloodError, SessionPasswordNeededError
 
@@ -79,7 +80,8 @@ async def login(db, channel, *, code=None, password=None):
 
 def error_text(error):
     if isinstance(error, ValueError):
-        return str(error)
+        text = str(error)
+        return text if re.search("[а-яё]", text, re.I) else "Не удалось найти этот чат в Telegram-профиле"
     if isinstance(error, FloodWaitError):
         until = datetime.now(timezone.utc) + timedelta(seconds=error.seconds)
         return f"Telegram ограничил отправку до {until.astimezone(ZoneInfo('Europe/Samara')):%H:%M}"
@@ -87,7 +89,12 @@ def error_text(error):
         return "Telegram временно запретил писать новым людям с этого аккаунта (спамблок)"
     if type(error).__name__ in {"AuthKeyUnregisteredError", "SessionRevokedError"}:
         return "Сессия завершена — подключите профиль заново"
-    return "Нет связи через прокси"
+    if type(error).__name__ in {"UserIsBlockedError", "InputUserDeactivatedError", "UserPrivacyRestrictedError",
+                                "PeerIdInvalidError", "ChatWriteForbiddenError"}:
+        return "Telegram не даёт написать этому человеку (заблокировал, удалил аккаунт или ограничил сообщения)"
+    if isinstance(error, (ConnectionError, OSError, asyncio.TimeoutError)):
+        return "Нет связи через прокси"
+    return "Telegram вернул ошибку — попробуйте ещё раз"
 
 
 async def accept_event(db, channel, event):
@@ -99,11 +106,14 @@ async def accept_event(db, channel, event):
         return False
     phone = messaging.norm_phone(sender.phone)
     username = (sender.username or "").lower().lstrip("@")
-    contact = None
-    contacts = (await db.scalars(select(CrmContact).where(
-        CrmContact.workspace_id == channel.workspace_id, CrmContact.project_id == channel.project_id))).all()
-    contact = next((c for c in contacts if (phone and c.phone_normalized == phone)
-                    or (username and (c.telegram or "").lower().lstrip("@") == username)), None)
+    # Look up only the matching contact: projects may hold thousands of contacts.
+    scope = select(CrmContact).where(CrmContact.workspace_id == channel.workspace_id,
+                                     CrmContact.project_id == channel.project_id)
+    contact = await db.scalar(scope.where(CrmContact.phone_normalized == phone).limit(1)) if phone else None
+    if contact is None and username:
+        candidates = (await db.scalars(scope.where(func.lower(CrmContact.telegram).in_(
+            [username, f"@{username}", f"https://t.me/{username}", f"t.me/{username}"])).limit(1))).all()
+        contact = candidates[0] if candidates else None
     if (channel.config or {}).get("mode", "corporate") == "personal" and contact is None:
         return False
     title = " ".join(filter(None, [sender.first_name, sender.last_name])) or sender.username or "Клиент"
@@ -173,7 +183,13 @@ class TelegramProfile:
 async def execute(client, command):
     operation = command["operation"]
     if operation == "send":
-        sent = await client.send_message(int(command["chat_id"]), command["text"])
+        chat_id = int(command["chat_id"])
+        try:
+            sent = await client.send_message(chat_id, command["text"])
+        except ValueError:
+            # StringSession keeps no entity cache across restarts: load dialogs once, then resolve the chat again.
+            await client.get_dialogs(limit=500)
+            sent = await client.send_message(chat_id, command["text"])
         return f"m{sent.id}"
     if operation == "lookup":
         if command.get("username"):
@@ -195,7 +211,11 @@ async def execute(client, command):
         history = await client.get_messages(user, limit=1)
         return {"external_chat_id": str(user.id), "title": user.first_name or user.username or "Клиент",
                 "has_history": bool(history)}
-    messages = await client.get_messages(int(command["chat_id"]), limit=command.get("limit", 50))
+    try:
+        messages = await client.get_messages(int(command["chat_id"]), limit=command.get("limit", 50))
+    except ValueError:
+        await client.get_dialogs(limit=500)
+        messages = await client.get_messages(int(command["chat_id"]), limit=command.get("limit", 50))
     return [{"external_id": f"m{m.id}", "direction": "out" if m.out else "in",
              "text": m.message or "Сообщение", "sent_at": m.date.isoformat()} for m in reversed(messages)]
 

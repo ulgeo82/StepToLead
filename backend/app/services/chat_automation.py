@@ -95,13 +95,8 @@ def grounded(text, knowledge):
     for claim in ("бесплатно", "скидка", "завтра", "сегодня доставим", "гарантируем"):
         if claim in text.casefold() and claim not in kb:
             return "Уточню у менеджера."
-    # Facts about money, delivery, guarantees and terms are safe only when quoted from the KB.
-    # Prefer a conservative hand-off over a plausible invented commercial promise.
-    for sentence in re.split(r"[.!?\n]+", text):
-        normalized = " ".join(sentence.casefold().split())
-        if re.search(r"\d|цен[аыу]|стоим|рубл|скид|бесплат|достав|гарант|оплат|предоплат|"
-                     r"срок|завтра|сегодня|недел|месяц|дней|услови", normalized) and normalized not in kb:
-            return "Уточню у менеджера."
+    # Commercial facts are checked by numbers and promise words above; general wording is left to the prompt,
+    # otherwise almost every polite answer ("какой срок вам удобен?") would turn into a hand-off.
     return text.strip()
 
 

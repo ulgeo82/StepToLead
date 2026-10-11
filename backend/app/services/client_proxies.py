@@ -52,20 +52,21 @@ async def check(proxy):
 
 
 async def check_due(db):
+    """Health-check due proxies concurrently, so a slow proxy never stalls message sending in the leader loop."""
     now = datetime.now(timezone.utc)
     proxies = (await db.scalars(select(Proxy).where(Proxy.pool == "client"))).all()
-    for proxy in proxies:
-        checked = proxy.last_checked_at
-        if checked and checked.replace(tzinfo=timezone.utc) > now - timedelta(minutes=5):
-            continue
-        try:
-            await asyncio.wait_for(check(proxy), 12)
-            proxy.status, proxy.last_error = "working", None
-        except Exception:
+    due = [p for p in proxies if not (p.last_checked_at and p.last_checked_at.replace(tzinfo=timezone.utc)
+                                     > now - timedelta(minutes=5))]
+    if not due:
+        return
+    results = await asyncio.gather(*(asyncio.wait_for(check(p), 12) for p in due), return_exceptions=True)
+    channels = (await db.scalars(select(MessagingChannel).where(MessagingChannel.kind == "telegram_user"))).all()
+    for proxy, result in zip(due, results):
+        if isinstance(result, BaseException):
             proxy.status, proxy.last_error = "error", "Нет связи через прокси"
+        else:
+            proxy.status, proxy.last_error = "working", None
         proxy.last_checked_at = now
-        channels = (await db.scalars(select(MessagingChannel).where(
-            MessagingChannel.kind == "telegram_user"))).all()
         for channel in channels:
             if (channel.config or {}).get("proxy_id") != proxy.id:
                 continue
