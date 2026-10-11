@@ -47,11 +47,17 @@ export function PeriodControls({ projects, projectId, setProjectId, start, setSt
   </div>;
 }
 
+const RATIO_METRIC = /^(cpl|cpql|cac|cpc|ctr|romi|average_check|cost_per_target|target_share)$|rate|share|avg|average|duration|depth|conversion/;
+
 export function MetricChart({ current, previous, metric, label }: {
   current: ReportingPoint[]; previous: ReportingPoint[]; metric: string; label: string;
 }) {
-  const a = current.map(point => (point as unknown as Record<string, number | null>)[metric]);
-  const b = previous.map(point => (point as unknown as Record<string, number | null>)[metric]);
+  const raw = (points: ReportingPoint[]) => points.map(point => (point as unknown as Record<string, number | null>)[metric]);
+  // Counts (leads, sales, spend…): a day without events is 0, not a gap — otherwise isolated days draw nothing.
+  const additive = !RATIO_METRIC.test(metric);
+  const fill = (values: (number | null)[]) => additive && values.some(value => value != null) ? values.map(value => value ?? 0) : values;
+  const a = fill(raw(current));
+  const b = fill(raw(previous));
   const all = [...a, ...b].filter((value): value is number => value != null);
   if (!all.length) return <div className="resultNoChart">За выбранный период нет данных для графика</div>;
   const min = Math.min(0, ...all), max = Math.max(...all, 1);
@@ -68,5 +74,7 @@ export function MetricChart({ current, previous, metric, label }: {
     {[28, 136, 244, 352, 460, 568, 676].map(x => <line key={x} x1={x} x2={x} y1="31" y2="181" stroke="#edf2fa" />)}
     {segments(b).map((points, index) => <polyline key={`prior-${index}`} points={points} fill="none" stroke="#99a8bf" strokeWidth="2" strokeDasharray="6 5" strokeLinecap="round" strokeLinejoin="round" />)}
     {segments(a).map((points, index) => <polyline key={`current-${index}`} points={points} fill="none" stroke="#006BFD" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />)}
+    {coordinates(a).map((point, index) => point && a[index] ? <circle key={`dot-${index}`} cx={point.split(",")[0]} cy={point.split(",")[1]} r="3.5" fill="#006BFD"><title>{`${current[index]?.label ? shortDate(current[index].label) : ""}: ${new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 1 }).format(a[index]!)}`}</title></circle> : null)}
+    <text x="24" y="24" fontSize="10" fill="#91a1b5" textAnchor="start">{new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 1 }).format(max)}</text>
   </svg><div className="resultAxis"><span>{current[0]?.label && shortDate(current[0].label)}</span><span>{current.at(-1)?.label && shortDate(current.at(-1)!.label)}</span></div></div>;
 }
