@@ -46,7 +46,7 @@ def _bucket(day: date, granularity: str):
 # identity-map bookkeeping) dominated response time, so these reports read only the columns
 # they use into light tuples with the same attribute names.
 LeadRow = namedtuple("LeadRow", "id created_at qualified_at meeting_at source_id source full_name status quality quality_reason")
-AttributionRow = namedtuple("AttributionRow", "connection_id source_id external_campaign_id")
+AttributionRow = namedtuple("AttributionRow", "connection_id source_id external_campaign_id utm_campaign")
 
 
 async def load_lead_rows(db: AsyncSession, project_id: int) -> list[tuple[LeadRow, AttributionRow | None]]:
@@ -54,7 +54,7 @@ async def load_lead_rows(db: AsyncSession, project_id: int) -> list[tuple[LeadRo
         ClientLead.id, ClientLead.created_at, ClientLead.qualified_at, ClientLead.meeting_at, ClientLead.source_id,
         ClientLead.source, ClientLead.full_name, ClientLead.status, ClientLead.quality, ClientLead.quality_reason,
         ClientLeadAttribution.id, ClientLeadAttribution.connection_id, ClientLeadAttribution.source_id,
-        ClientLeadAttribution.external_campaign_id)
+        ClientLeadAttribution.external_campaign_id, ClientLeadAttribution.utm_campaign)
         .outerjoin(ClientLeadAttribution, ClientLeadAttribution.lead_id == ClientLead.id)
         .where(ClientLead.project_id == project_id))
     return [(LeadRow(*r[:10]), AttributionRow(*r[11:]) if r[10] is not None else None) for r in rows]
@@ -71,13 +71,8 @@ def manual_source_key(value: str | None) -> str | None:
     return f"manual:{name}" if name and name.casefold() not in {"unknown", "не определено"} else None
 
 
-async def result_facts(db: AsyncSession, project: Project, start: date, end: date, granularity: str = "day",
-                       include_source_trend: bool = False):
-    prior_end = start - timedelta(days=1)
-    prior_start = prior_end - (end - start)
-    earliest = prior_start
-    latest = end
-
+async def source_catalog(db: AsyncSession, project: Project, lead_rows):
+    """Каналы проекта и канал каждого лида (одна логика для «Результата», «Аналитики» и кампаний)."""
     connections = (await db.scalars(select(AdConnection).where(
         AdConnection.project_id == project.id, AdConnection.platform != "telegram_ads"))).all()
     inbound = (await db.scalars(select(LeadInboundSource).where(LeadInboundSource.project_id == project.id))).all()
@@ -106,7 +101,6 @@ async def result_facts(db: AsyncSession, project: Project, start: date, end: dat
         sources[key] = {"id": key, "name": row.name, "kind": row.kind, "method": row.method,
                         "platform": None, "status": row.status}
 
-    lead_rows = await load_lead_rows(db, project.id)
     lead_source = {}
     for lead, attribution in lead_rows:
         # A verified ad-account attribution takes precedence over the generic website
@@ -122,6 +116,19 @@ async def result_facts(db: AsyncSession, project: Project, start: date, end: dat
                 sources[key] = {"id": key, "name": lead.source.strip(), "kind": "MANUAL", "method": "MANUAL",
                                 "platform": None, "status": "connected"}
         lead_source[lead.id] = key or "unknown"
+    return connections, custom, sources, lead_source
+
+
+async def result_facts(db: AsyncSession, project: Project, start: date, end: date, granularity: str = "day",
+                       include_source_trend: bool = False):
+    prior_end = start - timedelta(days=1)
+    prior_start = prior_end - (end - start)
+    earliest = prior_start
+    latest = end
+
+    lead_rows = await load_lead_rows(db, project.id)
+    connections, custom, sources, lead_source = await source_catalog(db, project, lead_rows)
+    connection_key = {row.id: f"ad:{row.id}" for row in connections}
     sales = (await db.scalars(select(ClientSale).where(ClientSale.project_id == project.id))).all()
 
     ad_rows = []

@@ -9,7 +9,7 @@ from app.models.marketing import (AdCampaignMetricDaily, AdConnection, AdHypothe
                                   AdHypothesisCampaign, AdMetricDaily, ClientLead,
                                   ClientLeadAttribution, ClientLeadEvent, ClientSale, Project,
                                   SourceMetricDaily)
-from app.services.result_analytics import _derived, _ratio, _sum, load_lead_rows, quality_fields
+from app.services.result_analytics import _derived, _ratio, _sum, load_lead_rows, quality_fields, source_catalog
 
 
 def defaultdict_count(values) -> dict:
@@ -111,10 +111,18 @@ async def analytics_details(db: AsyncSession, project: Project, start: date, end
         AdCampaignMetricDaily.connection_id.in_(connection_ids),
         AdCampaignMetricDaily.date >= start, AdCampaignMetricDaily.date <= end))).all() if connection_ids else []
     lead_rows = await load_lead_rows(db, project.id)
+    _, _, catalog, lead_source = await source_catalog(db, project, lead_rows)
     attribution = {}
     campaign_leads = defaultdict(list)
+    # Лиды без рекламной кампании (сайт, Telegram, ручные): строка «канал + utm_campaign», чтобы таблица
+    # кампаний показывала все заявки, а не только синхронизированные из кабинетов.
+    channel_leads = defaultdict(list)
+    channel_attribution = {}
     for lead, attr in lead_rows:
         if not attr or attr.connection_id not in connection_map or not attr.external_campaign_id:
+            channel_key = (lead_source.get(lead.id, "unknown"), ((attr.utm_campaign or "").strip()[:200] or None) if attr else None)
+            channel_leads[channel_key].append(lead)
+            channel_attribution[lead.id] = channel_key
             continue
         key = (attr.connection_id, attr.external_campaign_id)
         attribution[lead.id] = key
@@ -132,10 +140,13 @@ async def analytics_details(db: AsyncSession, project: Project, start: date, end
             label = (event.description or "Не определено").split(": ", 1)[0]
             lost_counts[label] += 1
     campaign_sales = defaultdict(list)
+    channel_sales = defaultdict(list)
     for sale in sales:
         key = attribution.get(sale.lead_id)
         if key:
             campaign_sales[key].append(sale)
+        elif sale.lead_id in channel_attribution:
+            channel_sales[channel_attribution[sale.lead_id]].append(sale)
 
     by_campaign = defaultdict(list)
     for row in campaign_rows:
@@ -176,7 +187,7 @@ async def analytics_details(db: AsyncSession, project: Project, start: date, end
                                      sum(lead.quality == "non_target" for lead in period_leads), spend))
         hypothesis_id = assignments.get(key)
         connection = connection_map[connection_id]
-        campaigns.append({"id": f"{connection_id}:{external_id}", "external_campaign_id": external_id,
+        campaigns.append({"id": f"{connection_id}:{external_id}", "kind": "ad", "external_campaign_id": external_id,
                           "name": max(rows, key=lambda row: row.date).campaign_name if rows else external_id,
                           "connection_id": connection_id, "connection_name": connection.name,
                           "platform": connection.platform, "hypothesis_id": hypothesis_id,
@@ -184,6 +195,33 @@ async def analytics_details(db: AsyncSession, project: Project, start: date, end
                           "status": None, "clicks": clicks, "impressions": impressions,
                           "cpc": _ratio(spend, clicks), **values})
     campaigns.sort(key=lambda row: (row["spend"] or 0, row["name"]), reverse=True)
+    margin = result["economics"]["margin"]
+    channel_rows = []
+    for key in set(channel_leads) | set(channel_sales):
+        source_key, utm = key
+        leads = channel_leads[key]
+        lead_count = sum(start <= lead.created_at.date() <= end for lead in leads)
+        qualified_count = sum(bool(lead.qualified_at and start <= lead.qualified_at.date() <= end) for lead in leads)
+        period_sales = [sale for sale in channel_sales[key] if start <= sale.occurred_at.date() <= end]
+        if not (lead_count or qualified_count or period_sales):
+            continue
+        revenue = _sum(sale.amount for sale in period_sales)
+        values = {"spend": None, "leads": lead_count or None,
+                  "qualified": qualified_count if qualified_count else (0 if lead_count else None),
+                  "sales": len(period_sales) if period_sales else (0 if lead_count else None),
+                  "revenue": revenue if revenue is not None else (0 if lead_count else None)}
+        values.update(_derived(values, margin))
+        period_leads = [lead for lead in leads if start <= lead.created_at.date() <= end]
+        values.update(quality_fields(sum(lead.quality == "target" for lead in period_leads),
+                                     sum(lead.quality == "non_target" for lead in period_leads), None))
+        channel = catalog.get(source_key, {}).get("name", "Не определено")
+        channel_rows.append({"id": f"channel:{source_key}:{utm or ''}", "kind": "channel",
+                             "external_campaign_id": utm or "", "name": utm or "Без кампании",
+                             "connection_id": None, "connection_name": channel, "platform": channel,
+                             "hypothesis_id": None, "hypothesis_name": None, "status": None,
+                             "clicks": None, "impressions": None, "cpc": None, **values})
+    channel_rows.sort(key=lambda row: (-(row["leads"] or 0), row["platform"], row["name"]))
+    campaigns += channel_rows
     return {"current": current, "previous": previous,
             "sales_cycle_days": sum(cycle_days) / len(cycle_days) if cycle_days else None,
             "lost_reasons": [{"label": label, "count": amount} for label, amount in

@@ -37,10 +37,16 @@ class ChannelGroupTests(unittest.TestCase):
                 lead = ClientLead(workspace_id=2, project_id=27, full_name="Лид", source="Telegram-профиль: Профиль",
                                   created_at=datetime(2026, 10, 5, tzinfo=timezone.utc))
                 db.add(lead); await db.flush()
-                db.add(ClientLeadAttribution(lead_id=lead.id, source_id=ids[0][0]))
+                db.add(ClientLeadAttribution(lead_id=lead.id, source_id=ids[0][0], utm_campaign="osen"))
+                site = ClientLead(workspace_id=2, project_id=27, full_name="Сайт", source="Сайт",
+                                  created_at=datetime(2026, 10, 6, tzinfo=timezone.utc))
+                db.add(site)
                 await db.commit()
-                return await result_analytics.result_facts(db, await db.get(Project, 27),
-                                                           date(2026, 10, 1), date(2026, 10, 11), "day")
+                project = await db.get(Project, 27)
+                facts = await result_analytics.result_facts(db, project, date(2026, 10, 1), date(2026, 10, 11), "day")
+                from app.services.analytics_details import analytics_details
+                self.details = await analytics_details(db, project, date(2026, 10, 1), date(2026, 10, 11), facts)
+                return facts
         try:
             data = asyncio.run(go())
         finally:
@@ -53,6 +59,10 @@ class ChannelGroupTests(unittest.TestCase):
         profile = next(s for s in sources if s["name"] == "Telegram-профиль: Профиль")
         self.assertEqual(profile["leads"], 1)
         self.assertEqual(profile["group"], "Telegram-профиль")
+        rows = {(r["platform"], r["name"]): r for r in self.details["campaigns"]}
+        self.assertEqual(rows[("Telegram-профиль: Профиль", "osen")]["leads"], 1)
+        self.assertEqual(rows[("Сайт", "Без кампании")]["leads"], 1)
+        self.assertTrue(all(r["kind"] == "channel" for r in rows.values()))
 
     def test_group_name(self):
         self.assertEqual(result_analytics.channel_group("Tilda: StepToLead(main)"), "Tilda")
