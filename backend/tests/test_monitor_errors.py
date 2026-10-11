@@ -42,9 +42,9 @@ class MonitorErrorTests(unittest.TestCase):
         return asyncio.run(go())
 
     def test_500_is_reported_with_route_project_and_place(self):
-        from app.main import remember_failures
+        from app.main import RememberFailures
         app = FastAPI()
-        app.middleware("http")(remember_failures)
+        app.add_middleware(RememberFailures)
 
         @app.get("/api/result")
         async def broken(project_id: int):

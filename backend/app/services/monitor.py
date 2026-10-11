@@ -44,11 +44,15 @@ _tasks: dict[str, asyncio.Task] = {}
 REPEATED_ERROR = 3       # одна и та же ошибка столько раз за окно — отдельное уведомление
 
 
+def path_is_main(filename: str) -> bool:
+    return filename.replace("\\", "/").endswith("app/main.py")
+
+
 def _where(tb) -> str | None:
     """Последнее место в нашем коде (не в библиотеках), где упало: services/x.py:120 (func)."""
     frames = [f for f in traceback.extract_tb(tb)
               if "site-packages" not in f.filename and "/lib/python" not in f.filename.replace("\\", "/")
-              and f.name != "remember_failures"]
+              and not (f.name == "__call__" and path_is_main(f.filename))]
     if not frames:
         return None
     f = frames[-1]

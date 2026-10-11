@@ -115,15 +115,30 @@ app.add_middleware(
 app.include_router(api_router, prefix="/api")
 
 
-@app.middleware("http")
-async def remember_failures(request, call_next):
-    """Ошибка 500 → в монитор с адресом, проектом и местом в коде (для понятного уведомления в Telegram)."""
-    try:
-        return await call_next(request)
-    except Exception as exc:
-        from app.services import monitor
-        monitor.record_exception(request.method, request.url.path, request.query_params.get("project_id"), exc)
-        raise
+class RememberFailures:
+    """Ошибка 500 → в монитор с адресом, проектом и местом в коде (для понятного уведомления в Telegram).
+    Чистый ASGI-слой: не буферизует ответы и не мешает стримингу, в отличие от @app.middleware."""
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        try:
+            await self.app(scope, receive, send)
+        except Exception as exc:
+            try:
+                from urllib.parse import parse_qs
+                from app.services import monitor
+                query = parse_qs((scope.get("query_string") or b"").decode("latin-1"))
+                monitor.record_exception(scope.get("method", ""), scope.get("path", ""),
+                                         (query.get("project_id") or [None])[0], exc)
+            except Exception:
+                pass
+            raise
+
+
+app.add_middleware(RememberFailures)
 
 
 @app.get("/health")
