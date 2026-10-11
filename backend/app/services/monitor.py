@@ -33,7 +33,7 @@ STALE_POLL_MINUTES = 30
 DISK_FREE_MIN = 0.10
 API_PLATFORMS = {"yandex": "Яндекс Директ", "vk_ads": "VK Реклама", "meta": "Meta Ads",
                  "avito_items": "Авито", "avito_ads": "Авито Реклама"}
-CHANNELS = {"whatsapp": "WhatsApp", "telegram_bot": "Telegram-бот", "avito": "Чаты Авито"}
+CHANNELS = {"whatsapp": "WhatsApp", "max": "MAX", "telegram_bot": "Telegram-бот", "avito": "Чаты Авито"}
 
 _errors: deque = deque(maxlen=200)
 _tasks: dict[str, asyncio.Task] = {}

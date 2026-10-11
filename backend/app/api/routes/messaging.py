@@ -140,10 +140,11 @@ async def create_channel(project_id: int, payload: ChannelIn, request: Request, 
         config = {"connection_id": cabinet.id, "since": int(datetime.now(timezone.utc).timestamp()) - 3600}
     elif not payload.token or len(payload.token.strip()) < 10:
         raise HTTPException(422, "Укажите токен")
-    if payload.kind == "whatsapp":
+    if payload.kind in {"whatsapp", "max"}:
         if not (payload.instance_id or "").strip().isdigit():
             raise HTTPException(422, "Укажите idInstance GREEN-API (число)")
-        api_url = (payload.api_url or "https://api.green-api.com").strip().rstrip("/")
+        default_api = messaging.MaxGreen.DEFAULT_API if payload.kind == "max" else "https://api.green-api.com"
+        api_url = (payload.api_url or default_api).strip().rstrip("/")
         if not api_url.startswith("https://"):
             raise HTTPException(422, "apiUrl должен начинаться с https://")
         config = {"instance_id": payload.instance_id.strip(), "api_url": api_url}
@@ -368,19 +369,27 @@ class StartChat(BaseModel):
 @router.post("/deals/{deal_id}/conversations", status_code=201)
 async def start_conversation(deal_id: int, payload: StartChat, request: Request, db: AsyncSession = Depends(get_db),
                              user: PortalUser = Depends(require_portal_user)):
-    """Start a WhatsApp chat with the deal's contact (WhatsApp allows writing first; Telegram bots and Avito do not)."""
+    """Start a WhatsApp/MAX chat with the deal's contact (they allow writing first; Telegram bots and Avito do not)."""
     check_origin(request); require_permission(user, "edit_deal")
     deal = await deal_for(db, user, deal_id)
     channel = await db.get(MessagingChannel, payload.channel_id)
     if not channel or channel.project_id != deal.project_id or not channel.active:
         raise HTTPException(404, "Канал не найден")
-    if channel.kind != "whatsapp":
-        raise HTTPException(422, "Первым можно написать только в WhatsApp")
+    if channel.kind not in {"whatsapp", "max"}:
+        raise HTTPException(422, "Первым можно написать только в WhatsApp или MAX")
     contact = await db.get(CrmContact, deal.contact_id)
     digits = messaging.norm_phone((contact.phones or [None])[0])
     if len(digits) < 10:
         raise HTTPException(422, "У клиента нет телефона")
     chat_id = f"{digits}@c.us"
+    if channel.kind == "max":
+        try:
+            found = await messaging.MaxGreen(channel).lookup(phone=digits)
+        except messaging.ChannelError as exc:
+            raise HTTPException(502, str(exc))
+        if not found:
+            raise HTTPException(404, "У этого номера нет аккаунта MAX")
+        chat_id = found["external_chat_id"]
     row = await db.scalar(select(Conversation).where(Conversation.channel_id == channel.id, Conversation.external_chat_id == chat_id))
     if row is None:
         row = Conversation(workspace_id=deal.workspace_id, project_id=deal.project_id, channel_id=channel.id, external_chat_id=chat_id,
