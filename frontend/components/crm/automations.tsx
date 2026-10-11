@@ -5,11 +5,13 @@ import { Pipeline, request, Source, Team, typeLabels, when } from "./shared";
 
 type Rule = { id: number; pipeline_id: number; stage_id: number | null; name: string; trigger: string; delay_minutes: number;
   conditions: Record<string, unknown>; action: string; params: Record<string, unknown>; active: boolean;
-  fired_count: number; last_fired_at: string | null; summary: string };
+  fired_count: number; last_fired_at: string | null; summary: string;
+  last_result?: { status: string; detail: string; at: string } | null };
 
-const triggerLabels: Record<string, string> = { DEAL_CREATED: "Новая сделка", STAGE_ENTER: "Сделка перешла на этап", NO_ACTIVITY: "Нет активности" };
+const triggerLabels: Record<string, string> = { DEAL_CREATED: "Новая сделка", STAGE_ENTER: "Сделка перешла на этап",
+  NO_ACTIVITY: "Нет активности", INBOUND_MESSAGE: "Входящее сообщение", NO_REPLY: "Менеджер не ответил" };
 const actionLabels: Record<string, string> = { CREATE_TASK: "Поставить задачу", SET_RESPONSIBLE: "Назначить ответственного",
-  ADD_TAG: "Добавить тег", NOTIFY: "Уведомить" };
+  ADD_TAG: "Добавить тег", NOTIFY: "Уведомить", SEND_TEMPLATE: "Отправить шаблон", AI_REPLY: "Ответить с ИИ" };
 const notifyTo: Record<string, string> = { owner: "Ответственному", heads: "Руководителям", owner_and_heads: "Ответственному и руководителям" };
 const delayOptions = [[60, "1 час"], [180, "3 часа"], [24 * 60, "1 день"], [2 * 24 * 60, "2 дня"], [3 * 24 * 60, "3 дня"],
   [7 * 24 * 60, "7 дней"], [14 * 24 * 60, "14 дней"]] as const;
@@ -45,12 +47,14 @@ export function Automations({ projectId, pipelines, pipelineId, team, sources, c
     {error && <p className="crmFormError">{error}</p>}{notice && <p className="crmOk">{notice}</p>}
     {pipeline && <div className="crmAutoStages">{[{ id: 0, name: "При создании сделки", color: "#7a8ca5" }, ...pipeline.stages].map(stage => {
       const list = shown.filter(r => stage.id === 0 ? r.trigger === "DEAL_CREATED" : r.stage_id === stage.id && r.trigger !== "DEAL_CREATED");
-      const anyStageIdle = stage.id === 0 ? shown.filter(r => r.trigger === "NO_ACTIVITY" && !r.stage_id) : [];
+      const anyStageIdle = stage.id === 0 ? shown.filter(r =>
+        ["NO_ACTIVITY", "INBOUND_MESSAGE", "NO_REPLY"].includes(r.trigger) && !r.stage_id) : [];
       return <div className="crmAutoColumn" key={stage.id} style={{ ["--stage" as string]: stage.color }}><header>{stage.name}</header>
         {[...list, ...anyStageIdle].map(rule => <article key={rule.id} className={rule.active ? "" : "off"}>
           <small>{rule.trigger === "NO_ACTIVITY" ? `Нет активности ${duration(rule.delay_minutes)}${rule.stage_id ? "" : " (любой этап)"}` : triggerLabels[rule.trigger]}</small>
           <b>{rule.name}</b><span>⚡ {actionText(rule, team)}</span>
           <em>Сработало {rule.fired_count} раз{rule.last_fired_at ? ` · последний ${when(rule.last_fired_at)}` : ""}</em>
+          {rule.last_result && <small>{rule.last_result.detail} · {when(rule.last_result.at)}</small>}
           {canManage && <div><button onClick={() => toggle(rule)}>{rule.active ? "Выключить" : "Включить"}</button><button onClick={() => setEditing(rule)}>Изменить</button><button onClick={() => remove(rule)}>Удалить</button></div>}</article>)}
         {!list.length && !anyStageIdle.length && <p className="crmEmpty">Нет правил</p>}</div>; })}</div>}
     {!shown.length && <div className="crmAutoHint"><b>С чего начать.</b> Нажмите «Рекомендуемые правила»: задача «позвонить за 15 минут» на каждый новый лид (скорость реакции — главный фактор конверсии), КП после квалификации, сигнал о лидах без движения сутки и дожим квалифицированных через 3 дня.</div>}
@@ -66,6 +70,8 @@ function strip(rule: Rule) {
 
 function actionText(rule: Rule, team: Team[]) {
   const p = rule.params;
+  if (rule.action === "SEND_TEMPLATE") return `Автоответ: «${p.text || ""}»`;
+  if (rule.action === "AI_REPLY") return p.mode === "draft" ? "Черновик ИИ по базе знаний" : "Автоответ ИИ по базе знаний";
   if (rule.action === "CREATE_TASK") return `Задача «${p.title}»${p.due_minutes ? `, срок ${duration(Number(p.due_minutes))}` : ""}`;
   if (rule.action === "SET_RESPONSIBLE") return p.mode === "round_robin"
     ? `По очереди: ${((p.user_ids as number[]) || []).map(id => team.find(m => m.id === id)?.display_name).filter(Boolean).join(", ")}`
@@ -87,10 +93,20 @@ function RuleForm({ projectId, pipeline, rule, team, sources, onClose, onSaved }
     const params: Record<string, unknown> = action === "CREATE_TASK" ? { type_code: f.get("type_code"), title: f.get("title"),
       due_minutes: Number(f.get("due_minutes")), priority: f.get("priority"), responsible: f.get("responsible") || "owner" }
       : action === "SET_RESPONSIBLE" ? (mode === "round_robin" ? { mode, user_ids: f.getAll("user_ids").map(Number) } : { mode, user_id: Number(f.get("user_id")) })
-      : action === "ADD_TAG" ? { tag: f.get("tag") } : { to: f.get("to"), text: f.get("text") };
+      : action === "ADD_TAG" ? { tag: f.get("tag") }
+      : action === "SEND_TEMPLATE" ? { text: f.get("auto_text") }
+      : action === "AI_REPLY" ? { mode: f.get("ai_mode") || "auto", fallback_template: f.get("fallback_template") }
+      : { to: f.get("to"), text: f.get("text") };
+    const chatTrigger = ["INBOUND_MESSAGE", "NO_REPLY"].includes(trigger);
+    const conditions = { ...(rule?.conditions || {}),
+      source_id: f.get("source_id") ? Number(f.get("source_id")) : null,
+      ...(chatTrigger ? { channel_kinds: f.getAll("channel_kinds"),
+        channel_ids: String(f.get("channel_ids") || "").split(",").map(v => v.trim()).filter(Boolean).map(Number),
+        first_only: f.get("first_only") === "on", time: f.get("time") || "always" } : {}),
+    };
     const body = { pipeline_id: pipeline.id, stage_id: Number(f.get("stage_id")) || null, name: f.get("name"), trigger,
-      delay_minutes: trigger === "NO_ACTIVITY" ? Number(f.get("delay_minutes")) : 0,
-      conditions: f.get("source_id") ? { source_id: Number(f.get("source_id")) } : {}, action, params, active: rule?.active ?? true };
+      delay_minutes: ["NO_ACTIVITY", "NO_REPLY"].includes(trigger) ? Number(f.get("delay_minutes")) : 0,
+      conditions, action, params, active: rule?.active ?? true };
     try { await request(rule ? `/crm/automations/${rule.id}` : `/crm/projects/${projectId}/automations`, rule ? "PUT" : "POST", body); onSaved(); }
     catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   }
@@ -100,8 +116,24 @@ function RuleForm({ projectId, pipeline, rule, team, sources, onClose, onSaved }
     <label>Название<input name="name" required minLength={2} defaultValue={rule?.name || ""} placeholder="Например, звонок новому лиду за 15 минут"/></label>
     <fieldset className="crmFieldset"><legend>Когда</legend>
       <select value={trigger} onChange={e => setTrigger(e.target.value)}>{Object.entries(triggerLabels).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
-      {trigger !== "DEAL_CREATED" && <label>Этап<select name="stage_id" defaultValue={rule?.stage_id || ""} required={trigger === "STAGE_ENTER"}>{trigger === "NO_ACTIVITY" && <option value="">Любой открытый этап</option>}{openStages.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>}
+      {trigger !== "DEAL_CREATED" && <label>Этап<select name="stage_id" defaultValue={rule?.stage_id || ""} required={trigger === "STAGE_ENTER"}>{trigger !== "STAGE_ENTER" && <option value="">Любой этап / новая заявка</option>}{openStages.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>}
       {trigger === "NO_ACTIVITY" && <label>Без активности дольше<select name="delay_minutes" defaultValue={rule?.delay_minutes || 24 * 60}>{delayOptions.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></label>}
+      {trigger === "NO_REPLY" && <label>Нет ответа, минут<input name="delay_minutes" type="number"
+        min={1} max={129600} defaultValue={rule?.delay_minutes || 10} required/></label>}
+      {["INBOUND_MESSAGE", "NO_REPLY"].includes(trigger) && <>
+        <label>Время<select name="time" defaultValue={String(rule?.conditions.time || "always")}>
+          <option value="always">Всегда</option><option value="working">Рабочее время</option>
+          <option value="nonworking">Нерабочее время</option></select></label>
+        <label><input name="first_only" type="checkbox" defaultChecked={!!rule?.conditions.first_only}/>
+          Только первое сообщение клиента</label>
+        <div className="crmChecks">{[["telegram_bot", "Telegram-бот"], ["telegram_user", "Telegram-профиль"],
+          ["whatsapp", "WhatsApp"], ["max", "MAX"], ["avito", "Авито"], ["email", "Почта"]].map(([kind, label]) =>
+          <label key={kind}><input type="checkbox" name="channel_kinds" value={kind}
+            defaultChecked={((rule?.conditions.channel_kinds as string[]) || []).includes(kind)}/>{label}</label>)}</div>
+        <p className="crmMuted">Без выбора — все каналы. Сообщения склеиваются за 25 секунд.</p>
+        <label>ID конкретных каналов (через запятую)<input name="channel_ids"
+          defaultValue={((rule?.conditions.channel_ids as number[]) || []).join(", ")}/></label>
+      </>}
       <label>Только для источника<select name="source_id" defaultValue={String(rule?.conditions.source_id || "")}><option value="">Любой источник</option>{sources.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label></fieldset>
     <fieldset className="crmFieldset"><legend>Что сделать</legend>
       <select value={action} onChange={e => setAction(e.target.value)}>{Object.entries(actionLabels).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
@@ -114,6 +146,14 @@ function RuleForm({ projectId, pipeline, rule, team, sources, onClose, onSaved }
         {mode === "user" ? <label>Сотрудник<select name="user_id" required defaultValue={String(p.user_id || "")}><option value="">Выберите</option>{team.map(m => <option key={m.id} value={m.id}>{m.display_name}</option>)}</select></label>
           : <div className="crmChecks">{team.map(m => <label key={m.id}><input type="checkbox" name="user_ids" value={m.id} defaultChecked={((p.user_ids as number[]) || []).includes(m.id)}/> {m.display_name}</label>)}</div>}</>}
       {action === "ADD_TAG" && <label>Тег<input name="tag" required maxLength={40} defaultValue={String(p.tag || "")} placeholder="горячий"/></label>}
+      {action === "SEND_TEMPLATE" && <label>Текст автоответа<textarea name="auto_text" required
+        defaultValue={String(p.text || "")}/><small>Переменные: {"{имя}, {компания}, {менеджер}"}</small></label>}
+      {action === "AI_REPLY" && <><label>Режим<select name="ai_mode" defaultValue={String(p.mode || "auto")}>
+        <option value="auto">Отправлять автоматически</option><option value="draft">Черновик менеджеру</option></select></label>
+        <label>Запасной шаблон, если ИИ недоступен<textarea name="fallback_template"
+          defaultValue={String(p.fallback_template || "")}/></label>
+        <p className="crmMuted">Нужна база знаний и включённый ИИ в настройках канала. Не больше двух
+          сообщений ИИ подряд до ответа живого менеджера. Автоответ не сбрасывает SLA.</p></>}
       {action === "NOTIFY" && <><label>Кому<select name="to" defaultValue={String(p.to || "owner")}>{Object.entries(notifyTo).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
         <label>Текст<input name="text" required defaultValue={String(p.text || "")} placeholder="Лид без движения больше суток"/></label><p className="crmModalLead">Придёт в кабинет и в Telegram, если он подключён.</p></>}</fieldset>
     {error && <p className="crmFormError">{error}</p>}

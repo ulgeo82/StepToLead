@@ -383,8 +383,10 @@ class AutomationIn(BaseModel):
 def automation_json(rule: CrmAutomation) -> dict:
     return {"id": rule.id, "pipeline_id": rule.pipeline_id, "stage_id": rule.stage_id, "name": rule.name,
             "trigger": rule.trigger, "delay_minutes": rule.delay_minutes, "conditions": rule.conditions or {},
-            "action": rule.action, "params": {k: v for k, v in (rule.params or {}).items() if k != "rr_index"},
+            "action": rule.action, "params": {k: v for k, v in (rule.params or {}).items()
+                                             if k != "rr_index" and not k.startswith("_")},
             "active": rule.active, "fired_count": rule.fired_count or 0, "last_fired_at": rule.last_fired_at,
+            "last_result": (rule.params or {}).get("_last_result"),
             "summary": crm_automation.describe(rule)}
 
 
@@ -401,6 +403,26 @@ async def validate_automation(db: AsyncSession, project_id: int, payload: Automa
     if payload.trigger == "NO_ACTIVITY" and payload.delay_minutes < 15:
         raise HTTPException(422, "Минимальное время без активности — 15 минут")
     params = payload.params
+    if payload.action in {"SEND_TEMPLATE", "AI_REPLY"} and payload.trigger not in {"INBOUND_MESSAGE", "NO_REPLY"}:
+        raise HTTPException(422, "Автоответы доступны только для входящих сообщений и отсутствия ответа")
+    if payload.action == "SEND_TEMPLATE" and not str(params.get("text") or "").strip():
+        raise HTTPException(422, "Укажите текст автоответа")
+    if payload.action == "AI_REPLY" and params.get("mode", "auto") not in {"auto", "draft"}:
+        raise HTTPException(422, "Режим ИИ: автоответ или черновик")
+    if payload.conditions.get("time", "always") not in {"always", "working", "nonworking"}:
+        raise HTTPException(422, "Выберите рабочее, нерабочее время или всегда")
+    kinds = payload.conditions.get("channel_kinds", [])
+    ids = payload.conditions.get("channel_ids", [])
+    from app.services.messaging import KINDS
+    from app.models.messaging import MessagingChannel
+    if not isinstance(kinds, list) or any(kind not in KINDS for kind in kinds):
+        raise HTTPException(422, "Неизвестные типы каналов")
+    if not isinstance(ids, list) or any(not isinstance(cid, int) for cid in ids):
+        raise HTTPException(422, "Укажите ID каналов списком чисел")
+    for cid in ids:
+        channel = await db.get(MessagingChannel, cid)
+        if not channel or channel.project_id != project_id:
+            raise HTTPException(422, "Канал не относится к проекту")
     if payload.action == "CREATE_TASK" and not str(params.get("title") or "").strip():
         raise HTTPException(422, "Укажите название задачи")
     if payload.action == "ADD_TAG" and not str(params.get("tag") or "").strip():
@@ -475,7 +497,8 @@ async def install_recommended(project_id: int, pipeline_id: int, request: Reques
         if rule["name"] in existing:
             continue
         db.add(CrmAutomation(workspace_id=project.workspace_id, project_id=project.id, active=True,
-                             conditions={}, delay_minutes=rule.pop("delay_minutes", 0), **rule))
+                             conditions=rule.pop("conditions", {}),
+                             delay_minutes=rule.pop("delay_minutes", 0), **rule))
         created += 1
     await db.commit()
     return {"created": created}

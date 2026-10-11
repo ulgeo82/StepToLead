@@ -47,7 +47,8 @@ def conversation_json(row: Conversation, channel: MessagingChannel | None = None
 
 def message_json(row: Message) -> dict:
     return {"id": row.id, "direction": row.direction, "text": row.text, "author_name": row.author_name,
-            "status": row.status, "error": row.error, "is_ai": row.is_ai, "sent_at": row.sent_at}
+            "status": row.status, "error": row.error, "is_ai": row.is_ai, "sent_at": row.sent_at,
+            "meta": row.meta or {}}
 
 
 async def conversation_for(db: AsyncSession, user: PortalUser, conversation_id: int) -> Conversation:
@@ -87,6 +88,7 @@ class ChannelPatch(BaseModel):
     name: str | None = Field(default=None, min_length=2, max_length=180)
     active: bool | None = None
     token: str | None = Field(default=None, max_length=500)
+    ai_mode: str | None = Field(default=None, pattern=r"^(off|suggest|auto)$")
 
 
 def reject_notification_token(kind: str, token: str | None):
@@ -171,6 +173,7 @@ async def edit_channel(channel_id: int, payload: ChannelPatch, request: Request,
     reject_notification_token(channel.kind, payload.token)
     if payload.name: channel.name = payload.name.strip()
     if payload.active is not None: channel.active = payload.active
+    if payload.ai_mode is not None: channel.ai_mode = payload.ai_mode
     if payload.token and channel.kind in {"email", "telegram_user"}:
         raise HTTPException(422, "Переподключите канал через его форму подключения")
     if payload.token: channel.secret_encrypted = encrypt_secret(payload.token.strip())

@@ -26,8 +26,8 @@ from app.models.marketing import PortalProjectAccess, PortalUser, Project
 from app.services.notifications import direct as notify_direct, flush_telegram
 
 logger = logging.getLogger("uvicorn.error.crm_automation")
-TRIGGERS = {"DEAL_CREATED", "STAGE_ENTER", "NO_ACTIVITY"}
-ACTIONS = {"CREATE_TASK", "SET_RESPONSIBLE", "ADD_TAG", "NOTIFY"}
+TRIGGERS = {"DEAL_CREATED", "STAGE_ENTER", "NO_ACTIVITY", "INBOUND_MESSAGE", "NO_REPLY"}
+ACTIONS = {"CREATE_TASK", "SET_RESPONSIBLE", "ADD_TAG", "NOTIFY", "SEND_TEMPLATE", "AI_REPLY"}
 TASK_TYPES = {"CALL", "MEETING", "MESSAGE", "SEND", "FOLLOW_UP", "OTHER"}
 IDLE_POLL_SECONDS = 600
 
@@ -79,6 +79,10 @@ async def project_users(db: AsyncSession, project_id: int) -> dict[int, PortalUs
 
 def describe(rule: CrmAutomation) -> str:
     params = rule.params or {}
+    if rule.action == "SEND_TEMPLATE":
+        return "Автоответ по шаблону"
+    if rule.action == "AI_REPLY":
+        return "Черновик ИИ" if params.get("mode") == "draft" else "Автоответ ИИ"
     if rule.action == "CREATE_TASK":
         return f"Задача «{params.get('title') or 'Задача'}»"
     if rule.action == "SET_RESPONSIBLE":
@@ -249,4 +253,16 @@ def recommended(pipeline_id: int, stages: list[CrmStage]) -> list[dict]:
         rules.append({"name": "Выигранная сделка — подтвердить продажу", "trigger": "STAGE_ENTER", "stage_id": won.id,
                       "action": "NOTIFY", "params": {"to": "owner_and_heads",
                                                      "text": "Сделка выиграна — подтвердите сумму продажи"}})
+    rules.extend([
+        {"name": "Автоответ ИИ в нерабочее время", "trigger": "INBOUND_MESSAGE", "stage_id": None,
+         "conditions": {"time": "nonworking"}, "action": "AI_REPLY", "params": {"mode": "auto"}},
+        {"name": "Держащее сообщение, если менеджер молчит 10 минут", "trigger": "NO_REPLY",
+         "stage_id": None, "delay_minutes": 10, "action": "SEND_TEMPLATE",
+         "params": {"text": "{имя}, ваше сообщение получено. Менеджер ответит, как только сможет."}},
+    ])
     return [{**rule, "pipeline_id": pipeline_id} for rule in rules]
+
+
+async def on_inbound_message(db, conversation, message):
+    from app.services.chat_automation import on_message
+    await on_message(db, conversation, message)

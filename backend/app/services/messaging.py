@@ -493,7 +493,8 @@ async def _new_lead(db: AsyncSession, channel: MessagingChannel, conversation: C
 async def ingest(db: AsyncSession, channel: MessagingChannel, item: Incoming) -> Message | None:
     """Store one message. Returns the Message when it is new. Does not commit."""
     conversation = await db.scalar(select(Conversation).where(Conversation.channel_id == channel.id,
-                                                              Conversation.external_chat_id == item["chat_id"]))
+        Conversation.external_chat_id == item["chat_id"]).with_for_update()
+        .execution_options(populate_existing=True))
     created = conversation is None
     if created:
         conversation = Conversation(workspace_id=channel.workspace_id, project_id=channel.project_id, channel_id=channel.id,
@@ -511,7 +512,8 @@ async def ingest(db: AsyncSession, channel: MessagingChannel, item: Incoming) ->
     sent_at = aware(item.get("sent_at")) or now()
     message = Message(conversation_id=conversation.id, direction=item.get("direction", "in"), text=item.get("text"),
                       external_id=item.get("external_id"), author_name=conversation.title if item.get("direction", "in") == "in" else None,
-                      status="received" if item.get("direction", "in") == "in" else "sent", sent_at=sent_at, attachments=[])
+                      status="received" if item.get("direction", "in") == "in" else "sent", sent_at=sent_at,
+                      attachments=[], meta=item.get("message_meta") or {})
     db.add(message)
     was_waiting = conversation.waiting_since is not None
     if conversation.last_message_at is None or sent_at >= aware(conversation.last_message_at):
@@ -530,9 +532,11 @@ async def ingest(db: AsyncSession, channel: MessagingChannel, item: Incoming) ->
                 [uid for uid, u in people.items() if u.role in {"client_owner", "sales_head"}]
             notify_direct(db, conversation.workspace_id, targets, f"Новое сообщение · {KINDS.get(channel.kind)}",
                           f"{conversation.title}: {(item.get('text') or '')[:200]}", people, project_id=conversation.project_id)
-    else:
+    elif not (message.meta or {}).get("auto"):
         conversation.waiting_since = None
     await db.flush()
+    from app.services.crm_automation import on_inbound_message
+    await on_inbound_message(db, conversation, message)
     return message
 
 
@@ -549,11 +553,15 @@ async def link_inbound(db: AsyncSession, inbound: CrmInbound, contact_id: int, d
 
 # --------------------------------------------------------------------------- sending
 
-async def send(db: AsyncSession, conversation: Conversation, text: str, user: PortalUser | None, *, is_ai: bool = False) -> Message:
+async def send(db: AsyncSession, conversation: Conversation, text: str, user: PortalUser | None, *,
+               is_ai: bool = False, auto_meta: dict | None = None) -> Message:
     """Send a reply through the channel and store it. Commits. Raises ChannelError on delivery failure."""
     text = text.strip()
     if not text:
         raise ChannelError("Пустое сообщение")
+    await db.flush()
+    conversation = await db.scalar(select(Conversation).where(Conversation.id == conversation.id)
+        .with_for_update().execution_options(populate_existing=True))
     channel = await db.get(MessagingChannel, conversation.channel_id)
     if not channel or not channel.active:
         raise ChannelError("Канал выключен")
@@ -562,7 +570,7 @@ async def send(db: AsyncSession, conversation: Conversation, text: str, user: Po
         raise ChannelError(f"Сообщение длиннее {limit} символов — разбейте его на части")
     message = Message(conversation_id=conversation.id, direction="out", text=text, author_user_id=user.id if user else None,
                       author_name=user.display_name if user else ("ИИ-ассистент" if is_ai else "Автоматически"), status="sent", sent_at=now(), is_ai=is_ai,
-                      attachments=[])
+                      attachments=[], meta=auto_meta or {})
     try:
         message.external_id = await adapter(channel, db).send(conversation, text)
     except (ChannelError, avito.AvitoError) as exc:
@@ -572,8 +580,14 @@ async def send(db: AsyncSession, conversation: Conversation, text: str, user: Po
         conversation.last_message_at = message.sent_at
         conversation.last_message_preview = text[:300]
         conversation.last_direction = "out"
-        conversation.waiting_since = None
-        conversation.unread_count = 0
+        if not auto_meta:
+            conversation.waiting_since = None
+            conversation.unread_count = 0
+            from app.services.chat_automation import reset_human
+            reset_human(conversation)
+        elif auto_meta.get("auto") == "ai":
+            conversation.meta = {**(conversation.meta or {}), "ai_consecutive":
+                                 int((conversation.meta or {}).get("ai_consecutive", 0)) + 1}
         if conversation.assigned_user_id is None and user is not None:
             conversation.assigned_user_id = user.id
         if conversation.deal_id and user is not None:

@@ -12,11 +12,11 @@ export type Conversation = { id: number; channel_id: number; channel_kind: strin
   last_message_at: string | null; last_message_preview: string | null; last_direction: string | null; waiting_since: string | null;
   meta: Record<string, unknown> };
 type ChatMessage = { id: number; direction: string; text: string | null; author_name: string | null; status: string;
-  error: string | null; is_ai: boolean; sent_at: string };
+  error: string | null; is_ai: boolean; sent_at: string; meta?: { auto?: string; rule_id?: number } };
 type Detail = Conversation & { messages: ChatMessage[]; ai_available?: boolean };
 type Channel = { id: number; kind: string; kind_name: string; name: string; active: boolean; status: string; last_error: string | null;
   bot_username?: string | null; instance_id?: string | null; last_polled_at: string | null; unread: number;
-  mode?: string | null };
+  mode?: string | null; ai_mode?: string };
 type Template = { id: number; title: string; text: string };
 
 export const channelBadge: Record<string, { label: string; cls: string }> = {
@@ -50,10 +50,18 @@ export function ChatThread({ conversationId, projectId, compact, canWrite, onCha
   const [aiBusy, setAiBusy] = useState("");
   const [summary, setSummary] = useState<{ text: string; saved: boolean } | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
+  const draftSeen = useRef("");
+  const draft = detail?.meta.auto_draft as { text: string; created_at: string } | undefined;
   const load = useCallback(() => request<Detail>(`/crm/conversations/${conversationId}`, "GET").then(setDetail).catch(e => setError((e as Error).message)), [conversationId]);
-  useEffect(() => { setDetail(null); setText(""); setError(""); setSummary(null); load(); const timer = setInterval(load, 6000); return () => clearInterval(timer); }, [load]);
+  useEffect(() => { draftSeen.current = ""; setDetail(null); setText(""); setError(""); setSummary(null); load(); const timer = setInterval(load, 6000); return () => clearInterval(timer); }, [load]);
   useEffect(() => { request<Template[]>(`/crm/projects/${projectId}/reply-templates`, "GET").then(setTemplates).catch(() => setTemplates([])); }, [projectId]);
   useEffect(() => { bottom.current?.scrollIntoView({ block: "end" }); }, [detail?.messages.length]);
+  useEffect(() => {
+    if (draft && draftSeen.current !== draft.created_at && !text.trim()) {
+      setText(draft.text);
+      draftSeen.current = draft.created_at;
+    }
+  }, [draft, text]);
   async function send(event?: FormEvent) {
     event?.preventDefault(); if (!text.trim() || busy) return;
     setBusy(true); setError("");
@@ -89,10 +97,13 @@ export function ChatThread({ conversationId, projectId, compact, canWrite, onCha
       return <div key={m.id}>{(!prev || new Date(prev.sent_at).toDateString() !== day) && <div className="chatDay">{new Date(m.sent_at).toLocaleDateString("ru-RU", { day: "numeric", month: "long" })}</div>}
         <div className={`chatBubble ${m.direction} ${m.status === "failed" ? "failed" : ""}`}>
           {m.direction === "out" && m.author_name && <small className="chatAuthor">{m.is_ai ? "🤖 " : ""}{m.author_name}</small>}
+          {m.meta?.auto && <small className="chatAuthor">{m.meta.auto === "ai" ? "ИИ" : "Автоответ"}</small>}
           <p>{m.text}</p><time>{new Date(m.sent_at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}{m.status === "failed" ? " · не доставлено" : ""}</time>
           {m.error && <small className="chatError">{m.error}</small>}</div></div>; })}
       {detail && !detail.messages.length && <p className="crmMuted">Сообщений пока нет</p>}<div ref={bottom}/></div>
     {canWrite && <form className="chatComposer" onSubmit={send}>
+      {draft && <p className="crmMuted">Черновик ИИ — проверьте перед отправкой.
+        <button type="button" className="crmLinkButton" onClick={() => setText(draft.text)}>Вставить черновик</button></p>}
       {error && <p className="crmFormError">{error}</p>}
       {showTemplates && <div className="chatTemplates">{templates.map(t => <button type="button" key={t.id} onClick={() => { setText(t.text); setShowTemplates(false); }} title={t.text}><b>{t.title}</b><span>{t.text}</span></button>)}
         {!templates.length && <p className="crmMuted">Шаблонов пока нет: напишите ответ и нажмите «В шаблоны».</p>}</div>}
@@ -132,6 +143,10 @@ function Channels({ projectId, onClose, onChanged }: { projectId: number; onClos
       <div><b>{c.name}</b><small>{c.kind_name}{c.bot_username ? ` · @${c.bot_username}` : ""} · {c.status === "connected" ? "работает" : c.status === "error" ? "ошибка" : "не проверен"}{c.last_polled_at ? ` · проверка ${when(c.last_polled_at)}` : ""}</small>
         {c.last_error && <small className="chatError">{c.last_error}</small>}</div>
       {data.can_manage && <div className="chatChannelActions"><button disabled={busy} onClick={() => run(() => request(`/crm/channels/${c.id}/sync`, "POST", {}), "Проверено")}>Проверить</button>
+        <select aria-label="ИИ в канале" disabled={busy} value={c.ai_mode || "off"}
+          onChange={e => run(() => request(`/crm/channels/${c.id}`, "PATCH", { ai_mode: e.target.value }),
+            "Режим ИИ сохранён")}><option value="off">ИИ выключен</option>
+          <option value="suggest">ИИ: черновики</option><option value="auto">ИИ: автоответы</option></select>
         {c.kind === "email" && <button disabled={busy} onClick={() => run(() => request(
           `/crm/channels/${c.id}/email-check`, "POST", {}), "Вход в IMAP и SMTP проверен")}>IMAP / SMTP</button>}
         {c.kind === "telegram_user" && <select aria-label="Режим Telegram-профиля" value={c.mode || "corporate"}
