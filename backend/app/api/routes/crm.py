@@ -383,7 +383,7 @@ async def create_deal_fact(db: AsyncSession, project: Project, contact: CrmConta
                            created_at: datetime | None = None):
     if not (contact.phones or contact.emails or contact.telegram or
             (inbound and (inbound.raw_payload.get("contact_consent") or (
-                inbound.raw_payload.get("external_source") in {"tilda", "avito", "telegram_bot", "whatsapp", "phone"} and inbound.raw_payload.get("contact"))))):
+                inbound.raw_payload.get("external_source") in {"tilda", "avito", "telegram_bot", "whatsapp", "max", "phone"} and inbound.raw_payload.get("contact"))))):
         raise HTTPException(422, "Для лида нужен контакт или подтверждённое согласие на связь")
     # A real contact is required before this point. Lead remains the shared analytics fact.
     source = await db.get(ProjectSource, source_id) if source_id else None
@@ -611,6 +611,11 @@ async def contacts(project_id: int, search: str | None = None, page: int = Query
     require_permission(user, "view_crm")
     await project_for(db, user, project_id)
     query = select(CrmContact).where(CrmContact.project_id == project_id)
+    if "view_all_deals" not in effective_permissions(user):
+        # Managers see their own clients and contacts without deals, not colleagues' clients.
+        theirs = select(CrmDeal.id).where(CrmDeal.contact_id == CrmContact.id, CrmDeal.responsible_user_id == user.id).exists()
+        anyone = select(CrmDeal.id).where(CrmDeal.contact_id == CrmContact.id).exists()
+        query = query.where(or_(theirs, ~anyone))
     if search:
         query = query.where(or_(CrmContact.name.ilike(f"%{search}%"),
                                 CrmContact.phones.cast(String).ilike(f"%{search}%"),

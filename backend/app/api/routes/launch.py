@@ -45,6 +45,9 @@ def save_launch(project: Project, data: dict) -> None:
     project.portal_state = {**(project.portal_state or {}), "launch": data}
 
 
+# Real accounts of the company (not bots): they keep the history and may write to a client first.
+CORPORATE_KINDS = ("telegram_user", "whatsapp", "max", "email")
+
 async def checklist(db: AsyncSession, project: Project, user: PortalUser | None) -> list[dict]:
     pid = project.id
     count = lambda query: db.scalar(select(func.count()).select_from(query.subquery()))  # noqa: E731
@@ -54,6 +57,8 @@ async def checklist(db: AsyncSession, project: Project, user: PortalUser | None)
         PortalProjectAccess.project_id == pid, PortalUser.active.is_(True), PortalUser.role != "client_owner"))
     channels = (await count(select(MessagingChannel.id).where(MessagingChannel.project_id == pid, MessagingChannel.active.is_(True)))
                 + await count(select(TelephonyConnection.id).where(TelephonyConnection.project_id == pid, TelephonyConnection.active.is_(True))))
+    corporate = await count(select(MessagingChannel.id).where(MessagingChannel.project_id == pid, MessagingChannel.active.is_(True),
+                                                             MessagingChannel.kind.in_(CORPORATE_KINDS)))
     economics = await count(select(ProjectEconomics.id).where(ProjectEconomics.project_id == pid))
     deals = await count(select(CrmDeal.id).where(CrmDeal.project_id == pid))
     suffix = f"?project_id={pid}"
@@ -67,13 +72,18 @@ async def checklist(db: AsyncSession, project: Project, user: PortalUser | None)
          "href": "/team"},
         {"key": "channels", "label": "Подключите WhatsApp, чаты и телефонию (вместе с маркетологом)", "done": bool(channels),
          "agency": False, "href": f"/crm{suffix}&tab=chats"},
+        {"key": "corporate", "label": "Подключите корпоративные аккаунты (Telegram, WhatsApp, MAX, почта) — переписка останется у компании, даже если менеджер уйдёт",
+         "done": bool(corporate), "agency": False, "href": f"/crm{suffix}&tab=chats"},
         {"key": "economics", "label": "Укажите средний чек и маржу — без них не посчитать окупаемость", "done": bool(economics),
          "agency": False, "href": f"/settings{suffix}#economics"},
         {"key": "first_lead", "label": "Примите первую заявку в CRM", "done": bool(deals), "agency": False,
          "href": f"/crm{suffix}"},
     ]
     if user is not None and user.role == "sales_manager":
-        items = [i for i in items if i["key"] in {"telegram", "first_lead"}]
+        items = [i for i in items if i["key"] in {"telegram", "corporate", "first_lead"}]
+        for item in items:
+            if item["key"] == "corporate":
+                item["label"] = "Попросите руководителя подключить рабочие аккаунты Telegram, WhatsApp или MAX — чтобы писать клиентам из CRM"
     return items
 
 
@@ -230,7 +240,7 @@ async def integrations(project_id: int, db: AsyncSession = Depends(get_db), user
                 *[{"name": t.form_name, "kind": "Форма Tilda", "status": "connected" if t.is_active else "off",
                    "detail": f"последняя заявка {t.last_received_at:%d.%m %H:%M}" if t.last_received_at else "заявок ещё не было"} for t in tilda]]},
             {"key": "chats", "title": "Чаты", "href": f"/crm{suffix}&tab=chats", "items": [
-                {"name": c.name, "kind": {"avito": "Авито", "telegram_bot": "Telegram-бот", "whatsapp": "WhatsApp"}.get(c.kind, c.kind),
+                {"name": c.name, "kind": {"avito": "Авито", "telegram_bot": "Telegram-бот", "whatsapp": "WhatsApp", "max": "MAX"}.get(c.kind, c.kind),
                  "status": c.status if c.active else "off", "detail": c.last_error} for c in channels]},
             {"key": "phone", "title": "Телефония", "href": f"/crm{suffix}&tab=calls", "items": [
                 {"name": t.name, "kind": "Mango Office", "status": t.status if t.active else "off",

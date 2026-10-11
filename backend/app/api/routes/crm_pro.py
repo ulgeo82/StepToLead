@@ -116,7 +116,16 @@ async def contact_in_scope(db: AsyncSession, user: PortalUser, contact_id: int) 
     if not contact or contact.workspace_id != user.workspace_id:
         raise HTTPException(404, "Контакт не найден")
     await project_for(db, user, contact.project_id)
+    if "view_all_deals" not in effective_permissions(user) and not await contact_is_own(db, user, contact.id):
+        raise HTTPException(403, "Клиента ведёт другой сотрудник")
     return contact
+
+
+async def contact_is_own(db: AsyncSession, user: PortalUser, contact_id: int) -> bool:
+    """A manager without "all deals" owns a contact if one of its deals is theirs or it has no deals yet."""
+    responsible = set((await db.scalars(select(CrmDeal.responsible_user_id)
+                                         .where(CrmDeal.contact_id == contact_id))).all())
+    return not responsible or user.id in responsible
 
 
 def _clean_list(values: list[str] | None, lower: bool = False) -> list[str]:

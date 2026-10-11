@@ -245,7 +245,7 @@
 .chatItem:hover{background:#f3f8ff}.chatItem.active{background:#e8f1ff}
 .chatItem.unread b{color:#0f2140}
 .chatBadge{width:34px;height:34px;display:grid;place-items:center;border-radius:50%;background:#7a8ca5;color:#fff;font-size:10px;font-weight:800}
-.chatBadge.avito{background:#00a9f4}.chatBadge.telegram{background:#2aabee}.chatBadge.whatsapp{background:#25d366}
+.chatBadge.avito{background:#00a9f4}.chatBadge.telegram{background:#2aabee}.chatBadge.whatsapp{background:#25d366}.chatBadge.max{background:linear-gradient(135deg,#3d6bff,#9b4dff)}
 .chatItemBody{display:flex;flex-direction:column;gap:3px;min-width:0}
 .chatItemTop{display:flex;justify-content:space-between;gap:6px}
 .chatItemTop b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#2a3f5c;font-size:12px}
@@ -443,3 +443,5 @@ button.callAi{cursor:pointer}
 .amoSample{font-size:12px}.amoSample td,.amoSample th{padding:6px 8px}
 .amoResult ul{font-size:13px;color:#40536f;line-height:1.6}
 @media(max-width:560px){.amoMap>div{grid-template-columns:1fr;gap:4px}}
+
+.chatCorporateHint{margin:10px 0;padding:12px 13px;border:1px solid #cfe0fb;border-radius:10px;background:#f2f7ff}.chatCorporateHint strong{display:block;color:#152239;font-size:12px}.chatCorporateHint p{margin:5px 0 9px;color:#4c607d;font-size:11px;line-height:1.45}.chatCorporateHint .resultPrimary{min-height:32px;font-size:11px}

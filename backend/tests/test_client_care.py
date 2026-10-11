@@ -162,7 +162,7 @@ class ClientCareTests(unittest.TestCase):
         launch = self.client.get("/api/crm/projects/1/launch").json()
         self.assertEqual(launch["marketer"]["name"], "Мария")
         self.assertEqual([p["status"] for p in launch["plan"]], ["done", "doing"])
-        self.assertEqual({i["key"] for i in launch["checklist"]}, {"telegram", "first_lead"})
+        self.assertEqual({i["key"] for i in launch["checklist"]}, {"telegram", "corporate", "first_lead"})
         self.assertEqual(self.client.put("/api/crm/projects/1/launch/goals", headers=ORIGIN, json={"leads": 1}).status_code, 403)
         self.client.post("/api/crm/projects/1/launch/dismiss", headers=ORIGIN)
         self.assertTrue(self.client.get("/api/crm/projects/1/launch").json()["dismissed"])

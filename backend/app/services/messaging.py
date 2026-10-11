@@ -24,7 +24,8 @@ from app.services import avito
 from app.services.notifications import direct as notify_direct, flush_telegram
 
 logger = logging.getLogger("uvicorn.error.messaging")
-KINDS = {"avito": "Авито", "telegram_bot": "Telegram", "whatsapp": "WhatsApp"}
+KINDS = {"avito": "Авито", "telegram_bot": "Telegram", "whatsapp": "WhatsApp", "max": "MAX",
+         "telegram_user": "Telegram-профиль"}
 POLL_SECONDS = 15
 AVITO_POLL_SECONDS = 60
 
@@ -215,6 +216,80 @@ class WhatsAppGreen:
         return str((sent or {}).get("idMessage") or f"wa-{secrets.token_hex(6)}")
 
 
+
+class MaxGreen(WhatsAppGreen):
+    """A regular MAX account through GREEN-API (MAX product: api.green-api.com/v3), same queue as WhatsApp.
+
+    Chats are addressed by the numeric MAX user id; the account is authorised in the GREEN-API cabinet
+    (QR or SMS code). Like WhatsApp, a MAX account may write first — by phone via ``checkAccount``.
+    """
+
+    DEFAULT_API = "https://api.green-api.com/v3"
+
+    def __init__(self, channel: MessagingChannel):
+        super().__init__(channel)
+        if not cfg(channel).get("api_url"):
+            self.api = self.DEFAULT_API
+
+    async def test(self) -> dict:
+        state = await _json("GET", self.url("getStateInstance"))
+        status = (state or {}).get("stateInstance")
+        if status != "authorized":
+            raise ChannelError(f"Аккаунт MAX не авторизован в GREEN-API (статус: {status}). "
+                               "Авторизуйте инстанс в кабинете GREEN-API по QR-коду или коду из SMS")
+        return {"name": "MAX подключён"}
+
+    @staticmethod
+    def personal(chat_id: str) -> bool:
+        # Personal MAX chats are positive numeric user ids; groups/channels have other ids (negative or suffixed).
+        return chat_id.isdigit()
+
+    @staticmethod
+    def parse(body: dict) -> Incoming | None:
+        kind = body.get("typeWebhook")
+        if kind not in {"incomingMessageReceived", "outgoingMessageReceived"}:
+            return None
+        sender = body.get("senderData") or {}
+        chat_id = str(sender.get("chatId") or "").removesuffix("@c.us")
+        if not MaxGreen.personal(chat_id):
+            return None  # groups and channels are not client chats
+        data = body.get("messageData") or {}
+        text = ((data.get("textMessageData") or {}).get("textMessage") or (data.get("extendedTextMessageData") or {}).get("text")
+                or (data.get("fileMessageData") or {}).get("caption"))
+        if not text:
+            text = {"imageMessage": "📷 Фото", "documentMessage": "📎 Файл", "audioMessage": "🎤 Голосовое сообщение",
+                    "videoMessage": "🎬 Видео", "locationMessage": "📍 Геопозиция", "contactMessage": "Контакт",
+                    "stickerMessage": "Стикер"}.get(data.get("typeMessage"), "Сообщение")
+        digits = norm_phone(str(sender.get("senderPhoneNumber") or sender.get("phoneNumber") or ""))
+        name = sender.get("senderContactName") or sender.get("senderName") or sender.get("chatName") or (
+            f"+{digits}" if digits else f"MAX {chat_id}")
+        return Incoming(chat_id=chat_id, title=str(name)[:180], text=str(text), external_id=str(body.get("idMessage")),
+                        sent_at=from_unix(body.get("timestamp")), phone=f"+{digits}" if len(digits) >= 10 else None,
+                        direction="in" if kind == "incomingMessageReceived" else "out", meta={})
+
+    async def lookup(self, *, phone: str | None = None, username: str | None = None, email: str | None = None) -> dict | None:
+        digits = norm_phone(phone or "")
+        if len(digits) < 10:
+            return None
+        found = await _json("POST", self.url("checkAccount"), json={"phoneNumber": int(digits)}) or {}
+        exists = found.get("exist", found.get("existsMax", found.get("exists")))
+        chat_id = str(found.get("chatId") or found.get("userId") or "").removesuffix("@c.us")
+        if not exists or not chat_id:
+            return None
+        history = await self.history(chat_id, limit=1)
+        return {"external_chat_id": chat_id, "title": str(found.get("name") or f"+{digits}")[:180], "has_history": bool(history)}
+
+    async def history(self, external_chat_id: str, limit: int = 50) -> list[dict]:
+        rows = await _json("POST", self.url("getChatHistory"), json={"chatId": external_chat_id, "count": limit}) or []
+        result = []
+        for row in rows if isinstance(rows, list) else []:
+            text = row.get("textMessage") or (row.get("extendedTextMessage") or {}).get("text") or row.get("caption")
+            if not text:
+                continue
+            result.append({"external_id": str(row.get("idMessage")), "direction": "out" if row.get("type") == "outgoing" else "in",
+                           "text": str(text), "sent_at": from_unix(row.get("timestamp"))})
+        return list(reversed(result))  # GREEN-API returns newest first
+
 class AvitoMessenger:
     """Avito chats of an «Авито · Объявления» cabinet; credentials come from the ad connection."""
 
@@ -292,10 +367,15 @@ class AvitoMessenger:
 
 
 def adapter(channel: MessagingChannel, db: AsyncSession):
+    if channel.kind == "telegram_user":
+        from app.services.telegram_profiles import TelegramProfile
+        return TelegramProfile(channel)
     if channel.kind == "telegram_bot":
         return TelegramBot(channel)
     if channel.kind == "whatsapp":
         return WhatsAppGreen(channel)
+    if channel.kind == "max":
+        return MaxGreen(channel)
     if channel.kind == "avito":
         return AvitoMessenger(channel, db)
     raise ChannelError("Неизвестный тип канала")
@@ -441,7 +521,7 @@ async def send(db: AsyncSession, conversation: Conversation, text: str, user: Po
     if not channel or not channel.active:
         raise ChannelError("Канал выключен")
     limit = 1000 if channel.kind == "avito" else 4096
-    if len(text) > limit:
+    if channel.kind != "telegram_user" and len(text) > limit:
         raise ChannelError(f"Сообщение длиннее {limit} символов — разбейте его на части")
     message = Message(conversation_id=conversation.id, direction="out", text=text, author_user_id=user.id if user else None,
                       author_name=user.display_name if user else ("ИИ-ассистент" if is_ai else "Автоматически"), status="sent", sent_at=now(), is_ai=is_ai,
@@ -499,6 +579,7 @@ async def run_worker() -> None:
                 from app.models.marketing import Project
                 channels = (await db.scalars(select(MessagingChannel).where(
                     MessagingChannel.active.is_(True),
+                    MessagingChannel.kind != "telegram_user",
                     MessagingChannel.project_id.not_in(select(Project.id).where(Project.status == "demo"))))).all()
                 ids = [(c.id, c.kind, aware(c.last_polled_at)) for c in channels]
             for channel_id, kind, polled in ids:

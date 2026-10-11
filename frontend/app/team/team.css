@@ -6,3 +6,4 @@
 @media(max-width:1200px){.teamStats{grid-template-columns:repeat(3,1fr)}.teamGrid{grid-template-columns:1fr}.teamDrawer{min-height:auto}}
 @media(max-width:700px){.teamStats{grid-template-columns:repeat(2,1fr)}.teamFilters{flex-direction:column}.teamHeader{align-items:flex-start}}
 @media(max-width:420px){.teamStats{grid-template-columns:1fr}.teamDrawerHead{flex-wrap:wrap}.teamDrawerHead>button{margin-left:auto}}
+.teamEditForm label small,.teamInvite label small{display:block;margin-top:4px;color:#7186a0;font-size:10px;font-weight:400}

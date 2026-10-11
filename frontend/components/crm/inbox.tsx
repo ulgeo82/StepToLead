@@ -2,6 +2,7 @@
 
 import { FormEvent, KeyboardEvent, useCallback, useEffect, useRef, useState } from "react";
 import { request, Team, when } from "./shared";
+import { TelegramProfileConnect } from "./telegram-profile-connect";
 
 export type Conversation = { id: number; channel_id: number; channel_kind: string | null; channel_name: string | null; title: string;
   phone: string | null; contact_id: number | null; contact_name: string | null; deal_id: number | null; deal_name: string | null;
@@ -12,13 +13,16 @@ type ChatMessage = { id: number; direction: string; text: string | null; author_
   error: string | null; is_ai: boolean; sent_at: string };
 type Detail = Conversation & { messages: ChatMessage[]; ai_available?: boolean };
 type Channel = { id: number; kind: string; kind_name: string; name: string; active: boolean; status: string; last_error: string | null;
-  bot_username?: string | null; instance_id?: string | null; last_polled_at: string | null; unread: number };
+  bot_username?: string | null; instance_id?: string | null; last_polled_at: string | null; unread: number;
+  mode?: string | null };
 type Template = { id: number; title: string; text: string };
 
 export const channelBadge: Record<string, { label: string; cls: string }> = {
-  avito: { label: "А", cls: "avito" }, telegram_bot: { label: "TG", cls: "telegram" }, whatsapp: { label: "WA", cls: "whatsapp" } };
+  telegram_user: { label: "TG", cls: "telegram" },
+  avito: { label: "А", cls: "avito" }, telegram_bot: { label: "TG", cls: "telegram" }, whatsapp: { label: "WA", cls: "whatsapp" }, max: { label: "MAX", cls: "max" } };
 
-const channelNames: Record<string, string> = { avito: "Авито", telegram_bot: "Telegram", whatsapp: "WhatsApp" };
+const channelNames: Record<string, string> = { avito: "Авито", telegram_bot: "Telegram", whatsapp: "WhatsApp", max: "MAX",
+  telegram_user: "Telegram-профиль" };
 const ago = (value: string | null) => {
   if (!value) return "";
   const minutes = Math.max(0, Math.round((Date.now() - new Date(value).getTime()) / 60000));
@@ -124,21 +128,46 @@ function Channels({ projectId, onClose, onChanged }: { projectId: number; onClos
       <div><b>{c.name}</b><small>{c.kind_name}{c.bot_username ? ` · @${c.bot_username}` : ""} · {c.status === "connected" ? "работает" : c.status === "error" ? "ошибка" : "не проверен"}{c.last_polled_at ? ` · проверка ${when(c.last_polled_at)}` : ""}</small>
         {c.last_error && <small className="chatError">{c.last_error}</small>}</div>
       {data.can_manage && <div className="chatChannelActions"><button disabled={busy} onClick={() => run(() => request(`/crm/channels/${c.id}/sync`, "POST", {}), "Проверено")}>Проверить</button>
+        {c.kind === "telegram_user" && <select aria-label="Режим Telegram-профиля" value={c.mode || "corporate"}
+          disabled={busy} onChange={e => run(() => request(`/crm/channels/${c.id}/telegram-mode`, "PATCH",
+            { mode: e.target.value }), "Режим сохранён")}><option value="corporate">Корпоративный</option>
+          <option value="personal">Личный</option></select>}
         <button disabled={busy} onClick={() => run(() => request(`/crm/channels/${c.id}`, "PATCH", { active: !c.active }), c.active ? "Канал выключен" : "Канал включён")}>{c.active ? "Выключить" : "Включить"}</button></div>}</div>)}
       {data && !data.channels.length && <p className="crmMuted">Каналы ещё не подключены.</p>}</div>
+    {data?.can_manage && <TelegramProfileConnect projectId={projectId} onChanged={() => { void load(); onChanged(); }}/ >}
     {data?.can_manage && <form className="chatAddChannel" onSubmit={add}><h3 className="crmSub">Подключить канал</h3>
-      <div className="crmChips">{[["telegram_bot", "Telegram-бот"], ["whatsapp", "WhatsApp"], ["avito", "Чаты Авито"]].map(([k, l]) => <button type="button" key={k} className={kind === k ? "active" : ""} onClick={() => setKind(k)}>{l}</button>)}</div>
-      <label>Название<input name="name" required minLength={2} placeholder={kind === "telegram_bot" ? "Бот компании" : kind === "whatsapp" ? "WhatsApp отдела продаж" : "Авито — кухни"}/></label>
+      <div className="crmChips">{[["telegram_bot", "Telegram-бот"], ["whatsapp", "WhatsApp"], ["max", "MAX"], ["avito", "Чаты Авито"]].map(([k, l]) => <button type="button" key={k} className={kind === k ? "active" : ""} onClick={() => setKind(k)}>{l}</button>)}</div>
+      <label>Название<input name="name" required minLength={2} placeholder={kind === "telegram_bot" ? "Бот компании" : kind === "whatsapp" ? "WhatsApp отдела продаж" : kind === "max" ? "MAX отдела продаж" : "Авито — кухни"}/></label>
       {kind === "telegram_bot" && <><p className="crmModalLead">Создайте бота в @BotFather (/newbot) и вставьте токен. Ссылку на бота (t.me/…) разместите на сайте, в объявлениях и в подписи. Это должен быть отдельный бот, не бот уведомлений.</p>
         <label>Токен бота<input name="token" required autoComplete="off" placeholder="123456789:AA…"/></label></>}
       {kind === "whatsapp" && <><p className="crmModalLead">WhatsApp подключается через сервис GREEN-API (green-api.com): создайте инстанс, отсканируйте QR-код телефоном с номером отдела продаж и скопируйте idInstance, apiTokenInstance и apiUrl.</p>
         <div className="resultModalGrid"><label>idInstance<input name="instance_id" required inputMode="numeric" pattern="[0-9]+"/></label><label>apiUrl<input name="api_url" placeholder="https://api.green-api.com"/></label></div>
+        <label>apiTokenInstance<input name="token" required autoComplete="off"/></label></>}
+      {kind === "max" && <><p className="crmModalLead">Обычный аккаунт MAX подключается через GREEN-API (green-api.com, продукт для MAX): создайте инстанс MAX, авторизуйте в нём номер отдела продаж по QR-коду или коду из SMS и скопируйте idInstance и apiTokenInstance. Писать клиенту можно первым — по номеру телефона.</p>
+        <div className="resultModalGrid"><label>idInstance<input name="instance_id" required inputMode="numeric" pattern="[0-9]+"/></label><label>apiUrl<input name="api_url" placeholder="https://api.green-api.com/v3"/></label></div>
         <label>apiTokenInstance<input name="token" required autoComplete="off"/></label></>}
       {kind === "avito" && <><p className="crmModalLead">Используются ключи кабинета «Авито · Объявления» из раздела «Реклама». Ответы уходят прямо в чат Авито (до 1000 символов).</p>
         <label>Кабинет<select name="connection_id" required>{(data.avito_cabinets || []).map(c => <option key={c.id} value={c.id}>{c.name}{c.status !== "connected" ? " (не проверен)" : ""}</option>)}</select></label>
         {!data.avito_cabinets.length && <p className="crmWarnLine">Сначала подключите «Авито · Объявления» в разделе «Реклама».</p>}</>}
       <button className="resultPrimary" disabled={busy}>{busy ? "Проверяем…" : "Подключить"}</button></form>}
   </div></div>;
+}
+
+const CORPORATE_KINDS = ["telegram_user", "whatsapp", "max", "email"];
+
+// Подсказка, пока у компании нет ни одного рабочего аккаунта (не бота): без них переписка живёт в личных телефонах менеджеров.
+function CorporateAccountsHint({ projectId, onConnect, reload }: { projectId: number; onConnect: () => void; reload: number }) {
+  const [state, setState] = useState<{ missing: boolean; canManage: boolean } | null>(null);
+  useEffect(() => {
+    request<{ channels: Channel[]; can_manage: boolean }>(`/crm/projects/${projectId}/channels`, "GET")
+      .then(v => setState({ missing: !v.channels.some(c => c.active && CORPORATE_KINDS.includes(c.kind)), canManage: v.can_manage }))
+      .catch(() => setState(null));
+  }, [projectId, reload]);
+  if (!state?.missing) return null;
+  return <div className="chatCorporateHint"><strong>Подключите корпоративные аккаунты</strong>
+    <p>Рабочие Telegram, WhatsApp, MAX и почта отдела продаж: клиентам можно писать первыми прямо из CRM, а вся переписка останется у компании, даже если менеджер уйдёт.</p>
+    {state.canManage ? <button className="resultPrimary" onClick={onConnect}>Подключить</button>
+      : <p className="crmMuted">Подключает руководитель или владелец — попросите его.</p>}</div>;
 }
 
 export function Inbox({ projectId, team, can, onOpenDeal, onOpenInbound }: { projectId: number; team: Team[];
@@ -168,6 +197,7 @@ export function Inbox({ projectId, team, can, onOpenDeal, onOpenInbound }: { pro
       <button className="crmGhost" onClick={() => setChannels(true)} title="Каналы переписки">⚙ Каналы</button></div>
       <div className="chatFilters">{filters.map(([key, label, n]) => <button key={key} className={filter === key ? "active" : ""} onClick={() => setFilter(key)}>{label}{n ? <b>{n}</b> : null}</button>)}
         <button className={status === "closed" ? "active" : ""} onClick={() => setStatus(status === "open" ? "closed" : "open")}>{status === "open" ? "Закрытые" : "← Открытые"}</button></div>
+      <CorporateAccountsHint projectId={projectId} onConnect={() => setChannels(true)} reload={channels ? 1 : 0}/>
       {error && <p className="crmFormError">{error}</p>}
       <div className="chatItems">{items.map(c => { const badge = channelBadge[c.channel_kind || ""]; const late = c.waiting_since && Date.now() - new Date(c.waiting_since).getTime() > 15 * 60000;
         return <button key={c.id} className={`chatItem ${active === c.id ? "active" : ""} ${c.unread_count ? "unread" : ""}`} onClick={() => setActive(c.id)}>
@@ -200,7 +230,7 @@ export function DealChats({ dealId, projectId, canWrite, phone }: { dealId: numb
   const load = useCallback(() => request<Conversation[]>(`/crm/deals/${dealId}/conversations`, "GET").then(rows => {
     setItems(rows); setActive(current => current && rows.some(r => r.id === current) ? current : rows[0]?.id ?? null); }).catch(e => setError((e as Error).message)), [dealId]);
   useEffect(() => { load(); }, [load]);
-  useEffect(() => { request<{ channels: Channel[] }>(`/crm/projects/${projectId}/channels`, "GET").then(v => setChannels(v.channels.filter(c => c.kind === "whatsapp" && c.active))).catch(() => setChannels([])); }, [projectId]);
+  useEffect(() => { request<{ channels: Channel[] }>(`/crm/projects/${projectId}/channels`, "GET").then(v => setChannels(v.channels.filter(c => (c.kind === "whatsapp" || c.kind === "max") && c.active))).catch(() => setChannels([])); }, [projectId]);
   async function startWhatsapp(channelId: number) {
     setError("");
     try { const row = await request<Conversation>(`/crm/deals/${dealId}/conversations`, "POST", { channel_id: channelId }); await load(); setActive(row.id); }
@@ -208,9 +238,10 @@ export function DealChats({ dealId, projectId, canWrite, phone }: { dealId: numb
   }
   if (items === null) return null;
   return <div className="crmBlock dealChats"><div className="crmBlockHead"><h3>Переписка</h3>
-    {canWrite && phone && channels.length > 0 && !items.some(c => c.channel_kind === "whatsapp") && <button className="crmLinkButton" onClick={() => startWhatsapp(channels[0].id)}>＋ Написать в WhatsApp</button>}</div>
+    {canWrite && phone && ["whatsapp", "max"].map(kind => { const channel = channels.find(c => c.kind === kind);
+      return channel && !items.some(c => c.channel_kind === kind) ? <button key={kind} className="crmLinkButton" onClick={() => startWhatsapp(channel.id)}>＋ Написать в {channelNames[kind]}</button> : null; })}</div>
     {error && <p className="crmFormError">{error}</p>}
     {items.length > 1 && <div className="crmChips">{items.map(c => <button key={c.id} className={active === c.id ? "active" : ""} onClick={() => setActive(c.id)}>{channelBadge[c.channel_kind || ""]?.label} · {c.channel_name}</button>)}</div>}
     {active ? <ChatThread conversationId={active} projectId={projectId} compact canWrite={canWrite} onChanged={load}/>
-      : <p className="crmMuted">Переписки с клиентом пока нет. Сообщения из Авито, Telegram и WhatsApp появятся здесь автоматически{phone && channels.length ? ", а в WhatsApp можно написать первым" : ""}.</p>}</div>;
+      : <p className="crmMuted">Переписки с клиентом пока нет. Сообщения из Авито, Telegram, WhatsApp и MAX появятся здесь автоматически{phone && channels.length ? ", а в WhatsApp и MAX можно написать первым" : ""}.</p>}</div>;
 }

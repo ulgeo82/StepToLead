@@ -98,6 +98,12 @@ def validate_delegation(actor, role, permissions):
     return sorted(permissions)
 
 
+def require_owner(actor: PortalUser) -> None:
+    """Changing employees (invite, edit, block, delete) is reserved for the company owner."""
+    if actor.role != "client_owner":
+        raise HTTPException(403, "Изменять сотрудников может только владелец компании")
+
+
 async def member_or_404(db, actor, member_id):
     member = await db.get(PortalUser, member_id)
     if not member or member.workspace_id != actor.workspace_id:
@@ -135,6 +141,7 @@ async def invite_member(payload: Invite, request: Request, db: AsyncSession = De
                         actor: PortalUser = Depends(require_portal_user)):
     check_origin(request)
     require_permission(actor, "manage_team")
+    require_owner(actor)
     permissions = validate_delegation(actor, payload.role, payload.permissions)
     email = str(payload.email).lower()
     if await db.scalar(select(PortalUser.id).where(PortalUser.username == email)):
@@ -164,6 +171,7 @@ async def edit_member(member_id: int, payload: MemberPatch, request: Request,
                       db: AsyncSession = Depends(get_db), actor: PortalUser = Depends(require_portal_user)):
     check_origin(request)
     require_permission(actor, "manage_team")
+    require_owner(actor)
     member = await member_or_404(db, actor, member_id)
     if member.role == "client_owner" and actor.role != "client_owner":
         raise HTTPException(403, "Изменить владельца может только владелец")
@@ -200,6 +208,7 @@ async def remove_member(member_id: int, request: Request, db: AsyncSession = Dep
                         actor: PortalUser = Depends(require_portal_user)):
     check_origin(request)
     require_permission(actor, "manage_team")
+    require_owner(actor)
     member = await member_or_404(db, actor, member_id)
     if member.role == "client_owner" and actor.role != "client_owner":
         raise HTTPException(403, "Изменить владельца может только владелец")
