@@ -98,8 +98,14 @@ async def problems(db: AsyncSession) -> list[dict]:
         label = f"{CHANNELS.get(c.kind, c.kind)} «{c.name}»"
         if c.status == "error":
             add(f"chan:{c.id}", f"Канал переписки не работает: {label}", c.last_error, c.workspace_id)
+        elif c.status == "waiting_proxy":
+            add(f"chan:{c.id}", "Нет свободных прокси для Telegram-профилей", c.name, c.workspace_id)
         elif c.status == "connected" and aware(c.last_polled_at) and aware(c.last_polled_at) < now() - timedelta(minutes=STALE_POLL_MINUTES):
             add(f"chanstale:{c.id}", f"Сообщения не забирались больше {STALE_POLL_MINUTES} мин: {label}", "", c.workspace_id)
+    from app.models.proxy import Proxy
+    for proxy in (await db.scalars(select(Proxy).where(Proxy.pool == "client", Proxy.status == "error"))).all():
+        add(f"clientproxy:{proxy.id}", "Нет связи через прокси Telegram-профилей",
+            f"{proxy.host}:{proxy.port} · {proxy.last_error or ''}", proxy.dedicated_workspace_id)
     for t in (await db.scalars(select(TelephonyConnection).where(TelephonyConnection.active.is_(True)))).all():
         if t.project_id in active and t.workspace_id in names and t.status == "error":
             add(f"tel:{t.id}", f"Телефония не работает: «{t.name}»", t.last_error, t.workspace_id)

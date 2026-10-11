@@ -75,7 +75,7 @@ async def import_tdata(
         raise HTTPException(status_code=422, detail="За один раз можно импортировать не более 50 аккаунтов")
 
     proxy = await db.get(Proxy, proxy_id) if proxy_id else None
-    if proxy_id and not proxy:
+    if proxy_id and (not proxy or proxy.pool != "agency"):
         raise HTTPException(status_code=404, detail="Выбранный прокси не найден")
     connection_proxy = proxy_config(proxy)
 
@@ -173,7 +173,7 @@ async def auth_request_code(payload: AuthRequestCode, db: AsyncSession = Depends
     phone = "+" + "".join(character for character in payload.phone if character.isdigit())
     account = await db.scalar(select(TelegramAccount).where(TelegramAccount.phone == phone))
     proxy = await db.get(Proxy, payload.proxy_id) if payload.proxy_id else None
-    if payload.proxy_id and not proxy:
+    if payload.proxy_id and (not proxy or proxy.pool != "agency"):
         raise HTTPException(status_code=404, detail="Выбранный прокси не найден")
     if account and account.session_encrypted:
         raise HTTPException(status_code=409, detail="Этот аккаунт уже подключён")
@@ -210,8 +210,9 @@ async def assign_proxy(account_id: int, payload: AccountProxyUpdate, db: AsyncSe
     account = await db.get(TelegramAccount, account_id)
     if not account:
         raise HTTPException(status_code=404, detail="Telegram-аккаунт не найден")
-    if payload.proxy_id and not await db.get(Proxy, payload.proxy_id):
-        raise HTTPException(status_code=404, detail="Прокси не найден")
+    proxy = await db.get(Proxy, payload.proxy_id) if payload.proxy_id else None
+    if payload.proxy_id and (not proxy or proxy.pool != "agency"):
+        raise HTTPException(status_code=404, detail="Прокси агентства не найден")
     account.proxy_id = payload.proxy_id
     account.status = "checking" if account.session_encrypted else "disconnected"
     account.last_error = None

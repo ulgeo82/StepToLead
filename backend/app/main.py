@@ -32,6 +32,8 @@ async def lifespan(_: FastAPI):
     avito_worker = asyncio.create_task(run_avito_worker())
     crm_worker = asyncio.create_task(run_crm_worker())
     messaging_worker = asyncio.create_task(run_messaging_worker())
+    from app.services.telegram_profiles import run_worker as run_profiles_worker
+    profiles_worker = asyncio.create_task(run_profiles_worker())
     telephony_worker = asyncio.create_task(run_telephony_worker())
     watchdog = asyncio.create_task(run_watchdog())
     ad_sync = asyncio.create_task(run_ad_sync())
@@ -39,6 +41,7 @@ async def lifespan(_: FastAPI):
     leadgen_sequences = asyncio.create_task(run_leadgen_sequences())
     from app.services import monitor
     monitor.install()
+    monitor.register("Telegram-профили клиентов", profiles_worker)
     from app.services.tg_bot import run_worker as run_tg_bot
     tg_worker = asyncio.create_task(run_tg_bot()) if settings.telegram_bot_token else None
     if tg_worker:
@@ -56,6 +59,9 @@ async def lifespan(_: FastAPI):
         avito_worker.cancel()
         crm_worker.cancel()
         messaging_worker.cancel()
+        profiles_worker.cancel()
+        with suppress(asyncio.CancelledError):
+            await profiles_worker
         telephony_worker.cancel()
         watchdog.cancel()
         ad_sync.cancel()

@@ -30,6 +30,7 @@ def channel_json(row: MessagingChannel, unread: int = 0) -> dict:
             "active": row.active, "status": row.status, "last_error": row.last_error, "ai_mode": row.ai_mode,
             "bot_username": data.get("bot_username"), "instance_id": data.get("instance_id"),
             "api_url": data.get("api_url"), "connection_id": data.get("connection_id"),
+            "phone": data.get("phone"), "mode": data.get("mode"), "proxy_id": data.get("proxy_id"),
             "last_polled_at": row.last_polled_at, "unread": unread}
 
 

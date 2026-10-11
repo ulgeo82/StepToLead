@@ -67,7 +67,7 @@ def proxy_config(proxy: Proxy | None) -> dict | None:
     }
 
 
-def make_client(session_value: str | None = None, proxy: Proxy | None = None) -> TelegramClient:
+def make_client(session_value: str | None = None, proxy: Proxy | None = None, *, catch_up=False) -> TelegramClient:
     ensure_telegram_configured()
     api_id, api_hash = telegram_api_credentials()
     return TelegramClient(
@@ -83,6 +83,7 @@ def make_client(session_value: str | None = None, proxy: Proxy | None = None) ->
         connection_retries=1,
         timeout=10,
         flood_sleep_threshold=0,
+        catch_up=catch_up,
     )
 
 

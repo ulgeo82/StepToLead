@@ -15,6 +15,9 @@ def upgrade_existing_schema(connection):
     ExpressAssessment.__table__.create(connection, checkfirst=True)
     inspector = inspect(connection)
     columns = {
+        "proxies": {"pool": "VARCHAR(16) NOT NULL DEFAULT 'agency'",
+                    "max_accounts": "INTEGER NOT NULL DEFAULT 3",
+                    "dedicated_workspace_id": "INTEGER REFERENCES client_workspaces(id)"},
         "client_briefs": {"transcript": "TEXT", "ai_fields": "JSON"},
         "client_workspaces": {"plan": "VARCHAR(16)", "legal_name": "VARCHAR(240)", "contact_email": "VARCHAR(254)",
                               "contact_phone": "VARCHAR(64)", "website": "VARCHAR(500)",

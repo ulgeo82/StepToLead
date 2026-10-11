@@ -37,6 +37,11 @@ export type Proxy = {
   last_checked_at: string | null;
   created_at: string;
   assigned_accounts: number;
+  pool: "agency" | "client";
+  max_accounts: number;
+  client_accounts: number;
+  dedicated_workspace_id: number | null;
+  dedicated_workspace_name: string | null;
 };
 
 export type TelegramAccount = {
