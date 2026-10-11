@@ -96,3 +96,90 @@ async def mode(channel_id: int, payload: ModeIn, request: Request,
     channel.config = {**(channel.config or {}), "mode": payload.mode}
     await db.commit()
     return channel_json(channel)
+
+
+class QrIn(BaseModel):
+    name: str | None = Field(default=None, min_length=2, max_length=180)
+    mode: str = Field(default="corporate", pattern=r"^(corporate|personal)$")
+    channel_id: int | None = None  # re-login of an existing profile
+
+
+@router.post("/projects/{project_id}/telegram-profile/qr", status_code=201)
+async def start_qr(project_id: int, payload: QrIn, request: Request,
+                   db=Depends(get_db), user=Depends(require_portal_user)):
+    """Login by QR code: the client scans it in Telegram → Settings → Devices → Link Desktop Device."""
+    check_origin(request)
+    project = await project_for(db, user, project_id)
+    if not can_manage_channels(user):
+        raise HTTPException(403, "Настраивать каналы может руководитель или владелец")
+    from app.services import plans
+    await plans.require(db, project.workspace_id, "all_chats")
+    if payload.channel_id:
+        channel = await managed(db, user, payload.channel_id)
+        if channel.project_id != project.id:
+            raise HTTPException(404, "Telegram-профиль не найден")
+        if channel.active and channel.status == "connected":
+            raise HTTPException(409, "Профиль подключён. Чтобы войти заново, сначала выключите канал.")
+    else:
+        if not payload.name:
+            raise HTTPException(422, "Укажите название профиля")
+        # Profiles whose QR window was simply closed are left half-created: clean them up.
+        for stale in (await db.scalars(select(MessagingChannel).where(
+                MessagingChannel.project_id == project.id, MessagingChannel.kind == "telegram_user",
+                MessagingChannel.status == "qr_pending", MessagingChannel.secret_encrypted.is_(None)))).all():
+            if stale.id not in telegram_profiles.qr_logins:
+                await db.delete(stale)
+        channel = MessagingChannel(workspace_id=project.workspace_id, project_id=project.id, kind="telegram_user",
+                                   name=payload.name.strip(), config={"mode": payload.mode}, active=False,
+                                   status="qr_pending")
+        db.add(channel)
+        await db.flush()
+    try:
+        qr = await telegram_profiles.start_qr(db, channel)
+    except ChannelError as error:
+        if not payload.channel_id and not channel.secret_encrypted and channel.status in {"qr_pending", "waiting_proxy"}:
+            await db.delete(channel)
+        await db.commit()
+        raise HTTPException(422, str(error)) from None
+    await db.commit()
+    return {"channel": channel_json(channel), "qr": qr}
+
+
+@router.get("/channels/{channel_id}/telegram-qr")
+async def qr_status(channel_id: int, db=Depends(get_db), user=Depends(require_portal_user)):
+    channel = await managed(db, user, channel_id)
+    state = telegram_profiles.qr_state(channel_id)
+    if state is None:
+        await db.refresh(channel)
+        state = {"status": "connected" if channel.status == "connected" else "expired",
+                 "error": None if channel.status == "connected" else (channel.last_error or "QR-код устарел — покажите новый")}
+    return {**state, "channel": channel_json(channel)}
+
+
+class QrPasswordIn(BaseModel):
+    password: str = Field(min_length=1, max_length=300)
+
+
+@router.post("/channels/{channel_id}/telegram-qr/password")
+async def qr_password(channel_id: int, payload: QrPasswordIn, request: Request,
+                      db=Depends(get_db), user=Depends(require_portal_user)):
+    check_origin(request)
+    await managed(db, user, channel_id)
+    try:
+        result = await telegram_profiles.qr_password(channel_id, payload.password)
+    except ChannelError as error:
+        raise HTTPException(422, str(error)) from None
+    if result["status"] != "connected":
+        raise HTTPException(422, result.get("error") or "Не удалось подключить профиль")
+    return result
+
+
+@router.delete("/channels/{channel_id}/telegram-qr", status_code=204)
+async def qr_cancel(channel_id: int, request: Request, db=Depends(get_db), user=Depends(require_portal_user)):
+    check_origin(request)
+    channel = await managed(db, user, channel_id)
+    await telegram_profiles.cancel_qr(channel_id)
+    await db.refresh(channel)
+    if not channel.secret_encrypted and channel.status != "connected":
+        await db.delete(channel)  # an unfinished new profile leaves nothing behind
+    await db.commit()

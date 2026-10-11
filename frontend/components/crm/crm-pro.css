@@ -445,3 +445,4 @@ button.callAi{cursor:pointer}
 @media(max-width:560px){.amoMap>div{grid-template-columns:1fr;gap:4px}}
 
 .chatCorporateHint{margin:10px 0;padding:12px 13px;border:1px solid #cfe0fb;border-radius:10px;background:#f2f7ff}.chatCorporateHint strong{display:block;color:#152239;font-size:12px}.chatCorporateHint p{margin:5px 0 9px;color:#4c607d;font-size:11px;line-height:1.45}.chatCorporateHint .resultPrimary{min-height:32px;font-size:11px}
+.tgQr{display:grid;grid-template-columns:auto 1fr;gap:10px 16px;align-items:start}.tgQrCode{width:210px;height:210px;padding:6px;border:1px solid #e2eaf5;border-radius:12px;background:#fff}.tgQrCode svg{width:100%;height:100%}.tgQr ol{margin:0;padding-left:18px;color:#1f3049;font-size:12px;line-height:1.7}.tgQr p,.tgQr button{grid-column:1/-1}@media(max-width:640px){.tgQr{grid-template-columns:1fr}.tgQrCode{margin:0 auto}}

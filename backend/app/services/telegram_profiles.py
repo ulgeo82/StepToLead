@@ -223,6 +223,7 @@ async def execute(client, command):
 async def run_leader(redis, owner, lost):
     tasks = {}
     locks = {}
+    signatures = {}
 
     async def heartbeat():
         try:
@@ -304,7 +305,12 @@ async def run_leader(redis, owner, lost):
                 channels = (await db.scalars(select(MessagingChannel).where(
                     MessagingChannel.kind == "telegram_user", MessagingChannel.active.is_(True)))).all()
                 wanted = {c.id for c in channels if c.status in {"connected", "error"} and c.secret_encrypted
-                          and c.last_error != "Сессия завершена — подключите профиль заново"}
+                          and c.last_error != "Сессия завершена — подключите профиль заново"
+                          and c.id not in qr_logins}
+                from app.models.proxy import Proxy
+                proxies = {p.id: p for p in (await db.scalars(select(Proxy).where(Proxy.pool == "client"))).all()}
+                current = {c.id: client_proxies.signature(proxies.get((c.config or {}).get("proxy_id")))
+                           for c in channels}
                 for channel in channels:
                     if channel.id in clients:
                         await redis.set(f"steptolead:telegram-profiles:live:{channel.id}", owner, ex=30)
@@ -315,7 +321,14 @@ async def run_leader(redis, owner, lost):
                                 "pts": state.pts, "qts": state.qts, "seq": state.seq,
                                 "date": state.date.isoformat(), "unread_count": state.unread_count}}
                 await db.commit()
+            # The agency replaced a proxy in the portal: drop the old connection, the profile reconnects via the new IP.
+            for channel_id in [cid for cid in tasks if cid in wanted and signatures.get(cid) != current.get(cid)]:
+                task = tasks.pop(channel_id)
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
             for channel_id in wanted - tasks.keys():
+                signatures[channel_id] = current.get(channel_id)
                 tasks[channel_id] = asyncio.create_task(connect(channel_id))
             for channel_id in tasks.keys() - wanted:
                 task = tasks.pop(channel_id)
@@ -385,3 +398,159 @@ async def run_worker():
 
 async def acquire(redis, owner):
     return bool(await redis.set(LEASE, owner, nx=True, ex=60))
+
+
+# --------------------------------------------------------------------------- QR login
+# The client scans a QR code in Telegram (Settings → Devices → Link Desktop Device): no SMS code, no phone number.
+# A pending login keeps a live Telegram connection, so it lives in this backend process (the portal runs one
+# backend process; the profile manager skips channels that are being logged in).
+QR_TTL_SECONDS = 180
+qr_logins: dict[int, dict] = {}
+
+
+def _now():
+    return datetime.now(timezone.utc)
+
+
+def qr_svg(url: str) -> str:
+    import io
+
+    import segno
+    buffer = io.BytesIO()
+    segno.make(url, error="m").save(buffer, kind="svg", scale=6, border=2, dark="#101c31", xmldecl=False)
+    return buffer.getvalue().decode()
+
+
+def qr_state(channel_id: int) -> dict | None:
+    state = qr_logins.get(channel_id)
+    if state is None:
+        return None
+    result = {"status": state["status"], "error": state.get("error"),
+              "deadline": state["deadline"].isoformat()}
+    if state["status"] == "waiting" and state.get("url"):
+        result.update(svg=qr_svg(state["url"]), expires_at=state["expires"].isoformat())
+    return result
+
+
+async def _close(channel_id: int, state: dict) -> None:
+    if qr_logins.get(channel_id) is state:
+        qr_logins.pop(channel_id, None)
+    with suppress(Exception):
+        await state["client"].disconnect()
+
+
+async def cancel_qr(channel_id: int) -> None:
+    state = qr_logins.get(channel_id)
+    if state:
+        task = state.get("task")
+        if task and task is not asyncio.current_task():
+            task.cancel()
+            with suppress(asyncio.CancelledError, Exception):
+                await task
+        await _close(channel_id, state)
+
+
+async def _finish(channel_id: int, state: dict) -> None:
+    """Telegram accepted the login: store the encrypted session and hand the profile to the manager."""
+    from app.services import messaging
+    client = state["client"]
+    me = await client.get_me()
+    session = client.session.save()
+    async with SessionLocal() as db:
+        channel = await db.get(MessagingChannel, channel_id)
+        others = (await db.scalars(select(MessagingChannel).where(
+            MessagingChannel.workspace_id == channel.workspace_id, MessagingChannel.kind == "telegram_user",
+            MessagingChannel.id != channel_id))).all()
+        if any((other.config or {}).get("telegram_user_id") == me.id for other in others):
+            state.update(status="error", error="Этот Telegram-аккаунт уже подключён в компании")
+            channel.status, channel.last_error = "error", state["error"]
+            await db.commit()
+            return
+        phone = messaging.norm_phone(me.phone)
+        channel.config = {**(channel.config or {}), "telegram_user_id": me.id, "username": me.username,
+                          "phone": f"+{phone}" if phone else None}
+        channel.config.pop("update_state", None)
+        channel.secret_encrypted = encrypt_secret(session)
+        channel.status, channel.last_error, channel.active = "connected", None, True
+        await db.commit()
+    state.update(status="connected", error=None)
+
+
+async def _wait(channel_id: int, state: dict) -> None:
+    qr = state["qr"]
+    try:
+        while _now() < state["deadline"]:
+            left = (state["deadline"] - _now()).total_seconds()
+            try:
+                await qr.wait(timeout=max(1.0, min(left, (qr.expires - _now()).total_seconds())))
+            except asyncio.TimeoutError:
+                if _now() >= state["deadline"]:
+                    break
+                await qr.recreate()  # Telegram tokens live ~30 s; the page shows the fresh code on its next poll.
+                state.update(url=qr.url, expires=qr.expires)
+                continue
+            except SessionPasswordNeededError:
+                state["status"] = "password_required"
+                await asyncio.sleep(max(0.0, (state["deadline"] - _now()).total_seconds()))
+                if state["status"] == "password_required":
+                    state.update(status="expired", error="Время на ввод пароля истекло")
+                return
+            await _finish(channel_id, state)
+            return
+        state.update(status="expired", error="QR-код устарел — покажите новый")
+    except asyncio.CancelledError:
+        raise
+    except Exception as error:
+        state.update(status="error", error=error_text(error))
+    finally:
+        if state["status"] != "password_required":
+            await _close(channel_id, state)
+
+
+async def start_qr(db, channel) -> dict:
+    from app.services.messaging import ChannelError
+    await cancel_qr(channel.id)
+    proxy = await client_proxies.allocate(db, channel)
+    if proxy is None:
+        raise ChannelError("Для Telegram-профилей компании не настроен прокси — обратитесь к агентству")
+    if proxy.status == "error":
+        raise ChannelError("Прокси компании не отвечает — агентство может заменить его в карточке клиента")
+    client = make_client(None, proxy, catch_up=True)
+    try:
+        await asyncio.wait_for(client.connect(), 15)
+        qr = await client.qr_login()
+    except Exception as error:
+        with suppress(Exception):
+            await client.disconnect()
+        raise ChannelError(error_text(error)) from None
+    state = {"client": client, "qr": qr, "status": "waiting", "url": qr.url, "expires": qr.expires,
+             "deadline": _now() + timedelta(seconds=QR_TTL_SECONDS), "error": None}
+    qr_logins[channel.id] = state
+    state["task"] = asyncio.create_task(_wait(channel.id, state))
+    if channel.status != "connected":
+        channel.status = "qr_pending"
+    return qr_state(channel.id)
+
+
+async def qr_password(channel_id: int, password: str) -> dict:
+    from telethon.errors import PasswordHashInvalidError
+
+    from app.services.messaging import ChannelError
+    state = qr_logins.get(channel_id)
+    if not state or state["status"] != "password_required":
+        raise ChannelError("Пароль сейчас не нужен — покажите QR-код заново")
+    try:
+        await state["client"].sign_in(password=password)
+    except PasswordHashInvalidError:
+        raise ChannelError("Неверный облачный пароль Telegram") from None
+    except Exception as error:
+        raise ChannelError(error_text(error)) from None
+    state["status"] = "finishing"
+    try:
+        await _finish(channel_id, state)
+    finally:
+        task = state.get("task")
+        if task:
+            task.cancel()
+        await _close(channel_id, state)
+    return {"status": state["status"], "error": state.get("error")}

@@ -125,3 +125,75 @@ async def remap_profile(channel_id: int, payload: RemapIn, request: Request, db=
     channel.config = {**(channel.config or {}), "proxy_id": proxy.id}
     await db.commit()
     return {"ok": True}
+
+
+# --------------------------------------------------------------------------- per-client proxies (client card in admin)
+
+class ClientProxyIn(BaseModel):
+    line: str = Field(min_length=3, max_length=500)
+    max_accounts: int = Field(default=3, ge=1, le=100)
+
+
+class ClientProxyReplace(BaseModel):
+    line: str = Field(min_length=3, max_length=500)
+    confirm_ip_change: bool = False
+
+
+async def _client_proxies_payload(db, workspace_id: int) -> dict:
+    from app.models.messaging import MessagingChannel
+    proxies = (await db.scalars(select(Proxy).where(Proxy.pool == "client", Proxy.dedicated_workspace_id == workspace_id)
+                                .order_by(Proxy.id))).all()
+    profiles = (await db.scalars(select(MessagingChannel).where(MessagingChannel.workspace_id == workspace_id,
+                                                                MessagingChannel.kind == "telegram_user"))).all()
+    shared = sum(1 for p in profiles if (p.config or {}).get("proxy_id") not in {x.id for x in proxies}
+                 and (p.config or {}).get("proxy_id"))
+    return {"proxies": [{
+        "id": p.id, "host": p.host, "port": p.port, "username": p.username, "status": p.status,
+        "last_error": p.last_error, "last_checked_at": p.last_checked_at, "max_accounts": p.max_accounts,
+        "profiles": [{"id": c.id, "name": c.name, "status": c.status, "last_error": c.last_error}
+                     for c in profiles if (c.config or {}).get("proxy_id") == p.id]} for p in proxies],
+        "shared_pool_profiles": shared,
+        "waiting": [{"id": c.id, "name": c.name} for c in profiles if c.status == "waiting_proxy"]}
+
+
+@router.get("/workspace/{workspace_id}")
+async def client_proxies_list(workspace_id: int, db=Depends(get_db)):
+    return await _client_proxies_payload(db, workspace_id)
+
+
+@router.post("/workspace/{workspace_id}", status_code=201)
+async def client_proxy_add(workspace_id: int, payload: ClientProxyIn, request: Request, db=Depends(get_db)):
+    """The agency pastes the client's proxy; it is checked against Telegram before it is saved."""
+    from app.core.access import check_origin
+    from app.models.marketing import ClientWorkspace
+    from app.services import client_proxies
+    check_origin(request)
+    if not await db.get(ClientWorkspace, workspace_id):
+        raise HTTPException(404, "Компания не найдена")
+    try:
+        await client_proxies.add_for_workspace(db, workspace_id, payload.line, payload.max_accounts)
+    except client_proxies.ProxyInputError as error:
+        raise HTTPException(422, str(error)) from None
+    await db.commit()
+    return await _client_proxies_payload(db, workspace_id)
+
+
+@router.put("/{proxy_id}/replace")
+async def client_proxy_replace(proxy_id: int, payload: ClientProxyReplace, request: Request, db=Depends(get_db)):
+    """Replace a dead or blocked proxy: profiles stay bound to it and reconnect through the new address."""
+    from app.core.access import check_origin
+    from app.services import client_proxies
+    check_origin(request)
+    proxy = await db.get(Proxy, proxy_id)
+    if not proxy or proxy.pool != "client":
+        raise HTTPException(404, "Прокси не найден")
+    load = (await client_proxies.usage(db)).get(proxy.id, 0)
+    if load and not payload.confirm_ip_change:
+        raise HTTPException(422, "Подтвердите смену IP: Telegram может попросить подтвердить вход в профилях заново")
+    try:
+        moved = await client_proxies.replace(db, proxy, payload.line)
+    except client_proxies.ProxyInputError as error:
+        raise HTTPException(422, str(error)) from None
+    await db.commit()
+    result = await _client_proxies_payload(db, proxy.dedicated_workspace_id) if proxy.dedicated_workspace_id else {}
+    return {**result, "moved": moved}

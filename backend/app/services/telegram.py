@@ -70,14 +70,19 @@ def proxy_config(proxy: Proxy | None) -> dict | None:
 def make_client(session_value: str | None = None, proxy: Proxy | None = None, *, catch_up=False) -> TelegramClient:
     ensure_telegram_configured()
     api_id, api_hash = telegram_api_credentials()
-    return TelegramClient(
+    # Sessions run on Telegram Desktop credentials, so they introduce themselves as Telegram Desktop:
+    # an unknown device name next to the Desktop api_id is an extra reason for Telegram to restrict an account.
+    desktop = API.TelegramDesktop
+    client = TelegramClient(
         StringSession(session_value or ""),
         api_id,
         api_hash,
         proxy=proxy_config(proxy),
-        device_model="Reachboard",
-        system_version="1.0",
-        app_version="0.1",
+        device_model=desktop.device_model,
+        system_version=desktop.system_version,
+        app_version=desktop.app_version,
+        lang_code=desktop.lang_code,
+        system_lang_code=desktop.system_lang_code,
         auto_reconnect=False,
         request_retries=0,
         connection_retries=1,
@@ -85,6 +90,8 @@ def make_client(session_value: str | None = None, proxy: Proxy | None = None, *,
         flood_sleep_threshold=0,
         catch_up=catch_up,
     )
+    client._init_request.lang_pack = desktop.lang_pack
+    return client
 
 
 async def request_login_code(account: TelegramAccount, proxy: Proxy | None) -> None:
