@@ -3,6 +3,7 @@
 import { FormEvent, KeyboardEvent, useCallback, useEffect, useRef, useState } from "react";
 import { request, Team, when } from "./shared";
 import { TelegramProfileConnect } from "./telegram-profile-connect";
+import { ReachContact } from "./reach-contact";
 
 export type Conversation = { id: number; channel_id: number; channel_kind: string | null; channel_name: string | null; title: string;
   phone: string | null; contact_id: number | null; contact_name: string | null; deal_id: number | null; deal_name: string | null;
@@ -75,7 +76,8 @@ export function ChatThread({ conversationId, projectId, compact, canWrite, onCha
     const row = await request<Template>(`/crm/projects/${projectId}/reply-templates`, "POST", { title, text });
     setTemplates(list => [...list, row]);
   }
-  const limit = detail?.channel_kind === "avito" ? 1000 : 4096;
+  const limit = detail?.channel_kind === "telegram_user" ? Infinity
+    : detail?.channel_kind === "avito" ? 1000 : 4096;
   return <div className={`chatThread ${compact ? "compact" : ""}`}>
     {detail?.ai_available && <div className="chatAiBar"><button type="button" className="crmLinkButton" disabled={!!aiBusy || !detail.messages.length} onClick={() => summarize(false)}>{aiBusy === "summary" ? "Готовим резюме…" : "✨ Резюме переписки"}</button></div>}
     {summary && <div className="chatSummary"><div><b>Резюме (ИИ)</b><button type="button" onClick={() => setSummary(null)} aria-label="Закрыть">×</button></div><p className="crmPre">{summary.text}</p>
@@ -92,11 +94,11 @@ export function ChatThread({ conversationId, projectId, compact, canWrite, onCha
       {error && <p className="crmFormError">{error}</p>}
       {showTemplates && <div className="chatTemplates">{templates.map(t => <button type="button" key={t.id} onClick={() => { setText(t.text); setShowTemplates(false); }} title={t.text}><b>{t.title}</b><span>{t.text}</span></button>)}
         {!templates.length && <p className="crmMuted">Шаблонов пока нет: напишите ответ и нажмите «В шаблоны».</p>}</div>}
-      <textarea value={text} onChange={e => setText(e.target.value)} onKeyDown={onKey} maxLength={limit} placeholder={`Ответ клиенту${detail?.channel_kind ? ` в ${channelNames[detail.channel_kind] || "чат"}` : ""} · Ctrl+Enter — отправить`}/>
+      <textarea value={text} onChange={e => setText(e.target.value)} onKeyDown={onKey} maxLength={Number.isFinite(limit) ? limit : undefined} placeholder={`Ответ клиенту${detail?.channel_kind ? ` в ${channelNames[detail.channel_kind] || "чат"}` : ""} · Ctrl+Enter — отправить`}/>
       <div className="chatComposerBar"><button type="button" className="crmLinkButton" onClick={() => setShowTemplates(v => !v)}>⚡ Шаблоны</button>
         {detail?.ai_available && <button type="button" className="crmLinkButton chatAiSuggest" disabled={!!aiBusy || !detail.messages.length} onClick={suggest} title="ИИ напишет черновик — проверьте и отправьте сами">{aiBusy === "suggest" ? "Пишем черновик…" : "✨ Подсказать ответ"}</button>}
         {text.trim().length > 5 && <button type="button" className="crmLinkButton" onClick={saveTemplate}>В шаблоны</button>}
-        <span className="crmMuted">{text.length}/{limit}</span><button className="crmPrimary" disabled={busy || !text.trim()}>{busy ? "Отправляем…" : "Отправить"}</button></div></form>}
+        <span className="crmMuted">{text.length}{Number.isFinite(limit) ? `/${limit}` : ""}</span><button className="crmPrimary" disabled={busy || !text.trim()}>{busy ? "Отправляем…" : "Отправить"}</button></div></form>}
   </div>;
 }
 
@@ -242,6 +244,7 @@ export function DealChats({ dealId, projectId, canWrite, phone }: { dealId: numb
       return channel && !items.some(c => c.channel_kind === kind) ? <button key={kind} className="crmLinkButton" onClick={() => startWhatsapp(channel.id)}>＋ Написать в {channelNames[kind]}</button> : null; })}</div>
     {error && <p className="crmFormError">{error}</p>}
     {items.length > 1 && <div className="crmChips">{items.map(c => <button key={c.id} className={active === c.id ? "active" : ""} onClick={() => setActive(c.id)}>{channelBadge[c.channel_kind || ""]?.label} · {c.channel_name}</button>)}</div>}
+    {canWrite && !items.length && <ReachContact dealId={dealId} onOpen={id => { void load(); setActive(id); }}/ >}
     {active ? <ChatThread conversationId={active} projectId={projectId} compact canWrite={canWrite} onChanged={load}/>
       : <p className="crmMuted">Переписки с клиентом пока нет. Сообщения из Авито, Telegram, WhatsApp и MAX появятся здесь автоматически{phone && channels.length ? ", а в WhatsApp и MAX можно написать первым" : ""}.</p>}</div>;
 }

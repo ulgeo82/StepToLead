@@ -256,7 +256,7 @@ async def conversation_detail(conversation_id: int, before_id: int | None = None
 
 class SendIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    text: str = Field(min_length=1, max_length=4096)
+    text: str = Field(min_length=1)
 
 
 @router.post("/conversations/{conversation_id}/messages", status_code=201)

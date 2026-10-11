@@ -167,6 +167,31 @@ class WhatsAppGreen:
     def url(self, method: str, suffix: str = "") -> str:
         return f"{self.api}/waInstance{self.instance}/{method}/{self.token}{suffix}"
 
+    async def lookup(self, *, phone=None, username=None, email=None):
+        digits = norm_phone(phone or "")
+        if len(digits) < 10:
+            return None
+        found = await _json("POST", self.url("checkWhatsapp"), json={"phoneNumber": int(digits)}) or {}
+        if not found.get("existsWhatsapp"):
+            return None
+        chat_id = f"{digits}@c.us"
+        history = await self.history(chat_id, limit=1)
+        return {"external_chat_id": chat_id, "title": f"+{digits}", "has_history": bool(history)}
+
+    async def history(self, external_chat_id, limit=50):
+        rows = await _json("POST", self.url("getChatHistory"),
+                           json={"chatId": external_chat_id, "count": min(limit, 50)}) or []
+        result = []
+        for row in rows if isinstance(rows, list) else []:
+            text = row.get("textMessage") or (row.get("extendedTextMessage") or {}).get("text")
+            text = text or row.get("caption")
+            if not text or not row.get("idMessage"):
+                continue
+            result.append({"external_id": str(row["idMessage"]),
+                           "direction": "out" if row.get("type") == "outgoing" else "in",
+                           "text": str(text), "sent_at": from_unix(row.get("timestamp"))})
+        return list(reversed(result))
+
     async def test(self) -> dict:
         state = await _json("GET", self.url("getStateInstance"))
         status = (state or {}).get("stateInstance")
