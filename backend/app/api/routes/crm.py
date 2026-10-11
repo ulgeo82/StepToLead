@@ -204,8 +204,12 @@ async def duplicate_contacts(db: AsyncSession, project_id: int, phone: str | Non
             (lowered and any(e.lower() == lowered for e in c.emails or []))][:10]
 
 
+# Requests from these sources always carry a way to reply (a chat, a call or an email thread), even without a phone.
+CONTACT_CHANNELS = {"tilda", "phone", "avito", "telegram_bot", "telegram_user", "whatsapp", "max", "email"}
+
+
 def inbound_telegram(payload: dict):
-    if payload.get("external_source") == "telegram_bot":
+    if payload.get("external_source") in {"telegram_bot", "telegram_user"}:
         contact = str(payload.get("contact") or "").strip()
         return contact[:120] if contact.startswith("@") else None
     if payload.get("external_source") != "tilda":
@@ -383,7 +387,7 @@ async def create_deal_fact(db: AsyncSession, project: Project, contact: CrmConta
                            created_at: datetime | None = None):
     if not (contact.phones or contact.emails or contact.telegram or
             (inbound and (inbound.raw_payload.get("contact_consent") or (
-                inbound.raw_payload.get("external_source") in {"tilda", "avito", "telegram_bot", "whatsapp", "max", "phone"} and inbound.raw_payload.get("contact"))))):
+                inbound.raw_payload.get("external_source") in CONTACT_CHANNELS and inbound.raw_payload.get("contact"))))):
         raise HTTPException(422, "Для лида нужен контакт или подтверждённое согласие на связь")
     # A real contact is required before this point. Lead remains the shared analytics fact.
     source = await db.get(ProjectSource, source_id) if source_id else None
