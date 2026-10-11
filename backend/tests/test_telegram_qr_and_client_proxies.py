@@ -140,7 +140,7 @@ class ClientProxyAdminTests(unittest.TestCase):
         self.assertEqual(bad.status_code, 422)
         self.assertIn("не пропускает к Telegram", bad.json()["detail"])
         self.assertEqual(self.client.post("/api/proxies/workspace/1", headers=ORIGIN,
-                                          json={"line": "http://1.2.3.4:8080"}).status_code, 422)
+                                          json={"line": "socks4://1.2.3.4:1080"}).status_code, 422)
         with patch.object(client_proxies, "check", AsyncMock()):
             added = self.client.post("/api/proxies/workspace/1", headers=ORIGIN, json={"line": "1.2.3.4:1080:u:p"})
         self.assertEqual(added.status_code, 201, added.text)
@@ -172,3 +172,17 @@ class ClientProxyAdminTests(unittest.TestCase):
         # Portal users cannot touch agency proxies.
         self.client.cookies.clear(); self.client.cookies.set(test_stage2.PORTAL_COOKIE, "1" * 43)
         self.assertIn(self.client.get("/api/proxies/workspace/1").status_code, {401, 403})
+
+
+class HttpProxyTests(unittest.TestCase):
+    def test_http_proxy_is_accepted_and_checked_as_http(self):
+        seen = {}
+
+        async def fake_check(proxy):
+            seen["scheme"] = proxy.scheme
+        with patch.object(client_proxies, "check", side_effect=fake_check):
+            probe = asyncio.run(client_proxies.checked_from_line("http://user:pass@mobpool.example:10000"))
+        self.assertEqual((probe.scheme, probe.host, probe.port, probe.username, seen["scheme"]),
+                         ("http", "mobpool.example", 10000, "user", "http"))
+        from app.services.telegram import proxy_config
+        self.assertEqual(proxy_config(probe)["proxy_type"], "http")

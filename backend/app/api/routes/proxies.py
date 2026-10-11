@@ -116,8 +116,8 @@ async def remap_profile(channel_id: int, payload: RemapIn, request: Request, db=
         raise HTTPException(404, "Профиль не найден")
     if channel.active:
         raise HTTPException(409, "Сначала выключите канал и дождитесь отключения профиля")
-    if not proxy or proxy.pool != "client" or proxy.scheme != "socks5" or proxy.status != "working":
-        raise HTTPException(422, "Выберите рабочий SOCKS5 из пула клиентов")
+    if not proxy or proxy.pool != "client" or proxy.scheme not in ("socks5", "http") or proxy.status != "working":
+        raise HTTPException(422, "Выберите рабочий прокси из пула клиентов")
     if proxy.dedicated_workspace_id not in (None, channel.workspace_id):
         raise HTTPException(409, "Прокси выделен другой компании")
     if (await usage(db)).get(proxy.id, 0) >= proxy.max_accounts:

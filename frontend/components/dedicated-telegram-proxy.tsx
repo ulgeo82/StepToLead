@@ -71,9 +71,9 @@ export function DedicatedTelegramProxy({ workspaceId }: { workspaceId: number })
         <button className="button primary" disabled={busy}>{busy ? "Проверяем…" : "Проверить и заменить"}</button></form>}
     </div>)}
     <form className="clientProxyForm" onSubmit={add}>
-      <input name="line" required placeholder="host:port:логин:пароль или socks5://логин:пароль@host:port" autoComplete="off"/>
+      <input name="line" required placeholder="host:port:логин:пароль, socks5://логин:пароль@host:port или http://логин:пароль@host:port" autoComplete="off"/>
       <label>Профилей на прокси<input name="max_accounts" type="number" min={1} max={100} defaultValue={3}/></label>
       <button className="button primary" disabled={busy}>{busy ? "Проверяем…" : "Проверить и добавить"}</button></form>
-    <p className="formHint">Нужен SOCKS5-прокси за пределами России. Перед сохранением портал проверяет, что через него открывается Telegram.</p>
+    <p className="formHint">Подходит SOCKS5 или HTTP-прокси (строка без схемы считается SOCKS5). Перед сохранением портал проверяет, что через него открывается Telegram.</p>
   </section>;
 }

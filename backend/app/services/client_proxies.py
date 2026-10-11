@@ -1,4 +1,4 @@
-"""Sticky SOCKS5 allocation for customer profiles; agency accounts remain separate."""
+"""Sticky proxy allocation for customer profiles (SOCKS5 or HTTP CONNECT); agency accounts remain separate."""
 import asyncio
 from datetime import datetime, timedelta, timezone
 
@@ -7,6 +7,10 @@ from sqlalchemy import select
 from app.core.crypto import decrypt_secret
 from app.models.messaging import MessagingChannel
 from app.models.proxy import Proxy
+
+
+# Telethon tunnels MTProto through SOCKS5 or an HTTP proxy with CONNECT (python-socks handles both).
+TELEGRAM_SCHEMES = ("socks5", "http")
 
 
 async def usage(db):
@@ -30,7 +34,7 @@ async def allocate(db, channel):
     counts = await usage(db)
     dedicated = [p for p in proxies if p.dedicated_workspace_id == channel.workspace_id]
     candidates = dedicated or [p for p in proxies if p.dedicated_workspace_id is None]
-    candidates = [p for p in candidates if p.scheme == "socks5" and p.status in {"working", "online", "ok"}
+    candidates = [p for p in candidates if p.scheme in TELEGRAM_SCHEMES and p.status in {"working", "online", "ok"}
                   and counts.get(p.id, 0) < p.max_accounts]
     if not candidates:
         channel.status = "waiting_proxy"
@@ -45,7 +49,8 @@ async def allocate(db, channel):
 async def check(proxy):
     from python_socks import ProxyType
     from python_socks.async_.asyncio import Proxy as SocksProxy
-    transport = SocksProxy(proxy_type=ProxyType.SOCKS5, host=proxy.host, port=proxy.port,
+    kind = ProxyType.HTTP if proxy.scheme == "http" else ProxyType.SOCKS5
+    transport = SocksProxy(proxy_type=kind, host=proxy.host, port=proxy.port,
                            username=proxy.username, password=decrypt_secret(proxy.password_encrypted), rdns=True)
     socket = await transport.connect(dest_host="149.154.167.50", dest_port=443, timeout=10)
     socket.close()
@@ -82,16 +87,16 @@ class ProxyInputError(ValueError):
 
 
 async def checked_from_line(line: str):
-    """Parse «host:port:login:password» (or socks5://…), require SOCKS5 and check it reaches Telegram right now."""
+    """Parse «host:port:login:password», socks5://… or http://…, and check it reaches Telegram right now."""
     from app.services.proxy_parser import parse_proxy_line
     try:
         item = parse_proxy_line(line)
     except ValueError as error:
         raise ProxyInputError(f"Не удалось разобрать прокси: {error}") from None
-    if item.scheme != "socks5":
-        raise ProxyInputError("Для Telegram-профилей нужен SOCKS5-прокси")
+    if item.scheme not in TELEGRAM_SCHEMES:
+        raise ProxyInputError("Для Telegram-профилей подходит SOCKS5 или HTTP-прокси")
     from app.core.crypto import encrypt_secret
-    probe = Proxy(scheme="socks5", host=item.host, port=item.port, username=item.username,
+    probe = Proxy(scheme=item.scheme, host=item.host, port=item.port, username=item.username,
                   password_encrypted=encrypt_secret(item.password) if item.password else None)
     try:
         await asyncio.wait_for(check(probe), 12)
@@ -106,7 +111,7 @@ async def add_for_workspace(db, workspace_id: int, line: str, max_accounts: int 
                                                     Proxy.username == probe.username))
     if duplicate:
         raise ProxyInputError("Этот прокси уже есть в портале")
-    proxy = Proxy(scheme="socks5", host=probe.host, port=probe.port, username=probe.username,
+    proxy = Proxy(scheme=probe.scheme, host=probe.host, port=probe.port, username=probe.username,
                   password_encrypted=probe.password_encrypted, pool="client", max_accounts=max_accounts,
                   dedicated_workspace_id=workspace_id, status="working",
                   last_checked_at=datetime.now(timezone.utc))
@@ -122,7 +127,7 @@ async def replace(db, proxy: Proxy, line: str) -> int:
                                                     Proxy.port == probe.port, Proxy.username == probe.username))
     if duplicate:
         raise ProxyInputError("Этот прокси уже есть в портале")
-    proxy.host, proxy.port, proxy.username = probe.host, probe.port, probe.username
+    proxy.scheme, proxy.host, proxy.port, proxy.username = probe.scheme, probe.host, probe.port, probe.username
     proxy.password_encrypted = probe.password_encrypted
     proxy.status, proxy.last_error, proxy.last_checked_at = "working", None, datetime.now(timezone.utc)
     moved = 0
@@ -138,4 +143,4 @@ def signature(proxy: Proxy | None):
     """What a live connection depends on; the profile manager reconnects when it changes."""
     if proxy is None:
         return None
-    return (proxy.id, proxy.host, proxy.port, proxy.username, proxy.password_encrypted)
+    return (proxy.id, proxy.scheme, proxy.host, proxy.port, proxy.username, proxy.password_encrypted)
