@@ -47,3 +47,4 @@
 .analyticsVkDeepLink { display: inline-flex; margin-top: 8px; padding: 10px 14px; border-radius: 9px; background: #006bfd; color: #fff; font-size: 12px; font-weight: 700; text-decoration: none; }
 
 .analyticsGroupRow td:first-child strong{display:inline-flex;align-items:center;gap:6px}.analyticsGroupRow td:first-child small{display:block;margin-top:2px;color:#91a1b5;font-weight:500}.analyticsGroupArrow{display:inline-block;width:10px;color:#006bfd}.analyticsGroupChild td{background:#fafcff;color:#4b5b70}.analyticsGroupChild td:first-child{padding-left:22px}
+.analyticsDepth1 td:first-child{padding-left:22px!important}.analyticsDepth2 td:first-child{padding-left:40px!important}.analyticsDepth1:not(.analyticsGroupRow) td,.analyticsDepth2 td{background:#fafcff}.analyticsGroupRow.analyticsDepth0 td{font-weight:600}.analyticsGroupRow.analyticsDepth1 td{background:#f7faff}

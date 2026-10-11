@@ -74,6 +74,46 @@ function conversionRows(list: Source[]): ConversionRow[] {
 
 const channelsWord = (n: number) => n % 10 === 1 && n % 100 !== 11 ? "канал" : [2, 3, 4].includes(n % 10) && ![12, 13, 14].includes(n % 100) ? "канала" : "каналов";
 
+const PLATFORM_NAMES: Record<string, string> = { yandex: "Яндекс Директ", yandex_direct: "Яндекс Директ", vk_ads: "VK Реклама",
+  avito_ads: "Авито Реклама", avito_items: "Авито · Объявления", yandex_maps: "Яндекс Карты", "2gis": "2ГИС", meta: "Meta Ads" };
+type CampaignNode = { key: string; name: string; note?: string; rows: Campaign[]; children: CampaignNode[]; depth: number };
+type CampaignSum = Pick<Campaign, "spend" | "clicks" | "cpc" | "leads" | "qualified" | "sales" | "revenue" | "cpl" | "cpql" | "cac" | "romi" | "target" | "non_target" | "target_share">;
+
+function sumCampaigns(rows: Campaign[], margin: number | null): CampaignSum {
+  const total = (f: (r: Campaign) => number | null | undefined) => { const v = rows.map(f).filter((x): x is number => x != null); return v.length ? v.reduce((a, b) => a + Number(b), 0) : null; };
+  const spend = total(r => r.spend), clicks = total(r => r.clicks), leads = total(r => r.leads), qualified = total(r => r.qualified);
+  const sales = total(r => r.sales), revenue = total(r => r.revenue), target = total(r => r.target) || 0, non_target = total(r => r.non_target) || 0;
+  const div = (a: number | null, b: number | null) => a != null && b ? a / b : null;
+  const profit = revenue != null && margin != null ? revenue * margin / 100 : null;
+  return { spend, clicks, leads, qualified, sales, revenue, target, non_target, cpc: div(spend, clicks), cpl: div(spend, leads),
+    cpql: div(spend, qualified), cac: div(spend, sales), romi: profit != null && spend ? (profit - spend) / spend * 100 : null,
+    target_share: target + non_target ? target / (target + non_target) * 100 : null };
+}
+
+/** Канал → гипотеза (или профиль/аккаунт) → кампании. Уровень пропускается, если в нём нечего различать. */
+function campaignTree(rows: Campaign[]): CampaignNode[] {
+  const top = new Map<string, { name: string; rows: Campaign[] }>();
+  for (const row of rows) {
+    const name = row.kind === "channel" ? (row.platform.split(": ")[0] || row.platform) : PLATFORM_NAMES[row.platform] || row.platform;
+    const key = `${row.kind || "ad"}:${name}`;
+    top.set(key, { name, rows: [...(top.get(key)?.rows || []), row] });
+  }
+  return [...top.entries()].map(([key, group]) => {
+    const second = new Map<string, Campaign[]>();
+    const isAd = group.rows[0].kind !== "channel";
+    for (const row of group.rows) {
+      const name = isAd ? row.hypothesis_name || "Без гипотезы" : row.platform.slice(group.name.length).replace(/^:\s*/, "") || row.platform;
+      second.set(name, [...(second.get(name) || []), row]);
+    }
+    const useSecond = second.size > 1 || (isAd && group.rows.some(row => row.hypothesis_id != null));
+    const children = useSecond ? [...second.entries()].map(([name, list]) => ({ key: `${key}/${name}`, name, rows: list, children: [], depth: 1,
+      note: isAd ? (name === "Без гипотезы" ? "кампании без гипотезы" : "гипотеза") : undefined })) : [];
+    return { key, name: group.name, rows: group.rows, children, depth: 0, note: isAd ? "реклама" : undefined };
+  }).sort((a, b) => (sumCampaigns(b.rows, null).spend || 0) - (sumCampaigns(a.rows, null).spend || 0) || (sumCampaigns(b.rows, null).leads || 0) - (sumCampaigns(a.rows, null).leads || 0));
+}
+
+const campaignWord = (n: number) => n % 10 === 1 && n % 100 !== 11 ? "кампания" : [2, 3, 4].includes(n % 10) && ![12, 13, 14].includes(n % 100) ? "кампании" : "кампаний";
+
 type Tab = "overview" | "marketing" | "sales" | "accounts" | "hypotheses" | "campaigns" | "website";
 const TABS: { key: Tab; label: string }[] = [
   { key: "overview", label: "Общий обзор" }, { key: "marketing", label: "Маркетинг" },
@@ -112,6 +152,7 @@ function KpiCard({ label, icon, value, prior, note, inverse = false, display = c
 export default function AnalyticsPage() {
   const today = useMemo(() => new Date(), []);
   const [openGroups, setOpenGroups] = useState<string[]>([]);
+  const [openCampaignNodes, setOpenCampaignNodes] = useState<string[]>([]);
   const toggleGroup = (key: string) => setOpenGroups(list => list.includes(key) ? list.filter(k => k !== key) : [...list, key]);
   const [start, setStart] = useState(dateInput(new Date(today.getFullYear(), today.getMonth(), today.getDate() - 29)));
   const [end, setEnd] = useState(dateInput(today));
@@ -185,13 +226,32 @@ export default function AnalyticsPage() {
   }, { pieces: [], cursor: 0 }).pieces.join(", ") : "";
   const selectedProject = projects.find(project => project.id === projectId);
 
+  const expandAllCampaigns = Boolean(search.trim() || filterAccount || filterHypothesis);
+  const toggleCampaignNode = (key: string) => setOpenCampaignNodes(list => list.includes(key) ? list.filter(k => k !== key) : [...list, key]);
+  const campaignCells = (v: CampaignSum, ad: boolean) => <><td>{ad ? money(v.spend) : "—"}</td><td>{ad ? count(v.clicks) : "—"}</td><td>{ad ? money(v.cpc) : "—"}</td><td>{count(v.leads)}</td><td title="Отметки отдела продаж: целевые / всего отмеченных">{quality(v)}</td><td>{count(v.qualified)}</td><td>{count(v.sales)}</td><td>{money(v.revenue)}</td><td>{ad ? money(v.cpl) : "—"}</td><td>{ad ? money(v.cpql) : "—"}</td><td>{ad ? money(v.cac) : "—"}</td><td>{ad ? percent(v.romi) : "—"}</td></>;
+  const campaignRow = (row: Campaign, depth: number) => row.kind === "channel"
+    ? <tr key={row.id} className={`analyticsChannelCampaign analyticsDepth${depth}`}><td><strong>{row.name}</strong><small>{row.external_campaign_id ? "utm_campaign" : "Заявки без рекламной метки"}</small></td><td>{row.platform}</td><td>—</td>{campaignCells(row, false)}<td>—</td></tr>
+    : <tr key={row.id} className={`analyticsClickableRow analyticsDepth${depth}`} onClick={() => setSelectedCampaign(row)} tabIndex={0} onKeyDown={event => { if (event.key === "Enter") setSelectedCampaign(row); }}><td><strong>{row.name}</strong><small>ID {row.external_campaign_id} · {row.connection_name}</small></td><td>{PLATFORM_NAMES[row.platform] || row.platform}</td><td>{row.hypothesis_name || "—"}</td>{campaignCells(row, true)}<td>{row.status || "—"}</td></tr>;
+  function campaignNodeRows(node: CampaignNode): React.ReactNode[] {
+    if (node.depth === 0 && node.rows.length === 1 && !node.children.length) return [campaignRow(node.rows[0], 0)];
+    const open = expandAllCampaigns || openCampaignNodes.includes(node.key);
+    const ad = node.rows[0].kind !== "channel";
+    const head = <tr key={node.key} className={`analyticsClickableRow analyticsGroupRow analyticsDepth${node.depth}`} tabIndex={0} aria-expanded={open}
+      onClick={() => toggleCampaignNode(node.key)} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); toggleCampaignNode(node.key); } }}>
+      <td><strong><span className="analyticsGroupArrow">{open ? "▾" : "▸"}</span>{node.name}</strong><small>{node.rows.length} {campaignWord(node.rows.length)}{node.note ? ` · ${node.note}` : ""}</small></td>
+      <td>{node.depth === 0 ? "Итого по каналу" : ""}</td><td>{node.depth === 1 && ad && node.name !== "Без гипотезы" ? node.name : "—"}</td>
+      {campaignCells(sumCampaigns(node.rows, data?.economics.margin ?? null), ad)}<td>—</td></tr>;
+    if (!open) return [head];
+    return [head, ...(node.children.length ? node.children.flatMap(child => campaignNodeRows(child)) : node.rows.map(row => campaignRow(row, node.depth + 1)))];
+  }
+
   function CampaignTable() {
     return <section className="resultPanel analyticsCampaigns" id="campaigns"><div className="resultPanelHead"><h2>Результат по кампаниям</h2><span className="analyticsQuiet">Рекламные кампании из кабинетов и заявки с сайта, мессенджеров и других каналов (по utm_campaign)</span></div>
       <div className="analyticsCampaignFilters"><select aria-label="Канал" value={filterPlatform} onChange={event => setFilterPlatform(event.target.value)}><option value="">Все каналы</option>{[...new Set([...(data?.analysis.connections || []).map(row => row.platform), ...(data?.analysis.campaigns || []).filter(row => row.kind === "channel").map(row => row.platform)])].map(value => <option key={value} value={value}>{value}</option>)}</select>
         <select aria-label="Рекламный кабинет" value={filterAccount} onChange={event => setFilterAccount(event.target.value)}><option value="">Все кабинеты</option>{data?.analysis.connections.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select>
         <select aria-label="Гипотеза" value={filterHypothesis} onChange={event => setFilterHypothesis(event.target.value)}><option value="">Все гипотезы</option><option value="none">Без гипотезы</option>{data?.analysis.hypotheses.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select>
         <input aria-label="Поиск кампании" value={search} onChange={event => setSearch(event.target.value)} placeholder="Поиск по кампании…" /></div>
-      <div className="resultTableScroll"><table><thead><tr>{["Кампания", "Канал", "Гипотеза", "Расходы", "Клики", "CPC", "Лиды", "Целевые", "Квал.", "Продажи", "Выручка", "CPL", "CPQL", "CAC", "ROMI", "Статус"].map(label => <th key={label}>{label}</th>)}</tr></thead><tbody>{filteredCampaigns.map(row => row.kind === "channel" ? <tr key={row.id} className="analyticsChannelCampaign"><td><strong>{row.name}</strong><small>{row.external_campaign_id ? "utm_campaign" : "Заявки без рекламной метки"}</small></td><td>{row.platform}</td><td>—</td><td>—</td><td>—</td><td>—</td><td>{count(row.leads)}</td><td title="Отметки отдела продаж: целевые / всего отмеченных">{quality(row)}</td><td>{count(row.qualified)}</td><td>{count(row.sales)}</td><td>{money(row.revenue)}</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td></tr> : <tr key={row.id} className="analyticsClickableRow" onClick={() => setSelectedCampaign(row)} tabIndex={0} onKeyDown={event => { if (event.key === "Enter") setSelectedCampaign(row); }}><td><strong>{row.name}</strong><small>ID {row.external_campaign_id} · {row.connection_name}</small></td><td>{row.platform}</td><td>{row.hypothesis_name || "—"}</td><td>{money(row.spend)}</td><td>{count(row.clicks)}</td><td>{money(row.cpc)}</td><td>{count(row.leads)}</td><td title="Отметки отдела продаж: целевые / всего отмеченных">{quality(row)}</td><td>{count(row.qualified)}</td><td>{count(row.sales)}</td><td>{money(row.revenue)}</td><td>{money(row.cpl)}</td><td>{money(row.cpql)}</td><td>{money(row.cac)}</td><td>{percent(row.romi)}</td><td>{row.status || "—"}</td></tr>)}</tbody></table>{!filteredCampaigns.length && <p className="resultTableEmpty">За этот период нет заявок и кампаний с данными.</p>}</div>
+      <div className="resultTableScroll"><table><thead><tr>{["Кампания", "Канал", "Гипотеза", "Расходы", "Клики", "CPC", "Лиды", "Целевые", "Квал.", "Продажи", "Выручка", "CPL", "CPQL", "CAC", "ROMI", "Статус"].map(label => <th key={label}>{label}</th>)}</tr></thead><tbody>{campaignTree(filteredCampaigns).flatMap(node => campaignNodeRows(node))}</tbody></table>{!filteredCampaigns.length && <p className="resultTableEmpty">За этот период нет заявок и кампаний с данными.</p>}</div>
     </section>;
   }
 
