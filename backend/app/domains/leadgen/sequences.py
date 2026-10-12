@@ -160,16 +160,34 @@ class SmtpImapTransport:
         return await asyncio.to_thread(go)
 
     async def check(self, mailbox, password):
+        def reachable(host, port, what):
+            import socket
+            try:
+                socket.create_connection((host, port), timeout=8).close()
+            except OSError:
+                raise ConnectionError(
+                    f"{what} {host}:{port} недоступен с сервера портала. Если это SMTP — хостинг закрыл исходящие "
+                    f"почтовые порты: попросите поддержку Timeweb открыть 465 и 587") from None
+
         def go():
+            reachable(mailbox.smtp_host, mailbox.smtp_port, "SMTP")
+            reachable(mailbox.imap_host, mailbox.imap_port, "IMAP")
             ctx = ssl.create_default_context()
             server = (smtplib.SMTP_SSL(mailbox.smtp_host, mailbox.smtp_port, timeout=self.timeout, context=ctx)
                       if mailbox.smtp_port == 465 else smtplib.SMTP(mailbox.smtp_host, mailbox.smtp_port, timeout=self.timeout))
             if mailbox.smtp_port != 465:
                 server.starttls(context=ctx)
-            server.login(mailbox.login, password)
+            try:
+                server.login(mailbox.login, password)
+            except smtplib.SMTPAuthenticationError:
+                raise PermissionError("Почта не приняла логин или пароль. Для Gmail и Яндекса нужен пароль приложения, "
+                                      "а логин — полный адрес почты") from None
             server.quit()
             box = imaplib.IMAP4_SSL(mailbox.imap_host, mailbox.imap_port, timeout=self.timeout)
-            box.login(mailbox.login, password)
+            try:
+                box.login(mailbox.login, password)
+            except imaplib.IMAP4.error:
+                raise PermissionError("IMAP не принял логин или пароль (проверьте, что IMAP включён в настройках почты)") from None
             box.logout()
         await asyncio.to_thread(go)
 

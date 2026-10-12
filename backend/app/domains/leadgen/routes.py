@@ -741,7 +741,7 @@ async def check_mailbox(mailbox_id: int, db: AsyncSession = Depends(get_db), adm
     try:
         await mail_transport_factory().check(mb, decrypt_secret(mb.password_encrypted))
     except Exception as exc:  # noqa: BLE001 — показываем причину как есть
-        mb.last_error = f"{type(exc).__name__}: {exc}"[:500]
+        mb.last_error = (str(exc) if isinstance(exc, (ConnectionError, PermissionError)) else f"{type(exc).__name__}: {exc}")[:500]
         await db.commit()
         return {"ok": False, "error": mb.last_error}
     mb.last_error = None

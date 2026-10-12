@@ -42,9 +42,16 @@ async def create(project_id: int, payload: EmailIn, request: Request,
     if not valid_email(payload.email) or "\n" in payload.login or "\r" in payload.login:
         raise HTTPException(422, "Укажите корректный email и логин")
     config = payload.model_dump(exclude={"name", "password"})
-    config["email"] = payload.email.lower()
+    config["email"] = payload.email.strip().lower()
+    # Пустой логин = адрес почты; для Gmail/Яндекса логин без @домена не принимается — дописываем домен.
+    login = payload.login.strip() or config["email"]
+    if "@" not in login and config["email"].split("@")[0].lower() == login.lower():
+        login = config["email"]
+    config["login"] = login
+    # Google показывает пароль приложения группами через пробел — пробелы не часть пароля.
+    password = payload.password.replace(" ", "").strip() if payload.imap_host.endswith("gmail.com") else payload.password.strip()
     channel = MessagingChannel(workspace_id=project.workspace_id, project_id=project.id,
-        kind="email", name=payload.name, secret_encrypted=encrypt_secret(payload.password), config=config)
+        kind="email", name=payload.name, secret_encrypted=encrypt_secret(password), config=config)
     db.add(channel)
     try:
         details = await EmailChannel(channel).test()

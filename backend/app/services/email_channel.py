@@ -192,8 +192,11 @@ class EmailChannel:
         try:
             cursor = await self.transport.check(self.mailbox, self.password)
             return {"name": self.mailbox.email, "imap_uid": cursor or 0}
-        except Exception:
-            raise ChannelError("Не удалось войти в IMAP/SMTP. Проверьте серверы и пароль приложения.") from None
+        except (ConnectionError, PermissionError) as exc:
+            raise ChannelError(str(exc)) from None
+        except Exception as exc:
+            raise ChannelError(f"Не удалось войти в IMAP/SMTP ({type(exc).__name__}: {str(exc)[:160]}). "
+                               "Проверьте серверы и пароль приложения.") from None
 
     async def poll(self):
         from app.services.messaging import ChannelError, Incoming
