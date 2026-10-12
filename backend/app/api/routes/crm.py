@@ -349,6 +349,7 @@ class TaskUpdate(BaseModel):
 
 class InboundAction(BaseModel):
     contact_id: int | None = None
+    pipeline_id: int | None = None
     deal_name: str | None = None
     responsible_user_id: int | None = None
     rejection_reason: str | None = None
@@ -811,6 +812,33 @@ async def update_deal_core(deal_id: int, payload: DealUpdate, db: AsyncSession, 
     return {"ok": True}
 
 
+class PipelineMove(BaseModel):
+    pipeline_id: int
+
+
+@router.post("/deals/{deal_id}/pipeline")
+async def change_pipeline(deal_id: int, payload: PipelineMove, request: Request, db: AsyncSession = Depends(get_db),
+                          user: PortalUser = Depends(require_portal_user)):
+    """Перенести сделку в другое направление: этап — первый того же аналитического типа (лид → лид, целевой → целевой)."""
+    check_origin(request); require_permission(user, "move_deal")
+    deal = await deal_for(db, user, deal_id)
+    if deal.pipeline_id == payload.pipeline_id:
+        return {"ok": True}
+    target = await pipeline_for(db, deal.project_id, payload.pipeline_id)
+    old_stage = await db.get(CrmStage, deal.stage_id)
+    stage = await db.scalar(select(CrmStage).where(CrmStage.pipeline_id == target.id, CrmStage.archived_at.is_(None),
+                                                   CrmStage.analytics_type == old_stage.analytics_type)
+                            .order_by(CrmStage.position, CrmStage.id).limit(1))
+    if not stage:
+        raise HTTPException(409, "В выбранной воронке нет подходящего этапа")
+    old_pipeline = await db.get(CrmPipeline, deal.pipeline_id)
+    db.add(CrmStageHistory(deal_id=deal.id, from_stage_id=old_stage.id, to_stage_id=stage.id, actor_id=user.id))
+    deal.pipeline_id, deal.stage_id, deal.stage_entered_at = target.id, stage.id, now()
+    activity(db, deal, user, "PIPELINE_CHANGED", {"text": f"Перенесена из «{old_pipeline.name if old_pipeline else '—'}» в «{target.name}» · этап «{stage.name}»"})
+    await db.commit()
+    return {"ok": True, "pipeline_id": target.id, "stage_id": stage.id}
+
+
 @router.post("/deals/{deal_id}/move")
 async def move_deal(deal_id: int, payload: StageMove, request: Request, db: AsyncSession = Depends(get_db),
                     user: PortalUser = Depends(require_portal_user)):
@@ -1031,9 +1059,23 @@ async def round_robin_owner(db: AsyncSession, project: Project, inbound: CrmInbo
     return owner_id
 
 
+async def pipeline_for_inbound(db: AsyncSession, project: Project, inbound: CrmInbound, pipeline_id: int | None = None) -> CrmPipeline:
+    """Воронка для заявки: выбранная менеджером → закреплённая за источником (направление) → основная."""
+    if pipeline_id:
+        return await pipeline_for(db, project.id, pipeline_id, commit=False)
+    source = await db.get(ProjectSource, inbound.source_id) if inbound.source_id else None
+    routed = (source.source_metadata or {}).get("pipeline_id") if source and source.project_id == project.id else None
+    if routed:
+        row = await db.get(CrmPipeline, int(routed))
+        if row and row.project_id == project.id and row.archived_at is None:
+            return row
+    return await pipeline_for(db, project.id, commit=False)
+
+
 async def accept_core(db: AsyncSession, inbound: CrmInbound, project: Project, actor: PortalUser | None, *,
                       contact_id: int | None = None, responsible_user_id: int | None = None,
-                      deal_name: str | None = None, merge_existing: bool = False) -> CrmDeal:
+                      deal_name: str | None = None, merge_existing: bool = False,
+                      pipeline_id: int | None = None) -> CrmDeal:
     """Turn a request into a deal (manual accept or a trusted source). Does not commit.
 
     merge_existing (automatic path): a known phone reuses its contact, and a repeat request from a client
@@ -1060,7 +1102,7 @@ async def accept_core(db: AsyncSession, inbound: CrmInbound, project: Project, a
             activity(db, deal, None, "INBOUND_REPEAT", {"inbound_id": inbound.id, "text": "Повторное обращение клиента",
                                                         "source": (inbound.raw_payload or {}).get("source")}, inbound, touch=False)
     if deal is None:
-        pipeline = await pipeline_for(db, project.id, commit=False)
+        pipeline = await pipeline_for_inbound(db, project, inbound, pipeline_id)
         stage = await db.scalar(select(CrmStage).where(CrmStage.pipeline_id == pipeline.id,
                         CrmStage.analytics_type == "LEAD", CrmStage.archived_at.is_(None))
                         .order_by(CrmStage.position).limit(1))
@@ -1096,7 +1138,8 @@ async def accept_inbound_core(inbound_id: int, payload: InboundAction, db: Async
         raise HTTPException(409, "Заявка уже обработана")
     await validate_owner(db, project.id, project.workspace_id, payload.responsible_user_id)
     deal = await accept_core(db, inbound, project, user, contact_id=payload.contact_id,
-                             responsible_user_id=payload.responsible_user_id, deal_name=payload.deal_name)
+                             responsible_user_id=payload.responsible_user_id, deal_name=payload.deal_name,
+                             pipeline_id=payload.pipeline_id)
     if commit:
         await db.commit()
         flush_telegram(db)

@@ -23,6 +23,13 @@ DEFAULT_REASONS = ["Не отвечает", "Не подходит", "Не по�
 # Event catalogue lives with the delivery logic.
 
 
+async def _pipelines(db, project_id):
+    from app.models.crm import CrmPipeline
+    rows = (await db.scalars(select(CrmPipeline).where(CrmPipeline.project_id == project_id, CrmPipeline.archived_at.is_(None))
+                             .order_by(CrmPipeline.is_default.desc(), CrmPipeline.id))).all()
+    return [{"id": r.id, "name": r.name, "is_default": r.is_default} for r in rows]
+
+
 async def _company_bot_ready(db, workspace_id):
     from app.services import client_bots
     row = await client_bots.bot_for(db, workspace_id)
@@ -61,7 +68,8 @@ def reason_payload(row):
 def source_payload(row):
     return {"id": f"source:{row.id}", "name": row.name, "category": row.category,
             "kind": row.kind, "method": row.method, "data_mode": row.data_mode or row.method,
-            "status": row.status, "created_at": row.created_at, "connection_id": row.connection_id}
+            "status": row.status, "created_at": row.created_at, "connection_id": row.connection_id,
+            "pipeline_id": (row.source_metadata or {}).get("pipeline_id")}
 
 
 async def source_permission(db, project, actor):
@@ -205,6 +213,7 @@ async def get_settings(project_id: int, db: AsyncSession = Depends(get_db),
                            "allowable_cac": float(economy.allowable_cac) if economy.allowable_cac is not None else None}
                           if calculation else None),
             "reasons": [reason_payload(row) for row in reason_rows], "sources": source_list,
+            "pipelines": await _pipelines(db, project.id),
             "notifications": notifications, "members": members,
             "telegram_bot_configured": telegram_configured() or bool(await _company_bot_ready(db, project.workspace_id)),
             "permissions": sorted(effective_permissions(actor))}
@@ -358,6 +367,30 @@ async def patch_source(project_id: int, source_id: int, payload: SourcePatch, re
     if payload.name is not None and len(payload.name.strip()) < 2:
         raise HTTPException(422, "Укажите название источника")
     for key, value in payload.model_dump(exclude_unset=True).items(): setattr(row, key, value)
+    await db.commit()
+    return source_payload(row)
+
+
+class SourcePipeline(BaseModel):
+    pipeline_id: int | None = None
+
+
+@router.put("/sources/{source_id}/pipeline")
+async def route_source(project_id: int, source_id: int, payload: SourcePipeline, request: Request,
+                       db: AsyncSession = Depends(get_db), actor: PortalUser = Depends(require_portal_user)):
+    """В какую воронку (направление) попадают заявки из источника. None — в основную."""
+    from app.models.crm import CrmPipeline
+    check_origin(request)
+    project = await scoped(db, actor, project_id)
+    await source_permission(db, project, actor)
+    row = await db.get(ProjectSource, source_id)
+    if not row or row.project_id != project.id: raise HTTPException(404, "Источник не найден")
+    if payload.pipeline_id is not None:
+        pipeline = await db.get(CrmPipeline, payload.pipeline_id)
+        if not pipeline or pipeline.project_id != project.id or pipeline.archived_at:
+            raise HTTPException(422, "Воронка не найдена")
+    meta = {k: v for k, v in (row.source_metadata or {}).items() if k != "pipeline_id"}
+    row.source_metadata = {**meta, "pipeline_id": payload.pipeline_id} if payload.pipeline_id else meta
     await db.commit()
     return source_payload(row)
 

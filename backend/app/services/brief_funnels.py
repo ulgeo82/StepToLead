@@ -20,7 +20,7 @@ from app.models.marketing import Project
 
 KEY = "sales.funnels"
 STATE_KEY = "brief_pipelines"
-MAX_DIRECTIONS, MAX_STAGES, MAX_NAME = 6, 12, 60
+MAX_DIRECTIONS, MAX_STAGES, MAX_NAME = 30, 15, 60
 LEAD_NAME, WON_NAME, LOST_NAME = "Заявка", "Продажа", "Отказ"
 COLORS = {"LEAD": "#006BFD", "QUALIFIED": "#8555E8", "WON": "#15A86B", "LOST": "#EF4A59"}
 

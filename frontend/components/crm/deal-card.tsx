@@ -112,7 +112,10 @@ export function DealCard({ dealId, projectId, pipelines, team, sources, fields, 
         <div className="crmCardMeta"><strong>{money(deal.amount)}</strong><span className={`crmTaskBadge ${deal.task_state.toLowerCase()}`}>{stateLabels[deal.task_state]}</span>
           <span>на этапе {days(deal.days_in_stage)}</span>{(deal.idle_days ?? 0) >= 3 && !closed && <span className="crmIdle">без движения {days(deal.idle_days)}</span>}
           {responseMinutes != null && <span title="Время от появления сделки до первого действия менеджера">реакция {responseMinutes < 60 ? `${responseMinutes} мин` : `${Math.round(responseMinutes / 60)} ч`}</span>}
-          {deal.archived_at && <span className="crmArchived">в архиве</span>}</div></div>
+          {deal.archived_at && <span className="crmArchived">в архиве</span>}
+          {pipelines.length > 1 && <select className="crmDealPipeline" aria-label="Воронка сделки" title="Перенести в другое направление" disabled={!can("move_deal") || busy || !!deal.archived_at} value={deal.pipeline_id}
+            onChange={e => void run(() => request(`/crm/deals/${dealId}/pipeline`, "POST", { pipeline_id: Number(e.target.value) }), "Сделка перенесена в другую воронку")}>
+            {pipelines.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>}</div></div>
       <button className="crmClose" onClick={onClose} aria-label="Закрыть">×</button></header>
 
     <nav className="crmRibbon" aria-label="Этапы">{stages.map((stage, index) => <button key={stage.id} disabled={!can("move_deal") || busy || !!deal.archived_at}

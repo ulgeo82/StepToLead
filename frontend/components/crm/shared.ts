@@ -78,6 +78,7 @@ export function describeActivity(a: Activity): { icon: string; text: string; ton
     case "DEAL_CREATED": return { icon: "＋", text: "Сделка создана" };
     case "INBOUND_CREATED": return { icon: "↘", text: `Заявка получена${s("source") ? ` · ${s("source")}` : ""}` };
     case "INBOUND_ACCEPTED": return { icon: "✓", text: "Заявка принята в работу" };
+    case "PIPELINE_CHANGED": return { icon: "⇄", text: s("text") || "Сделка перенесена в другую воронку", tone: "stage" };
     case "STAGE_CHANGED": return { icon: "→", text: `Этап: ${s("from")} → ${s("to")}`, tone: "stage" };
     case "OWNER_CHANGED": return { icon: "👤", text: "Сменён ответственный" };
     case "ATTRIBUTION_CHANGED": return { icon: "⌖", text: "Скорректирован источник" };

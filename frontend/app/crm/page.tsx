@@ -33,6 +33,7 @@ export default function CrmPage() {
   const [board, setBoard] = useState<Board | null>(null);
   const [pipelines, setPipelines] = useState<Pipeline[]>([]);
   const [pipelineId, setPipelineId] = useState<number | null>(null);
+  const [acceptPipeline, setAcceptPipeline] = useState<Record<number, string>>({});
   const [newDealPipelineId, setNewDealPipelineId] = useState<number | null>(null);
   const [page, setPage] = useState(1);
   const [filterState, setFilterState] = useState("");
@@ -343,7 +344,7 @@ export default function CrmPage() {
             {Boolean(p.brief_answers) && typeof p.brief_answers === "object" && <details><summary>📎 Оценка / бриф — все ответы</summary>{Object.entries(p.brief_answers as Record<string,unknown>).map(([key,value])=><p key={key}><strong>{(p.brief_labels as Record<string,string>|undefined)?.[key]||key}</strong><br/>{String(value)}</p>)}{p.express_calculation&&typeof p.express_calculation==="object"?<p>Предел цены заявки: {String((p.express_calculation as Record<string,unknown>).limit_cpl??"не рассчитан")} · Сейчас: {String((p.express_calculation as Record<string,unknown>).current_cpl??"не указано")}</p>:null}</details>}
             {p.brief_demo_access&&typeof p.brief_demo_access==="object"?<div><strong>Доступ к демо</strong><p>Логин: {String((p.brief_demo_access as Record<string,string>).username)}</p><a href={String((p.brief_demo_access as Record<string,string>).login_url)}>Войти в демо</a> · <a href={String((p.brief_demo_access as Record<string,string>).reset_url)}>Сбросить пароль</a><small>Сброс через подключённый Telegram. Если бот ещё не подключён, доступ перевыпускает администратор в карточке клиента.</small></div>:null}
             {item.potential_duplicates.length > 0 && <em>Возможный дубль: {item.potential_duplicates.map(c => c.name).join(", ")}</em>}</div>
-            {inboundStatus === "NEW" ? <div className="crmInboundActions"><button className="crmPrimary" disabled={busy} onClick={() => mutate<{ deal_id: number }>(`/crm/inbound/${item.id}/accept`, "POST", {}).then(r => r && setDealId(r.deal_id))}>Принять в работу</button>
+            {inboundStatus === "NEW" ? <div className="crmInboundActions">{pipelines.length > 1 && <select aria-label="Воронка" className="crmInboundPipeline" value={acceptPipeline[item.id] || ""} onChange={e => setAcceptPipeline(m => ({ ...m, [item.id]: e.target.value }))}><option value="">Воронка по источнику</option>{pipelines.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>}<button className="crmPrimary" disabled={busy} onClick={() => mutate<{ deal_id: number }>(`/crm/inbound/${item.id}/accept`, "POST", acceptPipeline[item.id] ? { pipeline_id: Number(acceptPipeline[item.id]) } : {}).then(r => r && setDealId(r.deal_id))}>Принять в работу</button>
               {item.potential_duplicates.map(c => <button key={c.id} disabled={busy} onClick={() => mutate<{ deal_id: number }>(`/crm/inbound/${item.id}/accept`, "POST", { contact_id: c.id }).then(r => r && setDealId(r.deal_id))}>Связать с «{c.name}»</button>)}
               <button onClick={() => setLinking(item)}>Другой клиент…</button><button className="crmDanger" onClick={() => setRejecting(item)}>Отклонить</button></div>
               : <span className="crmMuted">{inboundStatus === "ACCEPTED" ? "Принято" : "Отклонено"}</span>}</article>; })}

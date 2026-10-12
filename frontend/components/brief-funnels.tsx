@@ -52,7 +52,7 @@ export function FunnelsEditor({ value, onChange, disabled, hintText, projectId, 
   }
   async function apply() {
     setBusy(true); setError("");
-    try { await api(`/brief/projects/${projectId}/${briefId}/funnels`, { method: "POST" }); setPlan(null); setDone("Воронки созданы в CRM. Откройте CRM — этапы уже на месте."); }
+    try { await api(`/brief/projects/${projectId}/${briefId}/funnels`, { method: "POST" }); setPlan(null); setDone(directions.length > 1 ? "Воронки созданы в CRM. Теперь в «Настройки → Источники» выберите, в какую воронку идут заявки каждого источника — иначе всё попадёт в основную." : "Воронка обновлена в CRM — этапы уже на месте."); }
     catch (e) { setError(e instanceof Error ? e.message : "Не удалось создать воронки"); } finally { setBusy(false); }
   }
   const lock = disabled || busy;

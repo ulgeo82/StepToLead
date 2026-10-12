@@ -80,5 +80,40 @@ class BriefFunnelTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Кухни на заказ", brief.markdown({"sales.funnels": raw(KITCHENS)}))
 
 
+
+class PipelineRoutingTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+        self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
+        async with self.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+    async def asyncTearDown(self):
+        await self.engine.dispose()
+
+    async def test_source_routes_inbound_to_pipeline(self):
+        from app.models.crm import CrmInbound
+        from app.models.marketing import ProjectSource
+        async with self.sessions() as db:
+            db.add(ClientWorkspace(id=1, name="Кухни")); db.add(Project(id=1, workspace_id=1, name="Кухни", portal_state={}))
+            await db.flush()
+            await crm.pipeline_for(db, 1)
+            project = await db.get(Project, 1)
+            await brief_funnels.plan(db, project, brief_funnels.parse(raw(KITCHENS, WARDROBES)), apply=True)
+            wardrobes = await db.scalar(select(CrmPipeline).where(CrmPipeline.name == "Шкафы-купе"))
+            site = ProjectSource(project_id=1, name="Сайт шкафов", kind="CUSTOM", method="WEBHOOK", source_metadata={"pipeline_id": wardrobes.id})
+            other = ProjectSource(project_id=1, name="Сайт кухонь", kind="CUSTOM", method="WEBHOOK")
+            db.add_all([site, other]); await db.flush()
+            first = CrmInbound(workspace_id=1, project_id=1, name="Анна", phone="+79990000001", source_id=site.id, raw_payload={})
+            second = CrmInbound(workspace_id=1, project_id=1, name="Олег", phone="+79990000002", source_id=other.id, raw_payload={})
+            db.add_all([first, second]); await db.flush()
+            deal1 = await crm.accept_core(db, first, project, None)
+            deal2 = await crm.accept_core(db, second, project, None)
+            self.assertEqual(deal1.pipeline_id, wardrobes.id)
+            self.assertNotEqual(deal2.pipeline_id, wardrobes.id)
+            stage = await db.get(CrmStage, deal1.stage_id)
+            self.assertEqual((stage.name, stage.analytics_type), ("Заявка", "LEAD"))
+
+
 if __name__ == "__main__":
     unittest.main()

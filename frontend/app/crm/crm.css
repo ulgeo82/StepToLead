@@ -3,3 +3,5 @@
 .crmHeaderActions{display:flex;align-items:flex-end;gap:9px}.crmHeaderActions label{display:flex;flex-direction:column;gap:4px;color:#70819a;font-size:10px}.crmHeaderActions select{min-height:38px;max-width:210px;padding:7px;border:1px solid #dce5f2;border-radius:7px;background:white;color:#213751}@media(max-width:600px){.crmHeaderActions{width:100%;flex-wrap:wrap}}
 .crmTaskFilters label{display:flex;align-items:center;gap:5px;color:#6f8199;font-size:10px}.crmTaskFilters input{min-height:34px;padding:5px;border:1px solid #dce5f2;border-radius:7px;background:white;color:#3d536e;font-size:11px}
 .crmTaskRow strong small{display:block;margin-top:3px;color:#7b8da6;font-size:10px;font-weight:400}
+.crmDealPipeline{min-height:26px;padding:0 8px;border:1px solid #d8e2f1;border-radius:7px;background:#fff;font-size:11px;color:#30425c}
+.crmInboundPipeline{min-height:32px;padding:0 8px;border:1px solid #d8e2f1;border-radius:8px;background:#fff;font-size:12px}
