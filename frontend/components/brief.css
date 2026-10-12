@@ -84,3 +84,25 @@
 .briefAdminPage .briefShell h2{margin-top:6px}
 .briefAdminPage .briefShell h2+.briefTableScroll,.briefAdminPage .briefShell h2+table{margin-top:10px}
 .briefAdminPage .briefShell table+h2,.briefAdminPage .briefShell .briefTableScroll+h2{margin-top:22px}
+.briefQuestion.wide{grid-template-columns:1fr}
+.funnels{display:flex;flex-direction:column;gap:12px}
+.funnelsStart p,.funnelsLegacy p{margin:0 0 8px;font-size:11px;color:var(--b-text)}
+.funnelsLink{margin-top:8px;border:0;background:none;color:var(--b-accent);font-weight:600;padding:0;text-align:left;cursor:pointer}
+.funnelsCard{border:1px solid #e2eaf5;border-radius:12px;padding:12px 14px;background:#fbfdff}
+.funnelsHead{display:flex;align-items:center;gap:8px}.funnelsHead b{width:24px;height:24px;border-radius:50%;background:var(--b-accent);color:#fff;display:grid;place-items:center;font-size:11px}
+.funnelsHead input{flex:1;font-weight:700;font-size:13px}.funnelsRemove{border:0;background:none;font-size:18px;color:#97a6ba;cursor:pointer}
+.funnelsMeta{display:flex;gap:10px;margin:10px 0}.funnelsMeta label{flex:1;font-size:10px;color:var(--b-text);display:flex;flex-direction:column;gap:4px}
+.funnelsStages{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:5px}
+.funnelsStages li{display:flex;align-items:center;gap:6px;padding:6px 8px;border-radius:8px;background:#fff;border:1px solid #e8eef7;font-size:12px}
+.funnelsStages li input:not([type=radio]){flex:1;min-width:0;border:0;background:transparent;font-size:12px;padding:2px 0}
+.funnelsStages li.qualified{border-color:#d9ccf7;background:#f8f5ff}
+.funnelsStages li.fixed{background:#f2f6fc;color:#4b5b70;font-weight:600}.funnelsStages li.fixed small{font-weight:400;color:#91a1b5;margin-left:6px}
+.funnelsStages li.won{background:#eefaf4;color:#15784d}.funnelsStages li.lost{background:#fff3f4;color:#c0394a}
+.funnelsStages li.add{border:1px dashed #d8e2f1;background:none}.funnelsStages li button{border:0;background:none;color:#7d8da3;cursor:pointer;font-size:13px}
+.funnelsStages li.add button{color:var(--b-accent);font-weight:600;font-size:12px}
+.funnelsQ{display:flex!important;align-items:center;gap:3px;font-size:10px!important;color:#7a62c9!important;font-weight:500!important;white-space:nowrap}
+.funnelsFoot{display:flex;flex-direction:column;gap:10px}.funnelsFoot span{font-size:11px;color:var(--b-text);align-self:center}
+.funnelsApply{align-self:flex-start;min-height:36px;padding:0 16px;border:0;border-radius:9px;background:var(--b-accent);color:#fff;font-weight:700;cursor:pointer}
+.funnelsPlan{border:1px solid #cfe0ff;border-radius:12px;padding:12px 14px;background:#f5f9ff}.funnelsPlan h4{margin:0 0 8px}
+.funnelsPlan p{font-size:11px;margin:4px 0 10px}.funnelsPlan .warn{color:#a35b00}.funnelsPlanActions{display:flex;gap:8px}
+.funnelsDone{color:#15784d;font-weight:600;font-size:12px}

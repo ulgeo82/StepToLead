@@ -245,6 +245,28 @@ async def apply(project_id: int, brief_id: int, db: AsyncSession = Depends(get_d
     return await saved_output(db, row)
 
 
+@router.get("/brief/projects/{project_id}/{brief_id}/funnels")
+async def funnels_preview(project_id: int, brief_id: int, db: AsyncSession = Depends(get_db), user: PortalUser = Depends(brief_actor)):
+    from app.services import brief_funnels
+    row, project = await owned(db, user, project_id, brief_id)
+    return {"plan": await brief_funnels.plan(db, project, brief_funnels.parse(row.answers.get(brief_funnels.KEY)))}
+
+
+@router.post("/brief/projects/{project_id}/{brief_id}/funnels")
+async def funnels_apply(project_id: int, brief_id: int, db: AsyncSession = Depends(get_db), user: PortalUser = Depends(brief_actor)):
+    from app.services import brief_funnels
+    row, project = await owned(db, user, project_id, brief_id)
+    result = await brief_funnels.plan(db, project, brief_funnels.parse(row.answers.get(brief_funnels.KEY)), apply=True)
+    await db.commit()
+    return {"plan": result, "applied": True}
+
+
+@router.get("/brief/funnel-templates")
+async def funnel_templates():
+    from app.services import brief_funnels
+    return {"templates": [{"key": k, **v} for k, v in brief_funnels.TEMPLATES.items()]}
+
+
 @router.post("/brief/projects/{project_id}/upload")
 async def upload(project_id: int, file: UploadFile = File(...), db: AsyncSession = Depends(get_db), user: PortalUser = Depends(brief_actor)):
     project = await managed_project(db, user, project_id)
