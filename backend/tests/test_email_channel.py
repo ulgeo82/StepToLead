@@ -52,6 +52,36 @@ class EmailTests(test_messaging.MessagingTests):
             self.assertEqual(len(list(await db.scalars(select(Message)))), 2)
         self.read(run)
 
+    def test_known_contact_and_repeat_after_closed_deal_go_to_unsorted(self):
+        from datetime import datetime, timezone
+        from app.models.crm import CrmContact, CrmDeal
+        cid = self.connect()
+        first = IncomingMail(uid=1, sender="oleg@example.org", subject="Кухня", body="Здравствуйте", message_id="<a@example.org>")
+        again = IncomingMail(uid=2, sender="oleg@example.org", subject="Ещё", body="Хочу ещё шкаф", message_id="<b@example.org>")
+        transport = SimpleNamespace(fetch=AsyncMock(return_value=[first]), send=AsyncMock())
+        async def run(db):
+            db.add(CrmContact(workspace_id=1, project_id=1, name="Олег", email_normalized="oleg@example.org", emails=["oleg@example.org"]))
+            await db.commit()
+            channel = await db.get(MessagingChannel, cid)
+            with patch.object(email_channel, "EmailTransport", return_value=transport):
+                await messaging.poll_channel(db, channel)
+                rows = list(await db.scalars(select(CrmInbound)))
+                self.assertEqual(len(rows), 1)  # знакомый контакт без сделки — тоже в «Неразобранное»
+                conversation = await db.scalar(select(Conversation))
+                # Заявку приняли и закрыли сделку — клиент пишет снова.
+                from app.api.routes import crm
+                from app.models.marketing import Project
+                deal = await crm.accept_core(db, rows[0], await db.get(Project, 1), None)
+                self.assertEqual((await db.get(CrmContact, deal.contact_id)).name, "Олег")  # без дубля контакта
+                conversation.deal_id = deal.id
+                deal.closed_at = datetime.now(timezone.utc)
+                conversation.waiting_since = None
+                await db.commit()
+                transport.fetch = AsyncMock(return_value=[again])
+                await messaging.poll_channel(db, channel)
+                self.assertEqual(len(list(await db.scalars(select(CrmInbound).where(CrmInbound.status == "NEW")))), 1)
+        self.read(run)
+
     def test_mime_html_quotes_and_attachment_names(self):
         message = EmailMessage()
         message["From"] = "Анна <anna@example.org>"

@@ -1086,6 +1086,16 @@ async def accept_core(db: AsyncSession, inbound: CrmInbound, project: Project, a
     elif merge_existing and norm_phone(inbound.phone):
         contact = await db.scalar(select(CrmContact).where(CrmContact.project_id == project.id,
                                                            CrmContact.phone_normalized == norm_phone(inbound.phone)).limit(1))
+    if contact is None and not contact_id:
+        # Знакомый клиент написал в чат/почту: берём контакт из диалога, а не создаём дубль.
+        from app.models.messaging import Conversation
+        known = await db.scalar(select(Conversation.contact_id).where(
+            Conversation.inbound_id == inbound.id, Conversation.contact_id.is_not(None)).limit(1))
+        if known:
+            contact = await db.get(CrmContact, known)
+        elif inbound.email:
+            contact = await db.scalar(select(CrmContact).where(CrmContact.project_id == project.id,
+                                                               CrmContact.email_normalized == inbound.email.lower()).limit(1))
     if contact is None:
         contact = CrmContact(workspace_id=project.workspace_id, project_id=project.id,
                              name=inbound.name or "Без имени", phones=[inbound.phone] if inbound.phone else [],

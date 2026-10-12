@@ -52,6 +52,8 @@ export default function CrmPage() {
   const [taskType, setTaskType] = useState("");
   const [taskStatus, setTaskStatus] = useState("OPEN");
   const [inbound, setInbound] = useState<Inbound[]>([]);
+  const [newInbound, setNewInbound] = useState<Inbound[]>([]);
+  const [inboundOpen, setInboundOpen] = useState<Inbound | null>(null);
   const [inboundStatus, setInboundStatus] = useState<"NEW" | "ACCEPTED" | "REJECTED">("NEW");
   const [dealId, setDealId] = useState<number | null>(null);
   const [contactId, setContactId] = useState<number | null>(null);
@@ -147,6 +149,7 @@ export default function CrmPage() {
       if (taskOwner) q.set("responsible_user_id", taskOwner); if (taskType) q.set("type_code", taskType); if (taskStatus) q.set("status", taskStatus);
       api<{ items: Task[] }>(`/crm/projects/${projectId}/tasks?${q}`).then(v => active && setTasks(v.items)).catch(e => setError(e.message)); }
     if (tab === "inbound") api<{ items: Inbound[] }>(`/crm/projects/${projectId}/inbound?status=${inboundStatus}`).then(v => active && setInbound(v.items)).catch(e => setError(e.message));
+    if (tab === "deals") api<{ items: Inbound[] }>(`/crm/projects/${projectId}/inbound?status=NEW`).then(v => active && setNewInbound(v.items)).catch(() => undefined);
     return () => { active = false; };
   }, [projectId, tab, inboundStatus, revision, taskPage, taskOwner, taskType, taskStatus, contactSearch]);
 
@@ -254,6 +257,36 @@ export default function CrmPage() {
       ["Завершённые", tasks.filter(t => t.status === "COMPLETED"), "done"], ["Отменённые", tasks.filter(t => t.status === "CANCELLED"), "done"]] as [string, Task[], string][];
   }, [tasks]);
 
+  const inboundView = (item: Inbound, status: "NEW" | "ACCEPTED" | "REJECTED" = inboundStatus) => { const p = item.raw_payload || {}; const minutesAgo = Math.round((Date.now() - new Date(item.received_at).getTime()) / 60000);
+          return <article className="crmInbound crmInboundPro" key={item.id}><div>
+            <strong>{item.name || "Без имени"}</strong>
+            <small>{[item.phone, item.email, typeof p.contact === "string" && !String(p.contact).startsWith("http") ? p.contact : null].filter(Boolean).join(" · ") || "Контакт не указан"}{p.contact_method ? ` · ${String(p.contact_method)}` : ""}</small>
+            <small>{String(p.external_source || p.source || "Интеграция")}{p.item_title ? ` · ${String(p.item_title)}` : ""}{p.utm_source ? ` · ${String(p.utm_source)}${p.utm_campaign ? ` / ${String(p.utm_campaign)}` : ""}` : ""} · {when(item.received_at)}
+              {status === "NEW" && <b className={minutesAgo > 15 ? "crmBad" : "crmGood"}> · ждёт {minutesAgo < 60 ? `${minutesAgo} мин` : `${Math.round(minutesAgo / 60)} ч`}</b>}</small>
+            {Boolean(p.notes || p.comment) && <p className="crmPre">{String(p.notes || p.comment)}</p>}
+            {Boolean(p.brief_answers) && typeof p.brief_answers === "object" && <details><summary>📎 Оценка / бриф — все ответы</summary>{Object.entries(p.brief_answers as Record<string,unknown>).map(([key,value])=><p key={key}><strong>{(p.brief_labels as Record<string,string>|undefined)?.[key]||key}</strong><br/>{String(value)}</p>)}{p.express_calculation&&typeof p.express_calculation==="object"?<p>Предел цены заявки: {String((p.express_calculation as Record<string,unknown>).limit_cpl??"не рассчитан")} · Сейчас: {String((p.express_calculation as Record<string,unknown>).current_cpl??"не указано")}</p>:null}</details>}
+            {p.brief_demo_access&&typeof p.brief_demo_access==="object"?<div><strong>Доступ к демо</strong><p>Логин: {String((p.brief_demo_access as Record<string,string>).username)}</p><a href={String((p.brief_demo_access as Record<string,string>).login_url)}>Войти в демо</a> · <a href={String((p.brief_demo_access as Record<string,string>).reset_url)}>Сбросить пароль</a><small>Сброс через подключённый Telegram. Если бот ещё не подключён, доступ перевыпускает администратор в карточке клиента.</small></div>:null}
+            {item.potential_duplicates.length > 0 && <em>Возможный дубль: {item.potential_duplicates.map(c => c.name).join(", ")}</em>}</div>
+            {status === "NEW" ? <div className="crmInboundActions">{pipelines.length > 1 && <select aria-label="Воронка" className="crmInboundPipeline" value={acceptPipeline[item.id] || ""} onChange={e => setAcceptPipeline(m => ({ ...m, [item.id]: e.target.value }))}><option value="">Воронка по источнику</option>{pipelines.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>}<button className="crmPrimary" disabled={busy} onClick={() => mutate<{ deal_id: number }>(`/crm/inbound/${item.id}/accept`, "POST", acceptPipeline[item.id] ? { pipeline_id: Number(acceptPipeline[item.id]) } : {}).then(r => r && (setInboundOpen(null), setDealId(r.deal_id)))}>Принять в работу</button>
+              {item.potential_duplicates.map(c => <button key={c.id} disabled={busy} onClick={() => mutate<{ deal_id: number }>(`/crm/inbound/${item.id}/accept`, "POST", { contact_id: c.id }).then(r => r && (setInboundOpen(null), setDealId(r.deal_id)))}>Связать с «{c.name}»</button>)}
+              <button onClick={() => { setInboundOpen(null); setLinking(item); }}>Другой клиент…</button><button className="crmDanger" onClick={() => { setInboundOpen(null); setRejecting(item); }}>Отклонить</button></div>
+              : <span className="crmMuted">{status === "ACCEPTED" ? "Принято" : "Отклонено"}</span>}</article>; };
+  async function acceptToStage(item: Inbound, stageId: number) {
+    const first = board?.columns.find(c => c.stage.analytics_type === "LEAD")?.stage.id;
+    const r = await mutate<{ deal_id: number }>(`/crm/inbound/${item.id}/accept`, "POST", currentPipelineId ? { pipeline_id: currentPipelineId } : {});
+    if (!r) return;
+    if (stageId !== first) {
+      try { await request(`/crm/deals/${r.deal_id}/move`, "POST", { stage_id: stageId }); }
+      catch (e) { setError(`Заявка принята, но не перенесена на этап: ${(e as Error).message}`); }
+    }
+    refresh(); setDealId(r.deal_id);
+  }
+  const inboundCard = (item: Inbound) => { const p = item.raw_payload || {}; const minutesAgo = Math.round((Date.now() - new Date(item.received_at).getTime()) / 60000);
+    return <button key={`in-${item.id}`} className="crmCard crmInboundCard" draggable={can("create_deal")} onDragStart={e => e.dataTransfer.setData("text/plain", `stl-inbound:${item.id}`)} onClick={() => setInboundOpen(item)}>
+      <span className="crmCardTop"><span className="crmCardName">{item.name || "Без имени"}</span><b className={minutesAgo > 15 ? "crmBad" : "crmGood"}>{minutesAgo < 60 ? `${minutesAgo} мин` : minutesAgo < 1440 ? `${Math.round(minutesAgo / 60)} ч` : `${Math.round(minutesAgo / 1440)} дн`}</b></span>
+      <small>{[item.phone, item.email].filter(Boolean).join(" · ") || String(p.contact || "Контакт не указан")}</small>
+      {Boolean(p.notes || p.comment) && <small className="crmInboundPreview">{String(p.notes || p.comment).slice(0, 90)}</small>}
+      <small>{String(p.contact_method || p.external_source || p.source || "Интеграция")}{item.potential_duplicates.length ? " · есть похожий клиент" : ""}</small></button>; };
   const card = (deal: Deal) => <button draggable={!archived && can("move_deal")} onDragStart={e => e.dataTransfer.setData("text/plain", String(deal.id))}
     className={`crmCard ${(deal.idle_days ?? 0) >= 3 && deal.analytics_type !== "WON" && deal.analytics_type !== "LOST" ? "idle" : ""}`} key={deal.id} onClick={() => setDealId(deal.id)}>
     <span className="crmCardTop"><span className="crmCardName">{deal.contact.name}</span><strong>{money(deal.amount)}</strong></span>
@@ -271,9 +304,9 @@ export default function CrmPage() {
       {error && <div className="resultError" role="alert">{error} <button onClick={() => setError("")}>×</button></div>}
       {notice && <div className="crmOkBar" role="status">{notice} <button onClick={() => setNotice("")}>×</button></div>}
       {!projectId ? <div className="resultLoading">{error.includes("401") || error.includes("вход") ? <><p>Для работы с CRM войдите в клиентский кабинет.</p><Link href="/login?next=%2Fcrm">Войти →</Link></> : "Нет доступного проекта"}</div> : <>
-      <div className="crmTabs">{([["deals", "▣ Сделки"], ["chats", "💬 Чаты"], ["calls", "📞 Звонки"], ["inbound", "Неразобранное"], ["tasks", "◷ Задачи"], ["contacts", "♙ Контакты"], ["report", "📊 Аналитика продаж"],
+      <div className="crmTabs">{([["deals", "▣ Сделки"], ["chats", "💬 Чаты"], ["calls", "📞 Звонки"], ["tasks", "◷ Задачи"], ["contacts", "♙ Контакты"], ["report", "📊 Аналитика продаж"],
         ...(can("manage_pipeline") ? [["automation", "⚡ Автоматизация"], ["pipeline", "⚙ Воронки и поля"]] : [])] as [Tab, string][]).map(([key, label]) =>
-        <button key={key} className={tab === key ? "active" : ""} onClick={() => setTab(key)}>{label}{key === "inbound" && board?.inbound_count ? <b>{board.inbound_count}</b> : null}{key === "chats" && unreadChats ? <b>{unreadChats}</b> : null}</button>)}</div>
+        <button key={key} className={tab === key ? "active" : ""} onClick={() => setTab(key)}>{label}{key === "deals" && board?.inbound_count ? <b title="Новых заявок в «Неразобранном»">{board.inbound_count}</b> : null}{key === "chats" && unreadChats ? <b>{unreadChats}</b> : null}</button>)}</div>
 
       {tab === "deals" && <>
         <div className="crmFilters crmFiltersPro">
@@ -293,9 +326,17 @@ export default function CrmPage() {
         <div className="crmCounters">{Object.entries(stateLabels).map(([key, label]) => <button key={key} className={`crmCount ${key.toLowerCase()} ${filterState === key ? "active" : ""}`}
           onClick={() => { setFilterState(filterState === key ? "" : key); setPage(1); }}><strong>{board?.control[key] ?? "—"}</strong><span>{label}</span></button>)}
           <div className="crmCount crmCountSum"><strong>{money(totalAmount)}</strong><span>в воронке</span></div></div>
-        {view === "kanban" ? <div className="crmBoard">{board?.columns.map(column => <section className="crmColumn" key={column.stage.id}
-          onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); if (archived) return; const id = Number(e.dataTransfer.getData("text/plain")); const deal = allDeals.find(d => d.id === id); if (deal) move(deal, column.stage.id); }}>
-          <header style={{ borderTopColor: column.stage.color }}><div><strong>{column.stage.name}</strong><small>{money(column.amount)}</small></div><b>{column.total}</b></header>
+        {view === "kanban" ? <div className="crmBoard">{!archived && <section className="crmColumn crmInboundColumn" key="inbound">
+          <header style={{ borderTopColor: "#97a6ba" }}><div><strong>Неразобранное</strong><small><button type="button" className="crmLinkButton" onClick={() => setTab("inbound")}>история</button></small></div><b>{newInbound.length}</b></header>
+          {newInbound.map(inboundCard)}
+          {!newInbound.length && <p className="crmEmpty">Новых заявок нет 👌</p>}</section>}
+          {board?.columns.map(column => <section className="crmColumn" key={column.stage.id}
+          onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); if (archived) return; const data = e.dataTransfer.getData("text/plain");
+            if (data.startsWith("stl-stage:")) { void reorderStages(Number(data.slice(10)), column.stage.id); return; }
+            if (data.startsWith("stl-inbound:")) { const item = newInbound.find(i => i.id === Number(data.slice(12))); if (item) void acceptToStage(item, column.stage.id); return; }
+            const deal = allDeals.find(d => d.id === Number(data)); if (deal) move(deal, column.stage.id); }}>
+          <header style={{ borderTopColor: column.stage.color }} draggable={can("manage_pipeline") && !archived} title={can("manage_pipeline") ? "Перетащите, чтобы поменять порядок этапов" : undefined}
+            onDragStart={e => { e.stopPropagation(); e.dataTransfer.setData("text/plain", `stl-stage:${column.stage.id}`); }}><div><strong>{column.stage.name}</strong><small>{money(column.amount)}</small></div><b>{column.total}</b></header>
           {column.deals.map(card)}
           {!column.deals.length && <p className="crmEmpty">Перетащите сделку сюда</p>}
           {column.has_more && <button className="crmMore" onClick={() => setPage(page + 1)}>Показать ещё</button>}</section>)}</div>
@@ -332,26 +373,13 @@ export default function CrmPage() {
             {!subset.length && <p className="crmEmpty">Нет задач</p>}</div>)}</div>
         <div className="crmPager"><button disabled={taskPage <= 1} onClick={() => setTaskPage(taskPage - 1)}>← Назад</button><span>Страница {taskPage}</span><button disabled={tasks.length < 100} onClick={() => setTaskPage(taskPage + 1)}>Далее →</button></div></section>}
 
-      {tab === "inbound" && <section className="crmList resultPanel"><div className="crmSectionHead"><div><h2>Неразобранное</h2><p>Заявки с сайта, Авито и интеграций. Примите в работу, свяжите с существующим клиентом или отклоните. Исходные данные сохраняются.</p></div>
+      {tab === "inbound" && <section className="crmList resultPanel"><div className="crmSectionHead"><div><h2><button type="button" className="crmLinkButton" onClick={() => setTab("deals")}>← К воронке</button> Неразобранное: история</h2><p>Заявки с сайта, Авито и интеграций. Примите в работу, свяжите с существующим клиентом или отклоните. Исходные данные сохраняются.</p></div>
         <div className="crmView">{(["NEW", "ACCEPTED", "REJECTED"] as const).map(status => <button key={status} className={inboundStatus === status ? "active" : ""} onClick={() => setInboundStatus(status)}>{status === "NEW" ? "Новые" : status === "ACCEPTED" ? "Принятые" : "Отклонённые"}</button>)}</div></div>
-        {inbound.map(item => { const p = item.raw_payload || {}; const minutesAgo = Math.round((Date.now() - new Date(item.received_at).getTime()) / 60000);
-          return <article className="crmInbound crmInboundPro" key={item.id}><div>
-            <strong>{item.name || "Без имени"}</strong>
-            <small>{[item.phone, item.email, typeof p.contact === "string" && !String(p.contact).startsWith("http") ? p.contact : null].filter(Boolean).join(" · ") || "Контакт не указан"}{p.contact_method ? ` · ${String(p.contact_method)}` : ""}</small>
-            <small>{String(p.external_source || p.source || "Интеграция")}{p.item_title ? ` · ${String(p.item_title)}` : ""}{p.utm_source ? ` · ${String(p.utm_source)}${p.utm_campaign ? ` / ${String(p.utm_campaign)}` : ""}` : ""} · {when(item.received_at)}
-              {inboundStatus === "NEW" && <b className={minutesAgo > 15 ? "crmBad" : "crmGood"}> · ждёт {minutesAgo < 60 ? `${minutesAgo} мин` : `${Math.round(minutesAgo / 60)} ч`}</b>}</small>
-            {Boolean(p.notes || p.comment) && <p className="crmPre">{String(p.notes || p.comment)}</p>}
-            {Boolean(p.brief_answers) && typeof p.brief_answers === "object" && <details><summary>📎 Оценка / бриф — все ответы</summary>{Object.entries(p.brief_answers as Record<string,unknown>).map(([key,value])=><p key={key}><strong>{(p.brief_labels as Record<string,string>|undefined)?.[key]||key}</strong><br/>{String(value)}</p>)}{p.express_calculation&&typeof p.express_calculation==="object"?<p>Предел цены заявки: {String((p.express_calculation as Record<string,unknown>).limit_cpl??"не рассчитан")} · Сейчас: {String((p.express_calculation as Record<string,unknown>).current_cpl??"не указано")}</p>:null}</details>}
-            {p.brief_demo_access&&typeof p.brief_demo_access==="object"?<div><strong>Доступ к демо</strong><p>Логин: {String((p.brief_demo_access as Record<string,string>).username)}</p><a href={String((p.brief_demo_access as Record<string,string>).login_url)}>Войти в демо</a> · <a href={String((p.brief_demo_access as Record<string,string>).reset_url)}>Сбросить пароль</a><small>Сброс через подключённый Telegram. Если бот ещё не подключён, доступ перевыпускает администратор в карточке клиента.</small></div>:null}
-            {item.potential_duplicates.length > 0 && <em>Возможный дубль: {item.potential_duplicates.map(c => c.name).join(", ")}</em>}</div>
-            {inboundStatus === "NEW" ? <div className="crmInboundActions">{pipelines.length > 1 && <select aria-label="Воронка" className="crmInboundPipeline" value={acceptPipeline[item.id] || ""} onChange={e => setAcceptPipeline(m => ({ ...m, [item.id]: e.target.value }))}><option value="">Воронка по источнику</option>{pipelines.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>}<button className="crmPrimary" disabled={busy} onClick={() => mutate<{ deal_id: number }>(`/crm/inbound/${item.id}/accept`, "POST", acceptPipeline[item.id] ? { pipeline_id: Number(acceptPipeline[item.id]) } : {}).then(r => r && setDealId(r.deal_id))}>Принять в работу</button>
-              {item.potential_duplicates.map(c => <button key={c.id} disabled={busy} onClick={() => mutate<{ deal_id: number }>(`/crm/inbound/${item.id}/accept`, "POST", { contact_id: c.id }).then(r => r && setDealId(r.deal_id))}>Связать с «{c.name}»</button>)}
-              <button onClick={() => setLinking(item)}>Другой клиент…</button><button className="crmDanger" onClick={() => setRejecting(item)}>Отклонить</button></div>
-              : <span className="crmMuted">{inboundStatus === "ACCEPTED" ? "Принято" : "Отклонено"}</span>}</article>; })}
+        {inbound.map(item => inboundView(item))}
         {!inbound.length && <p className="crmEmpty">{inboundStatus === "NEW" ? "Всё разобрано 👌" : "Обращений с таким статусом нет"}</p>}</section>}
 
-      {tab === "chats" && <Inbox projectId={projectId} team={team} can={can} onOpenDeal={id => setDealId(id)} onOpenInbound={() => setTab("inbound")}/>}
-      {tab === "calls" && <CallsTab projectId={projectId} team={team} info={telephony.info} reloadInfo={telephony.reload} onOpenDeal={id => setDealId(id)} onOpenInbound={() => setTab("inbound")}/>}
+      {tab === "chats" && <Inbox projectId={projectId} team={team} can={can} onOpenDeal={id => setDealId(id)} onOpenInbound={() => { setTab("deals"); setView("kanban"); }}/>}
+      {tab === "calls" && <CallsTab projectId={projectId} team={team} info={telephony.info} reloadInfo={telephony.reload} onOpenDeal={id => setDealId(id)} onOpenInbound={() => { setTab("deals"); setView("kanban"); }}/>}
       {tab === "report" && <SalesReport projectId={projectId} pipelines={pipelines} pipelineId={currentPipelineId}/>}
       {tab === "automation" && <Automations projectId={projectId} pipelines={pipelines} pipelineId={currentPipelineId} team={team} sources={sources} canManage={can("manage_pipeline")}/>}
 
@@ -375,11 +403,13 @@ export default function CrmPage() {
 
     {dealId && projectId && <><div className="crmCardBackdrop" onClick={() => setDealId(null)}/><DealCard dealId={dealId} projectId={projectId} canDial={telephony.canDial} pipelines={pipelines} team={team} sources={sources} fields={fields} lostReasons={lostReasons} can={can}
       onClose={() => setDealId(null)} onChanged={refresh} onOpenContact={id => setContactId(id)}/></>}
-    {projectId && <IncomingCall projectId={projectId} enabled={Boolean(telephony.info?.connection?.active)} onOpenDeal={id => setDealId(id)} onOpenInbound={() => setTab("inbound")}/>}
+    {projectId && <IncomingCall projectId={projectId} enabled={Boolean(telephony.info?.connection?.active)} onOpenDeal={id => setDealId(id)} onOpenInbound={() => { setTab("deals"); setView("kanban"); }}/>}
     {contactId && <ContactCard contactId={contactId} projectId={projectId ?? undefined} canDial={telephony.canDial} can={can} onClose={() => setContactId(null)} onOpenDeal={id => { setContactId(null); setDealId(id); }} onChanged={refresh}/>}
     {completing && <CompleteTaskModal task={completing} team={team} onClose={() => setCompleting(null)} onDone={() => { setCompleting(null); refresh(); setNotice("Задача завершена"); }}/>}
     {modal === "task" && projectId && <NewTaskModal projectId={projectId} team={team} deals={allDeals} onClose={() => setModal(null)} onDone={() => { setModal(null); refresh(); setNotice("Задача поставлена"); }}/>}
     {rejecting && <InboundReject item={rejecting} onClose={() => setRejecting(null)} onSubmit={async reason => { const ok = await mutate(`/crm/inbound/${rejecting.id}/reject`, "POST", { rejection_reason: reason }, "Заявка отклонена"); if (ok) setRejecting(null); }}/>}
+    {inboundOpen && <div className="crmCardBackdrop" onClick={() => setInboundOpen(null)}/>}
+    {inboundOpen && <aside className="crmInboundModal" role="dialog" aria-label="Заявка"><button className="crmClose" onClick={() => setInboundOpen(null)} aria-label="Закрыть">×</button>{inboundView(inboundOpen, "NEW")}</aside>}
     {linking && projectId && <InboundLink item={linking} projectId={projectId} onClose={() => setLinking(null)} onSubmit={async id => { const r = await mutate<{ deal_id: number }>(`/crm/inbound/${linking.id}/accept`, "POST", { contact_id: id }); if (r) { setLinking(null); setDealId(r.deal_id); } }}/>}
     {modal && modal !== "task" && <div className="resultModalBackdrop" onMouseDown={e => { if (e.target === e.currentTarget) { setModal(null); setEditStage(null); setEditPipeline(null); } }}>
       <form className="resultModal crmModal" onSubmit={modal === "deal" ? submitDeal : modal === "stage" ? submitStage : modal === "field" ? submitField : modal === "pipeline" ? submitPipeline : submitLost}>

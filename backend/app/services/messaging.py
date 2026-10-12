@@ -465,9 +465,22 @@ async def _link_existing(db: AsyncSession, channel: MessagingChannel, conversati
         conversation.assigned_user_id = deal.responsible_user_id if deal else None
 
 
-async def _new_lead(db: AsyncSession, channel: MessagingChannel, conversation: Conversation, first_text: str) -> None:
-    """A first message from an unknown person becomes a request in «Неразобранное» (Avito has its own importer)."""
-    if channel.kind == "avito" or conversation.contact_id or conversation.inbound_id:
+async def _has_open_deal(db: AsyncSession, conversation: Conversation) -> bool:
+    if not conversation.deal_id:
+        return False
+    deal = await db.get(CrmDeal, conversation.deal_id)
+    return bool(deal and deal.archived_at is None and deal.closed_at is None)
+
+
+async def _new_lead(db: AsyncSession, channel: MessagingChannel, conversation: Conversation, first_text: str,
+                    *, repeat: bool = False) -> None:
+    """Обращение без открытой сделки → заявка в «Неразобранное» (у Авито свой импорт).
+
+    Знакомый контакт без открытой сделки тоже попадает туда (менеджер свяжет его с клиентом одной кнопкой);
+    repeat — клиент написал снова после закрытой сделки: это новая заявка, а не просто сообщение в чате."""
+    if channel.kind == "avito" or await _has_open_deal(db, conversation):
+        return
+    if conversation.inbound_id and not repeat:
         return
     from app.api.routes.portal import InboundLead
     from app.services.inbound_lead import create_inbound
@@ -478,7 +491,8 @@ async def _new_lead(db: AsyncSession, channel: MessagingChannel, conversation: C
         f"@{username}" if username else f"{KINDS[channel.kind]} · {conversation.title}")
     title = conversation.title if len(conversation.title) >= 2 else f"Клиент {KINDS[channel.kind]}"
     payload = InboundLead.model_validate({
-        "external_id": f"conv:{conversation.id}", "full_name": title[:180], "phone": conversation.phone,
+        "external_id": f"conv:{conversation.id}" + (f":{int(now().timestamp())}" if repeat else ""),
+        "full_name": title[:180], "phone": conversation.phone,
         "email": email_address,
         "source": channel.kind, "external_source": channel.kind, "contact_method": KINDS[channel.kind],
         "contact": contact, "notes": first_text[:3000], "conversation_id": conversation.id, "contact_consent": False})
@@ -526,6 +540,11 @@ async def ingest(db: AsyncSession, channel: MessagingChannel, item: Incoming) ->
         conversation.status = "open"
         if created:
             await _new_lead(db, channel, conversation, item.get("text") or "")
+        elif not was_waiting and conversation.deal_id and not await _has_open_deal(db, conversation):
+            # Сделка по этому диалогу закрыта (продажа/отказ), а клиент пишет снова — новая заявка.
+            pending = await db.get(CrmInbound, conversation.inbound_id) if conversation.inbound_id else None
+            if not (pending and pending.status == "NEW"):
+                await _new_lead(db, channel, conversation, item.get("text") or "", repeat=True)
         if not was_waiting and not created:
             people = await project_people(db, conversation.project_id)
             targets = [conversation.assigned_user_id] if conversation.assigned_user_id in people else \

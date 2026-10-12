@@ -5,3 +5,11 @@
 .crmTaskRow strong small{display:block;margin-top:3px;color:#7b8da6;font-size:10px;font-weight:400}
 .crmDealPipeline{min-height:26px;padding:0 8px;border:1px solid #d8e2f1;border-radius:7px;background:#fff;font-size:11px;color:#30425c}
 .crmInboundPipeline{min-height:32px;padding:0 8px;border:1px solid #d8e2f1;border-radius:8px;background:#fff;font-size:12px}
+.crmInboundColumn{background:#f4f6fa}
+.crmInboundCard{border-left:3px solid #97a6ba!important}
+.crmInboundCard .crmBad{color:#d9434f;font-size:10px}.crmInboundCard .crmGood{color:#15a86b;font-size:10px}
+.crmInboundPreview{color:#4b5b70!important;font-style:italic}
+.crmLinkButton{border:0;background:none;padding:0;color:#006bfd;font-size:inherit;cursor:pointer}
+.crmColumn header[draggable=true]{cursor:grab}
+.crmInboundModal{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:60;width:min(640px,calc(100vw - 32px));max-height:85vh;overflow:auto;background:#fff;border-radius:14px;padding:20px;box-shadow:0 20px 60px rgba(16,32,64,.25)}
+.crmInboundModal .crmClose{position:absolute;top:10px;right:12px}
