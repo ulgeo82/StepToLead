@@ -14,3 +14,24 @@ def bot_url(token: str, method: str = "") -> str:
 def client_options() -> dict:
     proxy = (settings.telegram_proxy or "").strip()
     return {"proxy": proxy} if proxy else {}
+
+
+from contextvars import ContextVar
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class BotScope:
+    """Бот, через который идёт текущий запрос к Telegram: свой бот клиента или (None) бот агентства."""
+    token: str
+    workspace_id: int
+    bot_row_id: int
+    username: str
+
+
+bot_scope: ContextVar[BotScope | None] = ContextVar("bot_scope", default=None)
+
+
+def current_token() -> str:
+    scope = bot_scope.get()
+    return scope.token if scope else settings.telegram_bot_token

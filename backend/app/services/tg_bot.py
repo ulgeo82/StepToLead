@@ -36,7 +36,19 @@ DONE_RESULTS = ["Связался с клиентом", "Не ответил", "
 
 
 def state_key():
-    return "tg_updates_" + hashlib.sha256(settings.telegram_bot_token.encode()).hexdigest()[:24]
+    from app.services.telegram_http import current_token
+    return "tg_updates_" + hashlib.sha256(current_token().encode()).hexdigest()[:24]
+
+
+def _scope():
+    from app.services.telegram_http import bot_scope
+    return bot_scope.get()
+
+
+def _linked_here(user) -> bool:
+    """Сотрудник подключён именно к этому боту (боту компании или, вне его, к боту агентства)."""
+    scope, bot_id = _scope(), (user.telegram_state or {}).get("bot_id")
+    return bot_id == scope.bot_row_id and user.workspace_id == scope.workspace_id if scope else not bot_id
 
 
 def button(text, data=None, url=None):
@@ -54,17 +66,29 @@ def portal_url(path="/crm"):
 
 
 async def unlink_blocked(chat_id, sessions=None):
+    """Человек заблокировал бот: отвязываем только тех, кто подключён через этот самый бот."""
     async with (sessions or SessionLocal)() as db:
-        for model in (PortalUser, AdminUser):
-            await db.execute(update(model).where(model.telegram_chat_id == str(chat_id)).values(
+        for user in (await db.scalars(select(PortalUser).where(PortalUser.telegram_chat_id == str(chat_id)))).all():
+            if _linked_here(user):
+                user.telegram_chat_id = user.telegram_username = user.telegram_link_code_hash = None
+                user.telegram_link_expires_at = None
+                user.telegram_state = {k: v for k, v in (user.telegram_state or {}).items() if k != "bot_id"}
+        if _scope() is None:
+            await db.execute(update(AdminUser).where(AdminUser.telegram_chat_id == str(chat_id)).values(
                 telegram_chat_id=None, telegram_username=None, telegram_link_code_hash=None,
                 telegram_link_expires_at=None))
         await db.commit()
 
 
 async def actor_for(db, chat_id, admin=False):
-    if not admin:
-        user = await db.scalar(select(PortalUser).where(PortalUser.telegram_chat_id == str(chat_id)).order_by(PortalUser.id))
+    scope = _scope()
+    if admin and scope:
+        raise HTTPException(403, "Неизвестная команда. Откройте /menu")
+    if not admin or scope:
+        rows = (await db.scalars(select(PortalUser).where(PortalUser.telegram_chat_id == str(chat_id)).order_by(PortalUser.id))).all()
+        user = next((row for row in rows if _linked_here(row)), None)
+        if scope and not user:
+            raise HTTPException(403, "Подключите Telegram в портале: Настройки → Уведомления → Мой Telegram")
         if user:
             company = await db.get(ClientWorkspace, user.workspace_id)
             if not user.active or not company or company.status == "deleted":
@@ -89,11 +113,16 @@ async def link(db, chat, sender, code):
         expires = expires.replace(tzinfo=timezone.utc)
     if not target or not expires or expires <= expires_now:
         return screen("Ссылка устарела или неверна. Нажмите «Подключить Telegram» в портале ещё раз.")
+    scope = _scope()
     if isinstance(target, PortalUser):
         company = await db.get(ClientWorkspace, target.workspace_id)
         if not target.active or not company or company.status == "deleted":
             raise HTTPException(403, "Доступ отключён")
-    elif target.role != "admin":
+        if scope and target.workspace_id != scope.workspace_id:
+            return screen("Эта ссылка для другого бота. Нажмите «Подключить Telegram» в портале ещё раз.")
+        state = {k: v for k, v in (target.telegram_state or {}).items() if k != "bot_id"}
+        target.telegram_state = {**state, "bot_id": scope.bot_row_id} if scope else state
+    elif target.role != "admin" or scope:
         raise HTTPException(403, "Доступ отключён")
     target.telegram_chat_id = str(chat["id"])
     target.telegram_username = sender.get("username")
@@ -131,7 +160,9 @@ async def menu(db, user):
     rows += [[button("Новые заявки", "leads:0"), button("Мои задачи", "tasks")],
              [button("Отчёт за 7 дней", "report:7"), button("За 30 дней", "report:30")],
              [button("Уведомления", "settings"), button("Открыть портал", url=portal_url())]]
-    return screen("<b>StepToLead</b>\nВыберите проект или действие.", rows)
+    company = await db.get(ClientWorkspace, user.workspace_id) if _scope() else None
+    title = html.escape(company.name) if company else "StepToLead"
+    return screen(f"<b>{title}</b>\nВыберите проект или действие.", rows)
 
 
 async def leads(db, user, page):
@@ -526,6 +557,18 @@ async def poll():
         except asyncio.CancelledError:
             raise
         except Exception as exc:
+            scope = _scope()
+            if scope and isinstance(exc, TelegramError) and exc.code in (401, 404):
+                # Токен бота клиента отозван или бот удалён: останавливаем опрос и показываем причину в карточке клиента.
+                from app.models.system import WorkspaceBot
+                async with SessionLocal() as db:
+                    row = await db.get(WorkspaceBot, scope.bot_row_id)
+                    if row:
+                        row.active, row.last_error = False, "Telegram не принимает токен: бот удалён или токен заменён в @BotFather. Вставьте новый токен."
+                        await db.commit()
+                return
+            if scope and isinstance(exc, TelegramError) and exc.code == 409:
+                logger.warning("client bot %s: getUpdates conflict (webhook or another consumer)", scope.username)
             logger.warning("telegram polling retry type=%s", type(exc).__name__)
             await asyncio.sleep(5)
 

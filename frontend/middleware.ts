@@ -2,10 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 
 export async function middleware(request: NextRequest) {
   const isPortal = request.nextUrl.pathname.startsWith("/portal");
-  if (request.nextUrl.pathname === "/portal/login") return NextResponse.next();
+  if (request.nextUrl.pathname === "/portal/login") return NextResponse.next(); // старый адрес, страница сама перенаправит на /login
   const cookieName = isPortal ? "stl_portal_session" : "stl_session";
   const mePath = isPortal ? "/api/portal/auth/me" : "/api/auth/me";
-  const loginPath = isPortal ? "/portal/login" : "/login";
+  const loginPath = isPortal ? "/login" : "/agency/login";
   const token = request.cookies.get(cookieName)?.value;
   let authorized = false;
   if (token) {

@@ -2,6 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { BOT_STEPS } from "@/components/client-telegram-bot";
 import { api, ClientWorkspace, PortalRole, PortalUser } from "@/lib/api";
 
 const roles: { value: PortalRole; label: string }[] = [
@@ -19,18 +20,22 @@ export default function ClientsPage() {
   const [users, setUsers] = useState<PortalUser[]>([]);
   const [modal, setModal] = useState<"client" | "user" | "credentials" | null>(null);
   const [credentials, setCredentials] = useState<{ username: string; password: string } | null>(null);
-  const [portalLoginUrl, setPortalLoginUrl] = useState("/portal/login");
+  const [portalLoginUrl, setPortalLoginUrl] = useState("/login");
   const [error, setError] = useState(""); const [busy, setBusy] = useState(false);
   const [deleted, setDeleted] = useState<ClientWorkspace[]>([]);
   const [toDelete, setToDelete] = useState<ClientWorkspace | null>(null);
   const [confirmName, setConfirmName] = useState("");
   const [notice, setNotice] = useState("");
-  useEffect(() => { setPortalLoginUrl(`${window.location.origin}/portal/login`); }, []);
+  useEffect(() => { setPortalLoginUrl(`${window.location.origin}/login`); }, []);
   const load = useCallback(async () => { try { const [w, u] = await Promise.all([api<ClientWorkspace[]>("/marketing/workspaces"), api<PortalUser[]>("/portal/admin/users")]); setWorkspaces(w); setUsers(u);
     api<Health[]>("/portal/admin/health").then(setHealth).catch(() => setHealth([]));
     api<ClientWorkspace[]>("/marketing/workspaces?deleted=true").then(setDeleted).catch(() => setDeleted([])); setError(""); } catch (e) { setError(e instanceof Error ? e.message : "Не удалось загрузить клиентов"); } }, []);
   useEffect(() => { load(); }, [load]);
-  async function addClient(event: FormEvent<HTMLFormElement>) { event.preventDefault(); setBusy(true); const data = new FormData(event.currentTarget); try { await api("/marketing/workspaces", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: data.get("name") }) }); setModal(null); await load(); } catch (e) { setError(e instanceof Error ? e.message : "Ошибка"); } finally { setBusy(false); } }
+  async function addClient(event: FormEvent<HTMLFormElement>) { event.preventDefault(); setBusy(true); const data = new FormData(event.currentTarget); try { const created = await api<ClientWorkspace>("/marketing/workspaces", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: data.get("name") }) });
+      const token = String(data.get("bot_token") || "").trim();
+      if (token) { try { const bot = await api<{ username: string }>(`/marketing/workspaces/${created.id}/telegram-bot`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token }) }); setNotice(`Кабинет создан, бот @${bot.username} подключён.`); }
+        catch (e) { setError(`Кабинет создан, но бот не подключился: ${e instanceof Error ? e.message : "ошибка"}. Подключите его в карточке клиента.`); } }
+      setModal(null); await load(); } catch (e) { setError(e instanceof Error ? e.message : "Ошибка"); } finally { setBusy(false); } }
   async function createDemo() { setBusy(true); setError("");
     try { const d = await api<{ name: string; username: string; password: string; deals: number }>("/marketing/workspaces/demo", { method: "POST", timeoutMs: 180_000 });
       setCredentials({ username: d.username, password: d.password }); setNotice(`Создан «${d.name}»: ${d.deals} сделок за 4 месяца, реклама, звонки и переписка. Данные вымышленные.`); setModal("credentials"); await load(); }
@@ -56,7 +61,7 @@ export default function ClientsPage() {
       <p className="formHint">Компания исчезнет из портала. Сотрудники больше не смогут войти, рекламные кабинеты, чаты, телефония, вебхуки и виджеты отключатся, уведомления и автоматизации остановятся. История сделок, звонков и продаж сохранится — компанию можно восстановить.</p>
       <label>Чтобы подтвердить, введите название компании<input value={confirmName} onChange={e => setConfirmName(e.target.value)} placeholder={toDelete.name} autoFocus autoComplete="off"/></label>
       <button className="button danger full" disabled={busy || confirmName.trim().toLowerCase() !== toDelete.name.trim().toLowerCase()}>{busy ? "Удаляем…" : "Удалить компанию"}</button></form></div>}
-    {modal === "client" && <div className="modalBackdrop"><form className="modal" onSubmit={addClient}><div className="modalHead"><div><p className="eyebrow">Новый клиент</p><h2>Создать кабинет</h2></div><button type="button" className="close" onClick={() => setModal(null)}>×</button></div><label>Название компании<input name="name" required minLength={2} autoFocus /></label><button className="button primary full" disabled={busy}>Создать</button></form></div>}
+    {modal === "client" && <div className="modalBackdrop"><form className="modal" onSubmit={addClient}><div className="modalHead"><div><p className="eyebrow">Новый клиент</p><h2>Создать кабинет</h2></div><button type="button" className="close" onClick={() => setModal(null)}>×</button></div><label>Название компании<input name="name" required minLength={2} autoFocus /></label><label>Токен Telegram-бота компании (необязательно)<input name="bot_token" placeholder="1234567890:AAH…" autoComplete="off" /></label><p className="formHint">{BOT_STEPS} Можно добавить позже в карточке клиента.</p><button className="button primary full" disabled={busy}>Создать</button></form></div>}
     {modal === "user" && <div className="modalBackdrop"><form className="modal" onSubmit={addUser}><div className="modalHead"><div><p className="eyebrow">Доступ в портал</p><h2>Добавить пользователя</h2></div><button type="button" className="close" onClick={() => setModal(null)}>×</button></div><label>Компания<select name="workspace_id" required defaultValue=""><option value="" disabled>Выберите компанию</option>{workspaces.map(w => <option value={w.id} key={w.id}>{w.name}</option>)}</select></label><label>Имя и фамилия<input name="display_name" required minLength={2} /></label><label>Логин<input name="username" required minLength={3} autoComplete="off" /></label><label>Роль<select name="role" defaultValue="client_owner">{roles.map(r => <option value={r.value} key={r.value}>{r.label}</option>)}</select></label><button className="button primary full" disabled={busy}>Создать доступ</button></form></div>}
     {modal === "credentials" && credentials && <div className="modalBackdrop"><div className="modal"><div className="modalHead"><div><p className="eyebrow">Показывается один раз</p><h2>Доступ создан</h2></div><button className="close" onClick={() => setModal(null)}>×</button></div><div className="credentialBox"><span>Адрес</span><strong><a href={portalLoginUrl} target="_blank" rel="noopener noreferrer">{portalLoginUrl}</a></strong><span>Логин</span><strong>{credentials.username}</strong><span>Временный пароль</span><strong>{credentials.password}</strong></div><p className="formHint">Передайте данные пользователю безопасным способом. После первого входа пароль следует заменить.</p><button className="button primary full" onClick={() => setModal(null)}>Готово</button></div></div>}
   </div>;

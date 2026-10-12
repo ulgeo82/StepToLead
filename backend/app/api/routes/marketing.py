@@ -19,7 +19,7 @@ from app.core.crypto import decrypt_secret, encrypt_secret
 from app.db import get_db
 from app.models.marketing import (AdCampaignMetricDaily, AdConnection, AdHypothesis, AdHypothesisCampaign,
                                   AdMetricDaily, ClientLeadAttribution, ClientWorkspace, LeadInboundReceipt,
-                                  LeadInboundSource, Project)
+                                  LeadInboundSource, PortalUser, Project)
 from app.services import avito
 from app.services.project_scope import default_project
 
@@ -485,6 +485,51 @@ async def create_workspace(payload: WorkspaceCreate, request: Request, db: Async
     await default_project(db, row.id)
     await db.commit(); await db.refresh(row)
     return row
+
+
+class WorkspaceBotIn(BaseModel):
+    token: str = Field(min_length=20, max_length=128)
+
+
+async def _workspace_bot_payload(db: AsyncSession, workspace_id: int) -> dict:
+    from app.services import client_bots
+    data = client_bots.public(await client_bots.bot_for(db, workspace_id))
+    users = (await db.scalars(select(PortalUser).where(PortalUser.workspace_id == workspace_id, PortalUser.active.is_(True)))).all()
+    bot = await client_bots.bot_for(db, workspace_id)
+    data["users"] = [{"id": u.id, "name": u.display_name,
+                      "status": "company_bot" if bot and (u.telegram_state or {}).get("bot_id") == bot.id
+                      else "agency_bot" if u.telegram_chat_id else "none"} for u in users]
+    return data
+
+
+@router.get("/workspaces/{workspace_id}/telegram-bot")
+async def get_workspace_bot(workspace_id: int, db: AsyncSession = Depends(get_db)):
+    if not await db.get(ClientWorkspace, workspace_id):
+        raise HTTPException(404, "Клиент не найден")
+    return await _workspace_bot_payload(db, workspace_id)
+
+
+@router.put("/workspaces/{workspace_id}/telegram-bot")
+async def put_workspace_bot(workspace_id: int, payload: WorkspaceBotIn, request: Request, db: AsyncSession = Depends(get_db)):
+    from app.services import client_bots
+    check_origin(request)
+    workspace = await db.get(ClientWorkspace, workspace_id)
+    if not workspace or workspace.status == "deleted":
+        raise HTTPException(404, "Клиент не найден")
+    try:
+        row = await client_bots.connect(db, workspace_id, payload.token, workspace.name)
+    except client_bots.BotTokenError as exc:
+        raise HTTPException(422, str(exc)) from None
+    invited = await client_bots.invite_existing(db, row)
+    return {**await _workspace_bot_payload(db, workspace_id), "invited": invited}
+
+
+@router.delete("/workspaces/{workspace_id}/telegram-bot")
+async def delete_workspace_bot(workspace_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    from app.services import client_bots
+    check_origin(request)
+    await client_bots.disconnect(db, workspace_id)
+    return await _workspace_bot_payload(db, workspace_id)
 
 
 @router.get("/workspaces/{workspace_id}/analysis")

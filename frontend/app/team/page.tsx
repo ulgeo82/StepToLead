@@ -103,7 +103,7 @@ export default function TeamPage() {
     <main className="resultMain teamMain"><div className="resultBreadcrumb">StepToLead <span>/</span> Команда</div>
       <header className="resultHeader teamHeader"><div><h1>Команда</h1><p>Сотрудники вашей организации и доступ к разделам клиентского кабинета.</p></div>
         {isOwner && <button className="teamPrimary" onClick={openInvite}>＋ Пригласить сотрудника</button>}</header>
-      {error && <div className="resultError" role="alert">{error}{!data && <div><Link href="/portal/login?next=/team">Войти в клиентский кабинет</Link></div>}</div>}{notice && <div className="teamNotice" role="status">{notice}</div>}
+      {error && <div className="resultError" role="alert">{error}{!data && <div><Link href="/login?next=/team">Войти в клиентский кабинет</Link></div>}</div>}{notice && <div className="teamNotice" role="status">{notice}</div>}
       {temporaryPassword && <div className="teamPassword" role="alert"><strong>Временный пароль</strong><code>{temporaryPassword}</code><span>Показан один раз. Email-приглашение не отправлялось.</span><button onClick={() => setTemporaryPassword(null)}>Скрыть</button></div>}
       {data && <><section className="teamStats">{([
         ["Всего сотрудников", counts.total, "♙"], ["Владельцы", counts.owner, "♛"],

@@ -91,12 +91,17 @@ class ChannelPatch(BaseModel):
     ai_mode: str | None = Field(default=None, pattern=r"^(off|suggest|auto)$")
 
 
-def reject_notification_token(kind: str, token: str | None):
+async def reject_notification_token(db: AsyncSession, kind: str, token: str | None):
     import secrets
     from app.core.config import settings
     if kind == "telegram_bot" and settings.telegram_bot_token and secrets.compare_digest(
             (token or "").strip().encode(), settings.telegram_bot_token.encode()):
         raise HTTPException(422, "Служебный бот StepToLead нельзя подключить как канал переписки")
+    if kind == "telegram_bot" and (token or "").strip():
+        from app.models.system import WorkspaceBot
+        from app.services.client_bots import token_hash
+        if await db.scalar(select(WorkspaceBot.id).where(WorkspaceBot.token_hash == token_hash(token.strip()))):
+            raise HTTPException(422, "Это бот уведомлений компании — для переписки с клиентами создайте отдельного бота")
 
 
 @router.get("/projects/{project_id}/channels")
@@ -124,7 +129,7 @@ async def create_channel(project_id: int, payload: ChannelIn, request: Request, 
     if payload.kind in {"email", "telegram_user"}:
         raise HTTPException(422, "Используйте отдельную форму подключения почты или Telegram-профиля")
     if payload.kind == "telegram_bot":
-        reject_notification_token(payload.kind, payload.token)
+        await reject_notification_token(db, payload.kind, payload.token)
         await plans.require(db, project.workspace_id, "all_chats")
     config: dict = {}
     if payload.kind == "avito":
@@ -171,7 +176,7 @@ async def edit_channel(channel_id: int, payload: ChannelPatch, request: Request,
     await project_for(db, user, channel.project_id)
     if not can_manage_channels(user):
         raise HTTPException(403, "Настраивать каналы может руководитель или владелец")
-    reject_notification_token(channel.kind, payload.token)
+    await reject_notification_token(db, channel.kind, payload.token)
     if payload.name: channel.name = payload.name.strip()
     if payload.active is not None: channel.active = payload.active
     if payload.ai_mode is not None: channel.ai_mode = payload.ai_mode

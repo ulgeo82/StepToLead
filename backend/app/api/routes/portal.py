@@ -305,14 +305,16 @@ async def reset_start(payload: ResetStart, request: Request, db: AsyncSession = 
     username = payload.username.strip().lower()
     user = await db.scalar(select(PortalUser).where(PortalUser.username == username))
     from app.services.notifications import telegram_api, telegram_configured
-    if user and user.active and user.telegram_chat_id and telegram_configured():
+    from app.services.notifications import can_telegram
+    if user and user.active and can_telegram(user):
         code = f"{secrets.randbelow(1_000_000):06d}"
         user.reset_code_hash = token_digest(f"{user.id}:{code}")
         user.reset_expires_at = datetime.now(timezone.utc) + RESET_TTL
         user.reset_attempts = 0
         await db.commit()
         try:
-            await telegram_api("sendMessage", {"chat_id": user.telegram_chat_id, "parse_mode": "HTML", "text":
+            from app.services.client_bots import send_to_user
+            await send_to_user(db, user, "sendMessage", {"chat_id": user.telegram_chat_id, "parse_mode": "HTML", "text":
                 f"Код для смены пароля StepToLead: <b>{code}</b>\nДействует 15 минут. Если это были не вы — просто проигнорируйте сообщение."})
         except Exception:
             pass  # same answer either way

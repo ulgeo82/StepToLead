@@ -273,7 +273,7 @@ export default function AnalyticsPage() {
   return <div className="resultShell analyticsShell"><ProjectSidebar project={selectedProject} projectId={projectId} active="analytics" role={data?.viewer.role}/><main className="resultMain"><div className="resultBreadcrumb">StepToLead <span>/</span> Аналитика</div>
     <header className="resultHeader"><div><h1>Аналитика</h1><p>Подробные причины результата по этапам воронки, каналам и кампаниям.</p></div><PeriodControls projects={projects} projectId={projectId} setProjectId={setProjectId} start={start} setStart={setStart} end={end} setEnd={setEnd}/></header>
     <div className="analyticsTopTabs" role="tablist">{TABS.map(item => <button key={item.key} role="tab" aria-selected={tab === item.key} className={tab === item.key ? "active" : ""} onClick={() => { setTab(item.key); const url = new URL(window.location.href); url.searchParams.set("tab", item.key); window.history.replaceState(null, "", url); }}>{item.label}</button>)}</div>
-    {error && <div className="resultError" role="alert">{error}{!projects.length && <div><Link href="/portal/login?next=/analytics">Войти в кабинет</Link> · <Link href="/login?next=/analytics">Войти как администратор</Link></div>}</div>}
+    {error && <div className="resultError" role="alert">{error}{!projects.length && <div><Link href="/login?next=/analytics">Войти в кабинет</Link> · <Link href="/login?next=/analytics">Войти как администратор</Link></div>}</div>}
     {loading && !data && <div className="resultLoading">Загружаем аналитику…</div>}
     {!loading && !data && !error && <div className="resultLoading">Проекты пока не созданы.</div>}
     {data && <>

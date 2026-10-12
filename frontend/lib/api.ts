@@ -108,10 +108,10 @@ export async function api<T>(path: string, options?: ApiOptions): Promise<T> {
     });
     if (!response.ok) {
       if (response.status === 401 && typeof window !== "undefined" && window.location.pathname.startsWith("/admin")) {
-        window.location.assign(`/login?next=${encodeURIComponent(window.location.pathname)}`);
+        window.location.assign(`/agency/login?next=${encodeURIComponent(window.location.pathname)}`);
       }
       if (response.status === 401 && typeof window !== "undefined" && window.location.pathname.startsWith("/portal")) {
-        window.location.assign(`/portal/login?next=${encodeURIComponent(window.location.pathname)}`);
+        window.location.assign(`/login?next=${encodeURIComponent(window.location.pathname)}`);
       }
       const body = await response.json().catch(() => null);
       const detail = body?.detail;

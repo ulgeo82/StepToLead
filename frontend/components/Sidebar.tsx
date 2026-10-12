@@ -92,7 +92,7 @@ export default function Sidebar() {
       <div className={styles.workspace}><span className={styles.avatar}>ЕД</span><span><small>Администратор</small><strong>StepToLead Agency</strong></span><span aria-hidden="true">⌄</span></div>
       <div className={styles.search}><label className={styles.srOnly} htmlFor="admin-section-search">Поиск по разделам</label><input ref={searchRef} id="admin-section-search" type="search" placeholder="Найти раздел…" value={query} onChange={event => setQuery(event.target.value)} /><kbd>⌘K / Ctrl K</kbd></div>
       <nav className={styles.navigation} aria-label="Разделы админки"><ul className={styles.root}>{filtered.map(renderNode)}</ul>{!filtered.length && <p className={styles.empty} role="status">Разделы не найдены</p>}</nav>
-      <div className={styles.footer}><button type="button" className={styles.logout} onClick={async () => { await fetch("/api/auth/logout", { method: "POST" }); window.location.assign("/login"); }}>Выйти</button><div className={styles.status}><span aria-hidden="true" /><div><strong>Система работает</strong><small>Локальная среда</small></div></div></div>
+      <div className={styles.footer}><button type="button" className={styles.logout} onClick={async () => { await fetch("/api/auth/logout", { method: "POST" }); window.location.assign("/agency/login"); }}>Выйти</button><div className={styles.status}><span aria-hidden="true" /><div><strong>Система работает</strong><small>Локальная среда</small></div></div></div>
     </aside>
   </>;
 }

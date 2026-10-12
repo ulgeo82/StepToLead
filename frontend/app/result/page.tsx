@@ -153,7 +153,7 @@ export default function ResultPage() {
     <ProjectSidebar project={selectedProject} projectId={projectId} active="result" role={data?.viewer.role}/>
     <main className="resultMain"><div className="resultBreadcrumb">StepToLead <span>/</span> Результат</div>
       <header className="resultHeader"><div><h1>Результат</h1><p>Главные показатели маркетинга и продаж за выбранный период.</p></div><PeriodControls projects={projects} projectId={projectId} setProjectId={setProjectId} start={start} setStart={setStart} end={end} setEnd={setEnd}/></header>
-      {error && <div className="resultError" role="alert">{error}{!projects.length && <div><Link href="/portal/login?next=/result">Войти в кабинет</Link> · <Link href="/login?next=/result">Войти как администратор</Link></div>}</div>}
+      {error && <div className="resultError" role="alert">{error}{!projects.length && <div><Link href="/login?next=/result">Войти в кабинет</Link> · <Link href="/login?next=/result">Войти как администратор</Link></div>}</div>}
       {loading && !data && <div className="resultLoading">Загружаем результат…</div>}
       {!loading && !data && !error && <div className="resultLoading">Проекты пока не созданы.</div>}
       {data && data.viewer.role !== "admin" && <LaunchPanel projectId={projectId}/>}

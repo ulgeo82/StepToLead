@@ -102,7 +102,7 @@ export default function Calculator() {
           </>}
         </div>
       </div>
-      <footer className="g-footer"><Link className="g-brand" href="/growth"><span>↗</span>StepToLead</Link><div><p>Базовая управленческая модель, а не бухгалтерское, финансовое или инвестиционное заключение.</p><p>Не учитывает налоги, кредиты, сезонность и кассовые разрывы отдельно. Не прогнозирует число лидов, стоимость привлечения или результат рекламы.</p></div><Link href="/login">Для команды ↗</Link></footer>
+      <footer className="g-footer"><Link className="g-brand" href="/growth"><span>↗</span>StepToLead</Link><div><p>Базовая управленческая модель, а не бухгалтерское, финансовое или инвестиционное заключение.</p><p>Не учитывает налоги, кредиты, сезонность и кассовые разрывы отдельно. Не прогнозирует число лидов, стоимость привлечения или результат рекламы.</p></div><Link href="/agency/login">Для команды ↗</Link></footer>
     </main>
   </div>;
 }

@@ -153,7 +153,7 @@ export default function AdsPage() {
     <main className="resultMain adsMain"><div className="resultBreadcrumb">StepToLead <span>/</span> Реклама</div>
       <header className="resultHeader adsHeader"><div><h1>Реклама</h1><p>Подключения и синхронизация кабинетов проекта. Анализ расходов и эффективности — в «Аналитике».</p></div>
         <div className="adsHeaderActions"><PeriodControls projects={projects} projectId={projectId} setProjectId={setProjectId} start={start} setStart={setStart} end={end} setEnd={setEnd}/>{canManage && <button className="adsBlueButton" onClick={() => setModal("connect")}>＋ Подключить рекламу</button>}</div></header>
-      {error && <div className="resultError" role="alert">{error}{!projects.length && <div><Link href="/portal/login?next=/ads">Войти в кабинет</Link> · <Link href="/login?next=/ads">Войти как администратор</Link></div>}</div>}
+      {error && <div className="resultError" role="alert">{error}{!projects.length && <div><Link href="/login?next=/ads">Войти в кабинет</Link> · <Link href="/login?next=/ads">Войти как администратор</Link></div>}</div>}
       {notice && <div className="adsNotice" role="status">{notice}</div>}
       {data && <><div className="adsAnalyticsLink"><Link href={`/analytics?tab=marketing${projectId ? `&project_id=${projectId}` : ""}`}>Смотреть маркетинговую аналитику →</Link></div>
         <section className="adsSources"><div className="adsSourcesHead"><div><h2>Рекламные платформы и кабинеты</h2><p>Только реальные подключения проекта. Общие маркетинговые источники сюда не включаются.</p></div>{canManage && activeAccounts.length > 0 && <button disabled={busy !== null} onClick={syncAll}>{busy === "all" ? "Синхронизируем…" : "↻ Синхронизировать все"}</button>}</div>

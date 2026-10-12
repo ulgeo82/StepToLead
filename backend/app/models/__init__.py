@@ -14,6 +14,6 @@ from app.models.tilda import TildaConnection, TildaReceipt
 __all__ = ["Campaign", "Lead", "LeadStatus", "Proxy", "TelegramAccount", "CampaignEvent", "ClientWorkspace", "AdConnection", "AdMetricDaily", "AdCampaignMetricDaily", "AdHypothesis", "AdHypothesisCampaign", "PortalUser", "PortalSession", "PortalNotification", "ClientLead", "ClientLeadEvent", "LeadInboundSource", "LeadInboundReceipt", "ClientLeadAttribution", "TelegramParseTask", "TelegramParsedContact", "TelegramParseLog"]
 from app.models.messaging import MessagingChannel, Conversation, Message, ReplyTemplate  # noqa: E402,F401
 from app.models.telephony import TelephonyConnection, Call  # noqa: E402,F401
-from app.models.system import AppSetting, PushSubscription  # noqa: E402,F401
+from app.models.system import AppSetting, PushSubscription, WorkspaceBot  # noqa: E402,F401
 from app.models.brief import ClientBrief, ExpressAssessment  # noqa: E402,F401
 from app.domains.leadgen.models import LgCompany, LgCompanyKey, LgSourceRun, LgAd, LgSignal, LgContact, LgEnrichment, LgSegment, LgTouch, LgDnc, LgMailbox, LgSequence, LgEnrollment  # noqa: E402,F401

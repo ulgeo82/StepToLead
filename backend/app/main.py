@@ -57,6 +57,9 @@ async def lifespan(_: FastAPI):
     tg_worker = asyncio.create_task(run_tg_bot()) if settings.telegram_bot_token else None
     if tg_worker:
         monitor.register("Telegram-бот", tg_worker)
+    from app.services.client_bots import run_worker as run_client_bots
+    client_bots_worker = asyncio.create_task(run_client_bots())
+    monitor.register("Боты клиентов", client_bots_worker)
     for name, task in (("Рассылки Telegram", runner), ("Сбор контактов", parser_worker), ("Авито", avito_worker),
                        ("Автоматизации CRM", crm_worker), ("Переписки", messaging_worker), ("Телефония", telephony_worker),
                        ("Контроль заявок и отчёты", watchdog), ("Обновление рекламы", ad_sync), ("Лидогенерация: повтор поиска", leadgen_repeat), ("Аутрич: цепочки и почта", leadgen_sequences)):
@@ -66,6 +69,7 @@ async def lifespan(_: FastAPI):
         yield
     finally:
         runner.cancel()
+        client_bots_worker.cancel()
         parser_worker.cancel()
         avito_worker.cancel()
         crm_worker.cancel()

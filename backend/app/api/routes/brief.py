@@ -144,7 +144,7 @@ async def public_submit(payload: PublicIn, request: Request, tasks: BackgroundTa
         demo_project.name=answers["what"][:180]
         origin=settings.frontend_origin.rstrip("/")
         lead.raw_payload={**lead.raw_payload,"brief_demo_access":{
-            "username":data["username"],"login_url":origin+"/portal/login",
+            "username":data["username"],"login_url":origin+"/login",
             "reset_url":origin+"/portal/reset?"+urlencode({"username":data["username"]})}}
         state=dict(demo_project.portal_state or {})
         personal={"company.name":str(answers.get("company") or answers["what"]), "company.what":answers["what"],
@@ -166,7 +166,7 @@ async def public_submit(payload: PublicIn, request: Request, tasks: BackgroundTa
     flush_telegram(db)
     tasks.add_task(admin_alert,row.id)
     return {"assessment_id":row.id,"lead_id":row.lead_id,"calculation":calculation,
-            "demo":{"username":data["username"],"password":data["password"],"login_url":"/portal/login"} if data else None,
+            "demo":{"username":data["username"],"password":data["password"],"login_url":"/login"} if data else None,
             "expires_at":row.expires_at,"booking_url":settings.brief_booking_url}
 
 

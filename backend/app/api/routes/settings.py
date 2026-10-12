@@ -23,6 +23,12 @@ DEFAULT_REASONS = ["Не отвечает", "Не подходит", "Не по�
 # Event catalogue lives with the delivery logic.
 
 
+async def _company_bot_ready(db, workspace_id):
+    from app.services import client_bots
+    row = await client_bots.bot_for(db, workspace_id)
+    return row is not None and row.active
+
+
 async def scoped(db, actor, project_id):
     project = await db.get(Project, project_id)
     if not project or project.workspace_id != actor.workspace_id:
@@ -200,7 +206,7 @@ async def get_settings(project_id: int, db: AsyncSession = Depends(get_db),
                           if calculation else None),
             "reasons": [reason_payload(row) for row in reason_rows], "sources": source_list,
             "notifications": notifications, "members": members,
-            "telegram_bot_configured": telegram_configured(),
+            "telegram_bot_configured": telegram_configured() or bool(await _company_bot_ready(db, project.workspace_id)),
             "permissions": sorted(effective_permissions(actor))}
 
 

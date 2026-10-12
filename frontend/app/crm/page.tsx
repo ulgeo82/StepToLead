@@ -269,7 +269,7 @@ export default function CrmPage() {
           {can("create_deal") && <button className="crmPrimary" onClick={() => { setNewDealPipelineId(currentPipelineId); setModal("deal"); }}>＋ Сделка</button>}</div></header>
       {error && <div className="resultError" role="alert">{error} <button onClick={() => setError("")}>×</button></div>}
       {notice && <div className="crmOkBar" role="status">{notice} <button onClick={() => setNotice("")}>×</button></div>}
-      {!projectId ? <div className="resultLoading">{error.includes("401") || error.includes("вход") ? <><p>Для работы с CRM войдите в клиентский кабинет.</p><Link href="/portal/login?next=%2Fcrm">Войти →</Link></> : "Нет доступного проекта"}</div> : <>
+      {!projectId ? <div className="resultLoading">{error.includes("401") || error.includes("вход") ? <><p>Для работы с CRM войдите в клиентский кабинет.</p><Link href="/login?next=%2Fcrm">Войти →</Link></> : "Нет доступного проекта"}</div> : <>
       <div className="crmTabs">{([["deals", "▣ Сделки"], ["chats", "💬 Чаты"], ["calls", "📞 Звонки"], ["inbound", "Неразобранное"], ["tasks", "◷ Задачи"], ["contacts", "♙ Контакты"], ["report", "📊 Аналитика продаж"],
         ...(can("manage_pipeline") ? [["automation", "⚡ Автоматизация"], ["pipeline", "⚙ Воронки и поля"]] : [])] as [Tab, string][]).map(([key, label]) =>
         <button key={key} className={tab === key ? "active" : ""} onClick={() => setTab(key)}>{label}{key === "inbound" && board?.inbound_count ? <b>{board.inbound_count}</b> : null}{key === "chats" && unreadChats ? <b>{unreadChats}</b> : null}</button>)}</div>

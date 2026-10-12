@@ -27,32 +27,45 @@ async def bot_username() -> str:
     return _bot_username
 
 
-def _status(user: PortalUser, username: str | None = None) -> dict:
-    return {"configured": telegram_configured(), "linked": bool(user.telegram_chat_id),
-            "telegram_username": user.telegram_username, "bot_username": username}
+async def _company_bot(db: AsyncSession, user: PortalUser):
+    from app.services import client_bots
+    row = await client_bots.bot_for(db, user.workspace_id)
+    return row if row and row.active and row.username else None
 
 
-def _require_bot():
-    if not telegram_configured():
-        raise HTTPException(409, "Telegram-бот не настроен: задайте TELEGRAM_BOT_TOKEN на сервере")
+async def _status(db: AsyncSession, user: PortalUser, username: str | None = None) -> dict:
+    company_bot = await _company_bot(db, user)
+    linked_to_company = bool(company_bot and (user.telegram_state or {}).get("bot_id") == company_bot.id)
+    return {"configured": telegram_configured() or bool(company_bot), "linked": bool(user.telegram_chat_id),
+            "telegram_username": user.telegram_username,
+            "bot_username": company_bot.username if company_bot else username,
+            "company_bot": bool(company_bot),
+            # Подключён к боту агентства, а у компании уже свой бот — предлагаем переподключиться.
+            "relink_suggested": bool(company_bot and user.telegram_chat_id and not linked_to_company)}
+
+
+async def _require_bot(db: AsyncSession, user: PortalUser):
+    if not telegram_configured() and not await _company_bot(db, user):
+        raise HTTPException(409, "Telegram-бот не настроен: подключите бот компании в портале")
 
 
 @router.get("")
-async def telegram_status(user: PortalUser = Depends(require_portal_user)):
+async def telegram_status(db: AsyncSession = Depends(get_db), user: PortalUser = Depends(require_portal_user)):
     username = None
-    if telegram_configured():
+    if telegram_configured() and not await _company_bot(db, user):
         try:
             username = await bot_username()
         except Exception as exc:
             logger.warning("telegram getMe failed: %s", exc)
-    return _status(user, username)
+    return await _status(db, user, username)
 
 
 @router.post("/link")
 async def start_link(db: AsyncSession = Depends(get_db), user: PortalUser = Depends(require_portal_user)):
-    _require_bot()
+    await _require_bot(db, user)
+    company_bot = await _company_bot(db, user)
     try:
-        username = await bot_username()
+        username = company_bot.username if company_bot else await bot_username()
     except Exception as exc:
         raise HTTPException(502, f"Telegram недоступен: {exc}") from None
     code = secrets.token_urlsafe(24)
@@ -64,19 +77,20 @@ async def start_link(db: AsyncSession = Depends(get_db), user: PortalUser = Depe
 
 @router.post("/check")
 async def check_link(db: AsyncSession = Depends(get_db), user: PortalUser = Depends(require_portal_user)):
-    _require_bot()
+    await _require_bot(db, user)
     await db.refresh(user)
-    return _status(user)
+    return await _status(db, user)
 
 
 @router.post("/test")
-async def send_test(user: PortalUser = Depends(require_portal_user)):
-    _require_bot()
+async def send_test(db: AsyncSession = Depends(get_db), user: PortalUser = Depends(require_portal_user)):
+    await _require_bot(db, user)
     if not user.telegram_chat_id:
         raise HTTPException(409, "Telegram ещё не подключён")
+    from app.services.client_bots import send_to_user
     try:
-        await telegram_api("sendMessage", {"chat_id": user.telegram_chat_id,
-                                           "text": "Тестовое уведомление StepToLead: всё работает ✅"})
+        await send_to_user(db, user, "sendMessage", {"chat_id": user.telegram_chat_id,
+                                                     "text": "Тестовое уведомление: всё работает ✅"})
     except Exception as exc:
         raise HTTPException(502, f"Telegram не принял сообщение: {exc}") from None
     return {"ok": True}
@@ -88,5 +102,6 @@ async def unlink(db: AsyncSession = Depends(get_db), user: PortalUser = Depends(
     user.telegram_username = None
     user.telegram_link_code_hash = None
     user.telegram_link_expires_at = None
+    user.telegram_state = {k: v for k, v in (user.telegram_state or {}).items() if k != "bot_id"}
     await db.commit()
-    return _status(user)
+    return await _status(db, user)

@@ -98,7 +98,7 @@ async def notify(db: AsyncSession, project_id: int | None, event_key: str, title
             db.add(PortalNotification(workspace_id=project.workspace_id, user_id=user.id, level="success",
                                       title=title[:180], body=body))
             push.queue(db, user.id, title, body, f"/crm?project_id={project.id}")
-        if state["telegram"] and telegram_configured() and user.telegram_chat_id and allowed(user, event_key, project.timezone):
+        if state["telegram"] and can_telegram(user) and allowed(user, event_key, project.timezone):
             lines = [f"<b>{html.escape(private_text(user, title))}</b> · {html.escape(project.name)}", html.escape(private_text(user, body))]
             lines += [html.escape(private_text(user, line)) for line in details or [] if line]
             db.sync_session.info.setdefault(PENDING_KEY, []).append({"chat_id": user.telegram_chat_id,
@@ -118,14 +118,21 @@ _last_send = 0.0
 _chat_sent: dict[str, float] = {}
 
 
+def can_telegram(user: PortalUser) -> bool:
+    """Есть куда слать: бот агентства настроен или человек подключён к своему боту компании."""
+    return bool(user.telegram_chat_id) and (telegram_configured() or bool((user.telegram_state or {}).get("bot_id")))
+
+
 async def telegram_api(method: str, payload: dict | None = None, timeout: float = 10) -> dict:
-    if not telegram_configured():
+    from app.services.telegram_http import current_token
+    token = current_token()
+    if not token:
         raise RuntimeError("TELEGRAM_BOT_TOKEN не задан")
     global _last_send
     for attempt in range(3):
         if method in {"sendMessage", "editMessageText"}:
             async with _api_lock:
-                chat = str((payload or {}).get("chat_id", ""))
+                chat = token[:12] + ":" + str((payload or {}).get("chat_id", ""))
                 await asyncio.sleep(max(0, .05 - (time.monotonic() - _last_send),
                     1 - (time.monotonic() - _chat_sent.get(chat, 0))))
                 _last_send = _chat_sent[chat] = time.monotonic()
@@ -134,7 +141,7 @@ async def telegram_api(method: str, payload: dict | None = None, timeout: float 
         try:
             from app.services.telegram_http import bot_url, client_options
             async with httpx.AsyncClient(timeout=timeout, **client_options()) as client:
-                response = await client.post(bot_url(settings.telegram_bot_token, method), json=payload or {})
+                response = await client.post(bot_url(token, method), json=payload or {})
                 data = response.json()
         except (httpx.HTTPError, ValueError):
             raise TelegramError(502) from None
@@ -173,12 +180,12 @@ async def _send_all(messages: list[dict]) -> None:
                         if not state["enabled"] or not state["telegram"]:
                             continue
                 message = {**message, "text": bounded_html(private_text(user, message["text"]))}
-            payload = {key: message[key] for key in ("chat_id", "text", "reply_markup") if message.get(key) is not None}
-            await telegram_api("sendMessage", {**payload, "parse_mode": "HTML", "disable_web_page_preview": True})
+                payload = {key: message[key] for key in ("chat_id", "text", "reply_markup") if message.get(key) is not None}
+                from app.services.client_bots import send_to_user
+                # Через бот компании, если сотрудник подключён к нему; иначе — через бот агентства.
+                # 403 (бот заблокирован) отвязывает человека внутри telegram_api — в том же боте.
+                await send_to_user(db, user, "sendMessage", {**payload, "parse_mode": "HTML", "disable_web_page_preview": True})
         except Exception as exc:  # Delivery is best-effort; the cabinet notification already exists.
-            if isinstance(exc, TelegramError) and exc.code == 403:
-                from app.services.tg_bot import unlink_blocked
-                await unlink_blocked(message["chat_id"])
             logger.warning("telegram notification failed type=%s", type(exc).__name__)
 
 
@@ -212,7 +219,7 @@ def direct(db: AsyncSession, workspace_id: int, user_ids: list[int], title: str,
                                   title=title[:180], body=body))
         from app.services import push
         push.queue(db, user.id, title, body)
-        if telegram_configured() and user.telegram_chat_id and allowed(user, event_key, check_quiet=not bool(project_id)):
+        if can_telegram(user) and allowed(user, event_key, check_quiet=not bool(project_id)):
             text = f"<b>{html.escape(private_text(user, title))}</b>\n{html.escape(private_text(user, body))}"
             db.sync_session.info.setdefault(PENDING_KEY, []).append({"chat_id": user.telegram_chat_id,
                 "text": bounded_html(text), "user_id": user.id, "event_key": event_key,

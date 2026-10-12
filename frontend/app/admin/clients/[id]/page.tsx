@@ -6,6 +6,7 @@ import { useParams } from "next/navigation";
 import { LaunchEditor } from "@/components/launch-editor";
 import {ClientBriefEntry} from "@/components/client-brief-entry";
 import {DedicatedTelegramProxy} from "@/components/dedicated-telegram-proxy";
+import { ClientTelegramBot } from "@/components/client-telegram-bot";
 import { AdminPlanPanel } from "@/components/plan-cards";
 import { api, ClientWorkspace, LeadInboundSource, PortalRole, PortalUser } from "@/lib/api";
 
@@ -25,12 +26,12 @@ export default function ClientDetailsPage() {
   const [sources, setSources] = useState<LeadInboundSource[]>([]);
   const [modal, setModal] = useState<"user" | "credentials" | "source" | "webhook" | null>(null);
   const [credentials, setCredentials] = useState<{ username: string; password: string } | null>(null);
-  const [portalLoginUrl, setPortalLoginUrl] = useState("/portal/login");
+  const [portalLoginUrl, setPortalLoginUrl] = useState("/login");
   const [webhook, setWebhook] = useState<{ url: string; token: string } | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState<number | string | null>(null);
-  useEffect(() => { setPortalLoginUrl(`${window.location.origin}/portal/login`); }, []);
+  useEffect(() => { setPortalLoginUrl(`${window.location.origin}/login`); }, []);
 
   const load = useCallback(async () => {
     try {
@@ -122,6 +123,7 @@ export default function ClientDetailsPage() {
     <AdminPlanPanel workspaceId={workspaceId}/>
     <LaunchEditor workspaceId={workspaceId}/>
     <ClientBriefEntry workspaceId={workspaceId}/>
+    <ClientTelegramBot workspaceId={workspaceId}/>
     <DedicatedTelegramProxy workspaceId={workspaceId}/>
     {modal === "user" && <div className="modalBackdrop"><form className="modal" onSubmit={addUser}><div className="modalHead"><div><p className="eyebrow">{workspace.name}</p><h2>Новый сотрудник</h2></div><button type="button" className="close" onClick={() => setModal(null)}>×</button></div><label>Имя и фамилия<input name="display_name" required minLength={2} autoFocus /></label><label>Логин<input name="username" required minLength={3} autoComplete="off" /></label><label>Роль<select name="role" defaultValue="sales_manager">{roles.map(role => <option value={role.value} key={role.value}>{role.label}</option>)}</select></label><p className="formHint">После создания вы увидите временный пароль. Позже роль и доступ можно менять прямо в карточке сотрудника.</p><button className="button primary full" disabled={busy === "user"}>{busy ? "Создаём…" : "Создать доступ"}</button></form></div>}
     {modal === "credentials" && credentials && <div className="modalBackdrop"><div className="modal"><div className="modalHead"><div><p className="eyebrow">Сохраните данные</p><h2>Данные для входа</h2></div><button className="close" onClick={() => setModal(null)}>×</button></div><div className="credentialBox"><span>Адрес</span><strong><a href={portalLoginUrl} target="_blank" rel="noopener noreferrer">{portalLoginUrl}</a></strong><span>Логин</span><strong>{credentials.username}</strong><span>Временный пароль</span><strong>{credentials.password}</strong></div><p className="formHint">Пароль показывается только сейчас. Позже можно выдать новый временный пароль из карточки сотрудника.</p><div className="credentialActions"><button className="button secondary" onClick={() => setModal("user")}>Добавить ещё сотрудника</button><button className="button primary" onClick={() => setModal(null)}>Готово</button></div></div></div>}

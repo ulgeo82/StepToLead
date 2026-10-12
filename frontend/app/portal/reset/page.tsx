@@ -37,6 +37,6 @@ export default function PortalReset() {
         <label className="g-field">Повторите пароль<input name="repeat" type="password" minLength={12} autoComplete="new-password" required /></label>
         {error && <p className="g-error">{error}</p>}<button className="g-button" disabled={busy}>{busy ? "Сохраняем…" : "Сменить пароль"}</button></form>
       <p className="g-small"><button type="button" className="g-linkButton" onClick={() => { setStep("login"); setError(""); }}>Запросить код ещё раз</button></p></>}
-    {step === "done" && <><p className="g-muted">Готово. На других устройствах вы вышли из кабинета — войдите с новым паролем.</p><Link className="g-button" href="/portal/login">Войти</Link></>}
-    {step !== "done" && <p className="g-small"><Link href="/portal/login">← Вернуться ко входу</Link></p>}</div></main>;
+    {step === "done" && <><p className="g-muted">Готово. На других устройствах вы вышли из кабинета — войдите с новым паролем.</p><Link className="g-button" href="/login">Войти</Link></>}
+    {step !== "done" && <p className="g-small"><Link href="/login">← Вернуться ко входу</Link></p>}</div></main>;
 }
