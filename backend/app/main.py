@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 import asyncio
 from contextlib import suppress
@@ -27,6 +28,13 @@ async def lifespan(_: FastAPI):
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
         await connection.run_sync(upgrade_existing_schema)
+    from app.db import SessionLocal
+    from app.services import runtime_settings
+    try:
+        async with SessionLocal() as db:
+            await runtime_settings.apply(db)  # ключи ИИ, заданные в портале, главнее .env
+    except Exception:
+        logging.getLogger("uvicorn.error").exception("Не удалось загрузить настройки подключений из портала")
     runner = asyncio.create_task(run_campaigns())
     parser_worker = asyncio.create_task(run_parser_worker())
     avito_worker = asyncio.create_task(run_avito_worker())

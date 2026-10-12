@@ -47,6 +47,34 @@ async def overview(db: AsyncSession = Depends(get_db)):
             "workspaces": [{"id": w.id, "name": w.name} for w in (await db.scalars(select(ClientWorkspace))).all()]}
 
 
+class SettingsIn(BaseModel):
+    values: dict[str, str | int | None] = Field(default_factory=dict)
+    clear: list[str] = Field(default_factory=list)
+
+
+@router.get("/settings")
+async def get_settings(db: AsyncSession = Depends(get_db)):
+    from app.services import runtime_settings
+    return {"fields": await runtime_settings.public(db)}
+
+
+@router.put("/settings")
+async def put_settings(payload: SettingsIn, request: Request, db: AsyncSession = Depends(get_db)):
+    from app.services import runtime_settings
+    check_origin(request)
+    provider = str(payload.values.get("llm_provider") or "").strip().lower()
+    if provider and provider not in ai.PROVIDER_NAMES:
+        raise HTTPException(422, "Неизвестный провайдер ИИ")
+    stt = str(payload.values.get("stt_provider") or "").strip().lower()
+    if stt and stt not in {"yandex", "openai"}:
+        raise HTTPException(422, "Распознавание речи: yandex или openai")
+    try:
+        await runtime_settings.save(db, payload.values, payload.clear)
+    except ValueError:
+        raise HTTPException(422, "Лимиты токенов — целые числа")
+    return {"fields": await runtime_settings.public(db)}
+
+
 @router.get("/usage")
 async def usage(days: int = 1, db: AsyncSession = Depends(get_db)):
     if days not in (1, 7, 30):
