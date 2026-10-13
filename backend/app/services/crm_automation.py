@@ -26,8 +26,20 @@ from app.models.marketing import PortalProjectAccess, PortalUser, Project
 from app.services.notifications import direct as notify_direct, flush_telegram
 
 logger = logging.getLogger("uvicorn.error.crm_automation")
-TRIGGERS = {"DEAL_CREATED", "STAGE_ENTER", "NO_ACTIVITY", "INBOUND_MESSAGE", "NO_REPLY"}
-ACTIONS = {"CREATE_TASK", "SET_RESPONSIBLE", "ADD_TAG", "NOTIFY", "SEND_TEMPLATE", "AI_REPLY"}
+# События по сделке: правило «когда … → перенести на этап / задача / тег / уведомление».
+# stage_id у такого правила — необязательное условие «только если сделка сейчас на этом этапе».
+EVENTS = {
+    "BRIEF_SUBMITTED": "Клиент заполнил бриф",
+    "CLIENT_REPLIED": "Клиент ответил в чате или на почту",
+    "CALL_DONE": "Состоялся разговор по телефону",
+    "MEETING_HELD": "Проведена встреча",
+    "TASK_DONE": "Выполнена задача",
+    "DOCUMENT_VIEWED": "Клиент открыл КП или счёт",
+    "DOCUMENT_PAID": "Счёт оплачен",
+}
+TRIGGERS = {"DEAL_CREATED", "STAGE_ENTER", "NO_ACTIVITY", "INBOUND_MESSAGE", "NO_REPLY", *EVENTS}
+ACTIONS = {"CREATE_TASK", "SET_RESPONSIBLE", "ADD_TAG", "NOTIFY", "SEND_TEMPLATE", "AI_REPLY", "MOVE_STAGE"}
+_depth = __import__("contextvars").ContextVar("crm_automation_depth", default=0)
 TASK_TYPES = {"CALL", "MEETING", "MESSAGE", "SEND", "FOLLOW_UP", "OTHER"}
 IDLE_POLL_SECONDS = 600
 
@@ -89,6 +101,8 @@ def describe(rule: CrmAutomation) -> str:
         return "Назначен ответственный" if params.get("mode") != "round_robin" else "Ответственный по очереди"
     if rule.action == "ADD_TAG":
         return f"Тег «{params.get('tag')}»"
+    if rule.action == "MOVE_STAGE":
+        return "Перенос на этап"
     return "Уведомление"
 
 
@@ -142,6 +156,10 @@ async def execute(db: AsyncSession, rule: CrmAutomation, deal: CrmDeal) -> str |
             return None
         deal.tags = normalize_tags([*(deal.tags or []), tag[0]])
         text = f"Добавлен тег «{tag[0]}»"
+    elif rule.action == "MOVE_STAGE":
+        text = await move_by_rule(db, rule, deal)
+        if text is None:
+            return None
     elif rule.action == "NOTIFY":
         to = params.get("to") or "owner"
         recipients = set()
@@ -157,6 +175,83 @@ async def execute(db: AsyncSession, rule: CrmAutomation, deal: CrmDeal) -> str |
         rule.fired_count = int(rule.fired_count or 0) + 1
         rule.last_fired_at = _now()
     return text
+
+
+async def move_by_rule(db: AsyncSession, rule: CrmAutomation, deal: CrmDeal) -> str | None:
+    """Перенос сделки правилом. Только на открытые этапы (лид/целевой) своей воронки, по умолчанию только вперёд;
+    продажу и отказ ставит человек (нужны сумма и причина). Обязательные поля этапа должны быть заполнены."""
+    from app.api.routes.crm import activity
+    from app.models.crm import CrmStageHistory
+    from app.models.marketing import ClientLead, ClientLeadEvent
+    params = rule.params or {}
+    target = await db.get(CrmStage, int(params.get("stage_id") or 0)) if params.get("stage_id") else None
+    current = await db.get(CrmStage, deal.stage_id)
+    if (not target or not current or target.pipeline_id != deal.pipeline_id or target.archived_at or target.id == current.id
+            or target.analytics_type not in {"LEAD", "QUALIFIED"} or deal.closed_at or deal.archived_at
+            or current.analytics_type in {"WON", "LOST"} or (current.analytics_type == "QUALIFIED" and target.analytics_type == "LEAD")):
+        return None
+    if params.get("forward_only", True) and (target.position or 0) <= (current.position or 0):
+        return None
+    values = {"name": deal.name, "amount": deal.amount, "responsible_user_id": deal.responsible_user_id, "source_id": deal.source_id}
+    if any((values[k] if k in values else (deal.custom_fields or {}).get(k)) in (None, "") for k in target.required_fields or []):
+        activity(db, deal, None, "AUTOMATION", {"rule_id": rule.id, "rule": rule.name,
+                 "text": f"Не перенесена на «{target.name}»: на этапе есть незаполненные обязательные поля"}, touch=False)
+        return None
+    db.add(CrmStageHistory(deal_id=deal.id, from_stage_id=current.id, to_stage_id=target.id, actor_id=None))
+    deal.stage_id, deal.stage_entered_at = target.id, _now()
+    activity(db, deal, None, "STAGE_CHANGED", {"from": current.name, "to": target.name, "analytics_type": target.analytics_type,
+                                               "auto": rule.name}, touch=False)
+    lead = await db.get(ClientLead, deal.lead_id) if deal.lead_id else None
+    if lead and target.analytics_type == "QUALIFIED":
+        lead.quality = lead.quality or "target"
+        if lead.qualified_at is None:
+            lead.qualified_at = _now()
+            db.add(ClientLeadEvent(workspace_id=lead.workspace_id, lead_id=lead.id, actor_id=None,
+                                   event_type="LEAD_QUALIFIED", description=f"Квалифицировано правилом «{rule.name}»"))
+        if lead.status not in {"won"}:
+            lead.status = "qualified"
+        from app.services import conversions
+        await conversions.record(db, deal, "qualified")
+    # Правила нового этапа тоже срабатывают (с защитой от зацикливания).
+    if _depth.get() < 3:
+        token = _depth.set(_depth.get() + 1)
+        try:
+            await on_stage_enter(db, deal, target)
+        finally:
+            _depth.reset(token)
+    return f"Перенесена на этап «{target.name}»"
+
+
+async def on_event(db: AsyncSession, deal: CrmDeal | None, event: str, data: dict | None = None) -> list[str]:
+    """Событие по сделке → правила этого события в её воронке. Не коммитит. Ошибка правила не ломает основное действие."""
+    if deal is None or event not in EVENTS or deal.archived_at:
+        return []
+    data = data or {}
+    rules = (await db.scalars(select(CrmAutomation).where(
+        CrmAutomation.pipeline_id == deal.pipeline_id, CrmAutomation.active.is_(True),
+        CrmAutomation.trigger == event).order_by(CrmAutomation.id))).all()
+    done = []
+    for rule in rules:
+        if rule.stage_id and rule.stage_id != deal.stage_id:
+            continue
+        conditions = rule.conditions or {}
+        if event == "TASK_DONE" and conditions.get("task_type") and conditions["task_type"] != data.get("task_type"):
+            continue
+        if event == "CALL_DONE" and int(data.get("duration") or 0) < int(conditions.get("min_duration") or 0):
+            continue
+        if not matches(rule, deal) or _already(deal, rule):
+            continue  # одно срабатывание правила на одно пребывание сделки на этапе — без спама
+        try:
+            async with db.begin_nested():
+                result = await execute(db, rule, deal)
+        except Exception:
+            logger.exception("automation rule %s failed on %s", rule.id, event)
+            continue
+        if not (rule.action == "MOVE_STAGE" and result):
+            _mark(deal, rule)
+        if result:
+            done.append(result)
+    return done
 
 
 def _mark(deal: CrmDeal, rule: CrmAutomation) -> None:
@@ -266,3 +361,6 @@ def recommended(pipeline_id: int, stages: list[CrmStage]) -> list[dict]:
 async def on_inbound_message(db, conversation, message):
     from app.services.chat_automation import on_message
     await on_message(db, conversation, message)
+    if message.direction == "in" and conversation.deal_id:
+        deal = await db.get(CrmDeal, conversation.deal_id)
+        await on_event(db, deal, "CLIENT_REPLIED")

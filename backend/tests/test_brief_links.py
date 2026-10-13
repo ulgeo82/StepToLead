@@ -59,6 +59,28 @@ class BriefLinkTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((brief.answers["company.what"], brief.status, brief.project_id), ("Кухни на заказ", "review", None))
             self.assertEqual(len((await db.scalars(select(CrmTask))).all()), 1)
 
+    async def test_event_rules_move_stage(self):
+        from app.models.crm import CrmAutomation, CrmPipeline
+        from app.services import crm_automation
+        async with self.sessions() as db:
+            deal = await db.get(CrmDeal, self.deal.id)
+            stages = (await db.scalars(select(CrmStage).where(CrmStage.pipeline_id == deal.pipeline_id).order_by(CrmStage.position))).all()
+            won = next(st for st in stages if st.analytics_type == "WON")
+            db.add_all([CrmAutomation(workspace_id=2, project_id=27, pipeline_id=deal.pipeline_id, name="Бриф → этап", trigger="BRIEF_SUBMITTED",
+                                      action="MOVE_STAGE", params={"stage_id": self.brief_stage.id}),
+                        CrmAutomation(workspace_id=2, project_id=27, pipeline_id=deal.pipeline_id, name="Счёт → продажа?", trigger="DOCUMENT_PAID",
+                                      action="MOVE_STAGE", params={"stage_id": won.id}),
+                        CrmAutomation(workspace_id=2, project_id=27, pipeline_id=deal.pipeline_id, stage_id=self.brief_stage.id, name="Задача",
+                                      trigger="STAGE_ENTER", action="CREATE_TASK", params={"title": "Разобрать бриф"})])
+            await db.commit()
+            done = await crm_automation.on_event(db, deal, "BRIEF_SUBMITTED")
+            self.assertEqual(deal.stage_id, self.brief_stage.id)
+            self.assertIn("Заполнил бриф", done[0])
+            tasks = (await db.scalars(select(CrmTask))).all()
+            self.assertEqual([t.title for t in tasks], ["Разобрать бриф"])  # правило нового этапа тоже сработало
+            self.assertEqual(await crm_automation.on_event(db, deal, "DOCUMENT_PAID"), [])  # в «Продажу» правилом нельзя
+            self.assertEqual(await crm_automation.on_event(db, deal, "BRIEF_SUBMITTED"), [])  # назад/повтор — нет
+
 
 if __name__ == "__main__":
     unittest.main()

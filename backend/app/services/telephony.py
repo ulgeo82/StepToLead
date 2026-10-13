@@ -402,6 +402,9 @@ async def link_crm(db: AsyncSession, conn: TelephonyConnection, call: Call) -> N
     human = answered or call.direction == "out"
     if deal:
         activity(db, deal, user if human else None, "CALL_LOGGED", payload, touch=human)
+        if answered:
+            from app.services import crm_automation
+            await crm_automation.on_event(db, deal, "CALL_DONE", {"duration": call.duration_sec or 0})
     elif inbound:
         activity(db, None, user if human else None, "CALL_LOGGED", payload, inbound=inbound, touch=False)
     callback_title = f"{CALLBACK_PREFIX} {pretty_phone(digits)}"[:220] if digits else None

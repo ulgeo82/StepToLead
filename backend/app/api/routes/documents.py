@@ -224,7 +224,11 @@ async def update_document(document_id: int, payload: DocumentUpdate, request: Re
             doc.paid_at = now()
             activity(db, deal, user, "DOCUMENT_PAID", {"document_id": doc.id,
                                                        "text": f"{documents.KINDS[doc.kind]} № {doc.number} оплачен"})
+            from app.services import crm_automation
+            await crm_automation.on_event(db, deal, "DOCUMENT_PAID")
     await db.commit()
+    from app.services.notifications import flush_telegram as _flush
+    _flush(db)
     return doc_json(doc)
 
 
@@ -271,6 +275,8 @@ async def public_document(token: str, request: Request, db: AsyncSession = Depen
             if deal:
                 label = f"{documents.KINDS[doc.kind]} № {doc.number}"
                 activity(db, deal, None, "DOCUMENT_VIEWED", {"document_id": doc.id, "text": f"Клиент открыл: {label}"}, touch=False)
+                from app.services import crm_automation
+                await crm_automation.on_event(db, deal, "DOCUMENT_VIEWED")
                 if deal.responsible_user_id:
                     owner = await db.get(PortalUser, deal.responsible_user_id)
                     if owner:

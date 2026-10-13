@@ -328,7 +328,12 @@ async def touch_deal(deal_id: int, payload: Touch, request: Request, db: AsyncSe
         lead = await db.get(ClientLead, deal.lead_id) if deal.lead_id else None
         if lead and lead.meeting_at is None:
             lead.meeting_at = now()
+    event = {"CALL": "CALL_DONE", "MEETING": "MEETING_HELD"}.get(payload.kind)
+    if event:
+        await crm_automation.on_event(db, deal, event, {"duration": 60})
     await db.commit()
+    from app.services.notifications import flush_telegram
+    flush_telegram(db)
     return {"ok": True}
 
 
@@ -423,6 +428,14 @@ async def validate_automation(db: AsyncSession, project_id: int, payload: Automa
         channel = await db.get(MessagingChannel, cid)
         if not channel or channel.project_id != project_id:
             raise HTTPException(422, "Канал не относится к проекту")
+    if payload.action == "MOVE_STAGE":
+        target = await stage_for(db, pipeline, int(params.get("stage_id") or 0))
+        if target.analytics_type not in {"LEAD", "QUALIFIED"}:
+            raise HTTPException(422, "Автоматически можно переносить только на рабочие этапы. Продажу и отказ отмечает менеджер")
+        if payload.stage_id and payload.stage_id == target.id:
+            raise HTTPException(422, "Этап условия и этап переноса совпадают")
+    if payload.trigger in crm_automation.EVENTS and payload.conditions.get("task_type") and payload.conditions["task_type"] not in crm_automation.TASK_TYPES:
+        raise HTTPException(422, "Неизвестный тип задачи")
     if payload.action == "CREATE_TASK" and not str(params.get("title") or "").strip():
         raise HTTPException(422, "Укажите название задачи")
     if payload.action == "ADD_TAG" and not str(params.get("tag") or "").strip():

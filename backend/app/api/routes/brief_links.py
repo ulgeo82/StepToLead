@@ -147,6 +147,10 @@ async def submit(token: str, payload: SaveIn, request: Request, db: AsyncSession
             db.add(CrmStageHistory(deal_id=deal.id, from_stage_id=deal.stage_id, to_stage_id=stage.id, actor_id=None))
             deal.stage_id, deal.stage_entered_at = stage.id, now
             moved = f" Сделка перенесена на этап «{stage.name}»."
+        from app.services import crm_automation
+        rules_done = await crm_automation.on_event(db, deal, "BRIEF_SUBMITTED")
+        if rules_done:
+            moved += " " + "; ".join(rules_done) + "."
         url = settings.frontend_origin.rstrip("/") + f"/admin/briefs?brief={brief.id}"
         activity(db, deal, None, "COMMENT_ADDED", {"text": f"📝 Клиент заполнил бриф ({len(brief.answers)} ответов): {url}.{moved}"})
         if deal.responsible_user_id:

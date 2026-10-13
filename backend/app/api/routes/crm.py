@@ -1273,6 +1273,9 @@ async def complete_task_core(task_id: int, payload: TaskComplete, db: AsyncSessi
     deal = await deal_for(db, user, task.deal_id) if task.deal_id else None
     if deal:
         activity(db, deal, user, "TASK_COMPLETED", {"task_id": task.id, "title": task.title, "result": payload.result})
+        await crm_automation.on_event(db, deal, "TASK_DONE", {"task_type": task.type_code})
+        if task.type_code == "MEETING":
+            await crm_automation.on_event(db, deal, "MEETING_HELD")
     next_task = None
     if payload.next_task:
         follow = payload.next_task
