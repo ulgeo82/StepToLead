@@ -106,3 +106,17 @@
 .funnelsPlan{border:1px solid #cfe0ff;border-radius:12px;padding:12px 14px;background:#f5f9ff}.funnelsPlan h4{margin:0 0 8px}
 .funnelsPlan p{font-size:11px;margin:4px 0 10px}.funnelsPlan .warn{color:#a35b00}.funnelsPlanActions{display:flex;gap:8px}
 .funnelsDone{color:#15784d;font-weight:600;font-size:12px}
+.briefDemoCta{display:block;width:100%;margin-top:8px;min-height:32px;border:0;border-radius:8px;background:#1a6cff;color:#fff;font-weight:700;font-size:11px;cursor:pointer}
+.briefDemoCta:hover{background:#0f56cb}
+.demoLaunchBackdrop{position:fixed;inset:0;z-index:80;background:#0f1d3280;display:grid;place-items:center;padding:16px}
+.demoLaunch{position:relative;width:min(560px,100%);max-height:90vh;overflow:auto;background:#fff;border-radius:16px;padding:26px 24px;color:#101c31;box-shadow:0 24px 70px #0f1d3255}
+.demoLaunch h2{margin:0 0 6px;font-size:20px;letter-spacing:-.5px}.demoLaunch>form>p,.demoLaunchDone p{margin:0 0 16px;color:#5b6d87;font-size:13px;line-height:1.5}
+.demoLaunchClose{position:absolute;top:10px;right:14px;border:0;background:none;font-size:22px;color:#8795a9;cursor:pointer}
+.demoLaunchField{display:flex;flex-direction:column;gap:6px;margin-bottom:14px;font-size:13px;font-weight:650}
+.demoLaunchField small{font-weight:400;color:#8795a9;font-size:11px}
+.demoLaunchField input,.demoLaunchField textarea{border:1px solid #d8e2f1;border-radius:9px;padding:9px 11px;font:inherit;font-weight:400}
+.demoLaunchOptions{display:flex;flex-wrap:wrap;gap:6px}.demoLaunchOptions button{min-height:32px;padding:0 12px;border:1px solid #d8e2f1;border-radius:16px;background:#fff;font-size:12px;cursor:pointer}
+.demoLaunchOptions button[aria-pressed=true]{border-color:#1a6cff;background:#e8f1ff;color:#0f56cb;font-weight:650}
+.demoLaunchPrimary{display:inline-block;margin-top:4px;min-height:42px;padding:11px 20px;border:0;border-radius:10px;background:#1a6cff;color:#fff;font-weight:750;font-size:14px;cursor:pointer;text-decoration:none}
+.demoLaunchDone button{margin-left:10px;border:0;background:none;color:#5b6d87;cursor:pointer}
+.demoLaunchError{color:#d9434f;font-size:12px}

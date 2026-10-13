@@ -1,4 +1,5 @@
 "use client";
+import { BrandMark } from "@/components/brand-mark";
 import BriefDemoBanner from "@/components/brief-demo-banner";
 
 import Link from "next/link";
@@ -21,7 +22,7 @@ export function ProjectSidebar({ project, projectId, active, role }: {
   useEffect(() => { api<{ permissions: string[] }>("/portal/auth/me").then(user => setPermissions(user.permissions)).catch(() => setPermissions([])); }, []);
   const allowed = (capability: string) => role === "admin" || permissions?.includes(capability);
   const suffix = projectId ? `?project_id=${projectId}` : "";
-  return <aside className="resultSidebar"><Link className="resultBrand" href={`/result${suffix}`}><span>↗</span> StepToLead</Link>
+  return <aside className="resultSidebar"><Link className="resultBrand" href={`/result${suffix}`} aria-label="StepToLead"><BrandMark tone="light" size={36}/></Link>
     <div className="resultProject"><small>ПРОЕКТ</small><strong>{project?.organization_name || "StepToLead"}</strong><span>{project?.name || "Выберите проект"}</span></div><BriefDemoBanner projectId={projectId}/>
     <nav aria-label="Навигация"><small>АНАЛИТИКА</small>
       {allowed("view_result") && <Link className={active === "result" ? "active" : ""} href={`/result${suffix}`}><b>01</b> Результат</Link>}

@@ -176,3 +176,11 @@
 .aiSettings details{margin:4px 0 12px}.aiSettings summary{cursor:pointer;color:#006bfd;font-size:11px;font-weight:600;margin-bottom:10px}
 .aiSettings .linkButton{border:0;background:none;padding:0;color:#c0392b;font-size:10px;cursor:pointer;text-decoration:underline}
 .aiSaved{color:#1a8f4c!important;font-weight:600}
+.stlBrand{display:inline-flex;align-items:center;gap:9px;font-weight:780;letter-spacing:-.6px;white-space:nowrap}
+.stlBrand img{flex-shrink:0;display:block}
+.stlBrand b{color:#1a6cff;font-weight:inherit}
+.stlBrand.dark .stlBrandText{color:#14213a}.stlBrand.light .stlBrandText{color:#fff}
+.resultBrand>.stlBrand,.g-brand>.stlBrand{width:auto!important;height:auto!important;border:0!important;border-radius:0!important;background:none!important;display:inline-flex!important;place-items:initial;font-size:inherit!important;line-height:normal}
+.launchRequests{margin-bottom:16px}.launchRow{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:12px 0;border-top:1px solid var(--line)}
+.launchRow>div{min-width:0;display:flex;flex-direction:column;gap:3px}.launchRow span{color:var(--muted);font-size:12px}.launchRow small{color:var(--muted);font-size:11px;line-height:1.4}
+.launchResult{margin-top:12px}.launchCheck{flex-direction:row!important;align-items:center;gap:8px}

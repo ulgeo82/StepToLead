@@ -1,4 +1,5 @@
 "use client";
+import { BrandMark } from "@/components/brand-mark";
 import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
@@ -26,7 +27,7 @@ export default function PortalReset() {
     try { await api("/portal/auth/reset/finish", json({ username, code: String(f.get("code") || "").trim(), new_password: f.get("new_password") })); setStep("done"); }
     catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   }
-  return <main className="growth g-login"><div className="g-card"><Link className="g-brand" href="/growth"><span>↗</span> StepToLead</Link><p className="g-kicker">Клиентский портал</p>
+  return <main className="growth g-login"><div className="g-card"><div className="g-brand"><BrandMark size={40}/></div><p className="g-kicker">Клиентский портал</p>
     <h1>{step === "done" ? "Пароль изменён" : "Восстановить доступ"}</h1>
     {step === "login" && <><p className="g-muted">Пришлём код в Telegram-бот StepToLead — если вы подключили его в настройках уведомлений.</p>
       <form onSubmit={start}><label className="g-field">Логин<input value={username} onChange={e => setUsername(e.target.value)} autoComplete="username" required autoFocus /></label>

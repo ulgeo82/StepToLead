@@ -17,6 +17,8 @@ internal_router.include_router(marketing.router)
 api_router = APIRouter()
 from app.api.routes import brief
 api_router.include_router(brief.router)
+from app.api.routes import demo_launch
+api_router.include_router(demo_launch.router)
 api_router.include_router(ai_admin.router)
 api_router.include_router(access.router)
 api_router.include_router(growth.public_router)

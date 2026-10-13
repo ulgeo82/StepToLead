@@ -1,4 +1,5 @@
 "use client";
+import { BrandMark } from "@/components/brand-mark";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
@@ -78,7 +79,7 @@ export default function Calculator() {
   const copy = result ? statusCopy[result.status] : null;
   const contactUrl = process.env.NEXT_PUBLIC_GROWTH_CONTACT_URL || "/contact";
   return <div className="growth">
-    <header className="g-header"><div className="g-wrap"><Link href="/growth" className="g-brand" aria-label="StepToLead — главная"><span>↗</span>StepToLead</Link><p>Понятная экономика. Уверенные решения.</p><span className="g-header-tag">Бизнес-инструменты</span></div></header>
+    <header className="g-header"><div className="g-wrap"><Link href="/growth" className="g-brand" aria-label="StepToLead — главная"><BrandMark size={36}/></Link><p>Понятная экономика. Уверенные решения.</p><span className="g-header-tag">Бизнес-инструменты</span></div></header>
     <main className="g-wrap g-main">
       <div className="g-topline"><span className="g-kicker">РЕШЕНИЯ НА ОСНОВЕ ЦИФР</span><nav className="g-steps" aria-label="Этапы"><span aria-current="step"><b>01</b> Экономика</span><i>—</i><span><b>02</b> Маркетинг</span></nav></div>
       <section className="g-intro"><div><h1>Калькулятор<br />экономики роста<span>.</span></h1><p>Проверьте, сколько зарабатывает бизнес<br className="g-desktop" /> и какой бюджет он выдержит без потери устойчивости.</p></div><div className="g-intro-note"><span>7 показателей · один месяц</span><p>Не прогноз лидов.<br />Основа для решения о росте.</p></div></section>
@@ -102,7 +103,7 @@ export default function Calculator() {
           </>}
         </div>
       </div>
-      <footer className="g-footer"><Link className="g-brand" href="/growth"><span>↗</span>StepToLead</Link><div><p>Базовая управленческая модель, а не бухгалтерское, финансовое или инвестиционное заключение.</p><p>Не учитывает налоги, кредиты, сезонность и кассовые разрывы отдельно. Не прогнозирует число лидов, стоимость привлечения или результат рекламы.</p></div><Link href="/agency/login">Для команды ↗</Link></footer>
+      <footer className="g-footer"><Link className="g-brand" href="/growth"><BrandMark size={32}/></Link><div><p>Базовая управленческая модель, а не бухгалтерское, финансовое или инвестиционное заключение.</p><p>Не учитывает налоги, кредиты, сезонность и кассовые разрывы отдельно. Не прогнозирует число лидов, стоимость привлечения или результат рекламы.</p></div><Link href="/agency/login">Для команды ↗</Link></footer>
     </main>
   </div>;
 }
