@@ -39,6 +39,8 @@ async def create(project_id: int, payload: EmailIn, request: Request,
     project = await project_for(db, user, project_id)
     if not can_manage_channels(user):
         raise HTTPException(403, "Настраивать каналы может руководитель или владелец")
+    from app.services import plans
+    await plans.require_full(db, project.workspace_id)
     if not valid_email(payload.email) or "\n" in payload.login or "\r" in payload.login:
         raise HTTPException(422, "Укажите корректный email и логин")
     config = payload.model_dump(exclude={"name", "password"})

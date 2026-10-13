@@ -254,6 +254,8 @@ async def run_worker() -> None:
             async with SessionLocal() as db:
                 from app.services.brief import expire_demos
                 await expire_demos(db)
+                from app.api.routes.demo_launch import expire_live_demos
+                await expire_live_demos(db)
                 await run_once(db)
         except asyncio.CancelledError:
             raise

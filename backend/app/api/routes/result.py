@@ -13,10 +13,50 @@ from app.models.marketing import (AdCampaignMetricDaily, AdConnection, AdHypothe
                                   ClientLeadEvent, ClientSale, ClientWorkspace, PortalUser,
                                   LeadInboundSource, PortalProjectAccess, Project, ProjectEconomics, ProjectSource,
                                   SourceMetricDaily)
-from app.services.result_analytics import manual_source_key, result_facts
+from app.services.result_analytics import load_lead_rows, manual_source_key, result_facts
 from app.services.business_economics import EconomicsInput, calculateBusinessEconomics
 
 router = APIRouter(prefix="/result", tags=["result"])
+
+
+@router.get("/audit")
+async def advertising_audit(request: Request, project_id: int, db: AsyncSession = Depends(get_db)):
+    from app.services.ad_audit import audit
+    project, kind, user = await scoped_project(db, request, project_id)
+    require_actor_permission(kind, user, "view_analytics")
+    current = datetime.now(timezone.utc)
+    cached = (project.portal_state or {}).get("audit_cache") or {}
+    try:
+        saved = datetime.fromisoformat(cached["created_at"])
+        age = (current - saved).total_seconds()
+        if 0 <= age < 600 and saved.date() == current.date() and isinstance(cached.get("data"), dict):
+            return cached["data"]
+    except (KeyError, TypeError, ValueError):
+        pass
+    connections = (await db.scalars(select(AdConnection).where(AdConnection.project_id == project.id))).all()
+    rows = (await db.scalars(select(AdCampaignMetricDaily).join(AdConnection).where(
+        AdConnection.project_id == project.id,
+        AdCampaignMetricDaily.date >= current.date() - timedelta(days=29),
+        AdCampaignMetricDaily.date <= current.date()).order_by(AdCampaignMetricDaily.date))).all()
+    leads = await load_lead_rows(db, project.id)
+    link = await db.scalar(select(ProjectEconomics).where(ProjectEconomics.project_id == project.id))
+    calculation = await db.get(GrowthCalculation, link.growth_calculation_id) if link else None
+    # CAC is not CPL. Never invent a lead-to-sale conversion to turn one into the other.
+    economics = {}
+    if calculation:
+        for source in (calculation.inputs or {}, calculation.results or {},
+                       (calculation.results or {}).get("metrics", {})):
+            for field in ("allowable_cpl", "limit_cpl"):
+                if source.get(field) is not None:
+                    economics[field] = source[field]
+    result = audit(project, connections, rows, leads, economics, today=current.date())
+    # Reread under a row lock so another writer's portal_state sections are not overwritten.
+    project = await db.scalar(select(Project).where(Project.id == project.id).with_for_update()
+                              .execution_options(populate_existing=True))
+    project.portal_state = {**(project.portal_state or {}),
+                           "audit_cache": {"created_at": current.isoformat(), "data": result}}
+    await db.commit()
+    return result
 
 
 def reporting_period(start: date | None, end: date | None):

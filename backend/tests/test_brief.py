@@ -84,7 +84,7 @@ class BriefTests(unittest.TestCase):
             self.assertEqual(access["reset_url"],settings.frontend_origin.rstrip("/")+"/portal/reset?username=demo-test")
             self.assertNotIn("password",access)
             self.assertNotIn("one-time-password",json.dumps(lead.raw_payload))
-            self.assertAlmostEqual((row.expires_at.replace(tzinfo=timezone.utc)-row.created_at.replace(tzinfo=timezone.utc)).total_seconds()/86400,14,places=3)
+            self.assertAlmostEqual((row.expires_at.replace(tzinfo=timezone.utc)-row.created_at.replace(tzinfo=timezone.utc)).total_seconds()/86400,7,places=3)
         self.run_db(check)
 
     def test_global_demo_cap_keeps_lead_and_does_not_create_another_demo(self):

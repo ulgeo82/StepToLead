@@ -128,6 +128,7 @@ async def create_channel(project_id: int, payload: ChannelIn, request: Request, 
         raise HTTPException(422, "Неизвестный тип канала")
     if payload.kind in {"email", "telegram_user"}:
         raise HTTPException(422, "Используйте отдельную форму подключения почты или Telegram-профиля")
+    await plans.require_full(db, project.workspace_id)
     if payload.kind == "telegram_bot":
         await reject_notification_token(db, payload.kind, payload.token)
         await plans.require(db, project.workspace_id, "all_chats")

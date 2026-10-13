@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     ai_workspace_daily_token_limit: int = 0
     ai_prices: str = "{}"
     agency_workspace_id: int = 0
-    brief_demo_ttl_days: int = 14
+    brief_demo_ttl_days: int = 7
     brief_demo_daily_cap: int = 30
     brief_booking_url: str = "/contact"
     brief_privacy_url: str = ""

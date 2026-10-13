@@ -165,7 +165,7 @@ async def process(db, conversation, *, at=None, can_send=None):
     at = at or now()
     channel = await db.get(MessagingChannel, conversation.channel_id)
     project = await db.get(Project, conversation.project_id)
-    if not channel or not channel.active or not project or project.status == "demo":
+    if not channel or not channel.active or not project or project.status in {"demo", "trial"}:
         return 0
     pending = dict((conversation.meta or {}).get("auto_pending") or {})
     rules = (await db.scalars(select(CrmAutomation).where(

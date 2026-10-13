@@ -30,7 +30,7 @@ def now() -> datetime:
 
 def _base():
     return select(AdConnection).join(Project, Project.id == AdConnection.project_id).where(
-        AdConnection.platform.in_(PLATFORMS), Project.status == "active")
+        AdConnection.platform.in_(PLATFORMS), Project.status.in_(("active", "trial")))
 
 
 async def due(db) -> list[int]:

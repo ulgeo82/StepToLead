@@ -22,9 +22,14 @@ PLANS = {
     "system": {"name": "Система", "price": 110000, "users": None, "features": set(FEATURES)},
 }
 ORDER = ["start", "growth", "system"]
+# Живое демо: свои рекламные кабинеты на чтение, без каналов, телефонии, ИИ и команды. Не продаётся, в ORDER нет.
+PLANS["trial"] = {"name": "Демо", "price": 0, "users": 1, "features": set()}
+TRIAL_HINT = "В демо это недоступно — работает в вашем портале. Нажмите «Хочу такой портал», и мы всё подключим."
 
 
 def plan_info(code: str | None) -> dict:
+    if code == "trial":
+        return {"code": "trial", "name": "Демо", "users": 1, "features": [], "price": None}
     if code not in PLANS:
         return {"code": None, "name": "Индивидуальный", "users": None, "features": sorted(FEATURES), "price": None}
     plan = PLANS[code]
@@ -35,7 +40,7 @@ def allows(code: str | None, feature: str) -> bool:
     return code not in PLANS or feature in PLANS[code]["features"]
 
 
-def lowest_with(feature: str) -> str:
+def lowest_with(feature: str) -> str:  # noqa: D401
     return next(PLANS[c]["name"] for c in ORDER if feature in PLANS[c]["features"])
 
 
@@ -48,7 +53,19 @@ async def has(db: AsyncSession, workspace_id: int, feature: str) -> bool:
     return allows(await plan_of(db, workspace_id), feature)
 
 
+async def is_trial(db: AsyncSession, workspace_id: int) -> bool:
+    return await plan_of(db, workspace_id) == "trial"
+
+
+async def require_full(db: AsyncSession, workspace_id: int) -> None:
+    """Функции, которые тратят деньги или пишут клиентам, — не в живом демо."""
+    if await is_trial(db, workspace_id):
+        raise HTTPException(403, TRIAL_HINT)
+
+
 async def require(db: AsyncSession, workspace_id: int, feature: str) -> None:
+    if await is_trial(db, workspace_id):
+        raise HTTPException(403, TRIAL_HINT)
     if not await has(db, workspace_id, feature):
         raise HTTPException(403, f"«{FEATURES[feature]}» входит в тариф «{lowest_with(feature)}». Чтобы подключить, напишите вашему маркетологу StepToLead.")
 
@@ -59,6 +76,8 @@ async def require_seat(db: AsyncSession, workspace_id: int) -> None:
     if limit is None:
         return
     active = await db.scalar(select(func.count(PortalUser.id)).where(PortalUser.workspace_id == workspace_id, PortalUser.active.is_(True)))
+    if active >= limit and code == "trial":
+        raise HTTPException(403, TRIAL_HINT)
     if active >= limit:
         raise HTTPException(403, f"В тарифе «{PLANS[code]['name']}» до {limit} сотрудников в портале. Отключите неактивного сотрудника или перейдите на тариф выше.")
 

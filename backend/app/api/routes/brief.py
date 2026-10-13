@@ -190,7 +190,7 @@ async def managed_project(db, user, project_id):
     project = await project_for(db, user, project_id)
     if user.role != "client_owner":
         raise HTTPException(403, "Бриф меняет владелец клиента или администратор агентства")
-    if project.status == "demo":
+    if project.status in {"demo", "trial"}:
         raise HTTPException(403, "Полный бриф доступен после подключения рабочего кабинета. Обратитесь к менеджеру")
     return project
 
@@ -302,7 +302,10 @@ async def import_text(project_id: int, payload: TextIn, db: AsyncSession = Depen
 async def demo_status(project_id: int, db: AsyncSession = Depends(get_db), user: PortalUser = Depends(brief_actor)):
     from app.models.access import AdminUser
     project = await managed_project(db,user,project_id) if isinstance(user,AdminUser) else await project_for(db,user,project_id)
-    return {"demo": (project.portal_state or {}).get("brief_demo"), "booking_url": settings.brief_booking_url}
+    state = project.portal_state or {}
+    demo = state.get("brief_demo") or ({"created_by": "agency"} if project.status in {"demo", "trial"} else None)
+    return {"demo": demo, "live": state.get("demo_live") if project.status == "trial" else None,
+            "booking_url": settings.brief_booking_url}
 
 
 @admin.get("")

@@ -9,20 +9,19 @@ import json
 import logging
 import re
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone  # noqa: F401
 from html import escape
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.access import check_origin, hash_password, require_admin, require_portal_user
+from app.core.access import check_origin, require_admin, require_portal_user
 from app.core.config import settings
 from app.db import get_db
 from app.models.brief import ClientBrief, ExpressAssessment
-from app.models.marketing import ClientWorkspace, PortalProjectAccess, PortalUser, Project
+from app.models.marketing import ClientWorkspace, PortalUser, Project
 from app.services import brief as brief_service
 from app.services import brief_funnels
 from app.services.project_scope import default_project
@@ -53,22 +52,33 @@ TEMPLATE_HINTS = [("kitchens", r"кухн|мебел|шкаф"), ("houses", r"д
 
 
 async def _demo_context(db: AsyncSession, user: PortalUser, project_id: int):
+    """Любой демо-кабинет: из экспресс-оценки (есть ответы) или созданный агентством в админке."""
     from app.api.routes.crm import project_for
     project = await project_for(db, user, project_id)
+    if project.status not in {"demo", "trial"}:
+        raise HTTPException(404, "Это не демо-кабинет")
     demo = (project.portal_state or {}).get("brief_demo") or {}
     row = await db.get(ExpressAssessment, int(demo["assessment_id"])) if demo.get("assessment_id") else None
-    if not row or row.demo_workspace_id != project.workspace_id:
-        raise HTTPException(404, "Это не демо-кабинет")
+    if row and row.demo_workspace_id != project.workspace_id:
+        row = None
     return project, row
+
+
+async def _lead_for(db: AsyncSession, project: Project, row: ExpressAssessment | None):
+    """Заявка агентства: из экспресс-оценки или созданная этим демо раньше."""
+    from app.models.crm import CrmInbound
+    if row:
+        return await db.get(CrmInbound, row.lead_id)
+    lead_id = (project.portal_state or {}).get("demo_launch_lead_id")
+    return await db.get(CrmInbound, int(lead_id)) if lead_id else None
 
 
 @router.get("/brief/demo/launch")
 async def launch_form(project_id: int, db: AsyncSession = Depends(get_db), user: PortalUser = Depends(require_portal_user)):
-    from app.models.crm import CrmInbound
-    _, row = await _demo_context(db, user, project_id)
-    lead = await db.get(CrmInbound, row.lead_id)
+    project, row = await _demo_context(db, user, project_id)
+    lead = await _lead_for(db, project, row)
     sent = (lead.raw_payload or {}).get("launch_request") if lead else None
-    a = row.answers or {}
+    a = (row.answers if row else {}) or {}
     prefill = {"budget": a.get("budget", ""), "start": a.get("start", ""), "contact": a.get("contact", ""),
                "directions": a.get("what", "")}
     return {"questions": QUESTIONS, "prefill": {**prefill, **((sent or {}).get("answers") or {})},
@@ -91,17 +101,46 @@ def _clean(answers: dict) -> dict:
     return result
 
 
+async def _new_agency_lead(db: AsyncSession, project: Project, answers: dict):
+    """Демо, созданное агентством: заявки ещё нет — заводим её в «Неразобранном» агентства."""
+    from app.api.routes.portal import InboundLead
+    from app.models.marketing import LeadInboundSource
+    from app.services.inbound_lead import create_inbound
+    agency = await db.get(ClientWorkspace, settings.agency_workspace_id) if settings.agency_workspace_id else None
+    if not agency or agency.status != "active":
+        return None
+    agency_project = await default_project(db, agency.id)
+    source = await db.scalar(select(LeadInboundSource).where(LeadInboundSource.project_id == agency_project.id,
+                                                              LeadInboundSource.name == "Демо-портал"))
+    if not source:
+        source = LeadInboundSource(workspace_id=agency.id, project_id=agency_project.id, name="Демо-портал",
+                                   token_hash=secrets.token_hex(32), token_prefix="demo", active=False, auto_assign=True, auto_accept=False)
+        db.add(source); await db.flush()
+    contact = answers["contact"]
+    phone = contact if len(re.sub(r"\D", "", contact)) >= 10 and not contact.startswith("@") else None
+    result = await create_inbound(db, source, InboundLead(full_name=(project.name or "Клиент из демо")[:180], contact=contact,
+        contact_method="Telegram" if contact.startswith("@") else "Телефон", phone=phone, source="Демо-портал",
+        contact_consent=True, notes="Из демо-портала: хочет свой портал"), allow_raw_contact=True, commit=False)
+    from app.models.crm import CrmInbound
+    lead = await db.get(CrmInbound, result["inbound_id"])
+    lead.raw_payload = {**(lead.raw_payload or {}), "demo_workspace_id": project.workspace_id}
+    project.portal_state = {**(project.portal_state or {}), "demo_launch_lead_id": lead.id}
+    return lead
+
+
 @router.post("/brief/demo/launch")
 async def launch_submit(project_id: int, payload: LaunchIn, request: Request, db: AsyncSession = Depends(get_db),
                         user: PortalUser = Depends(require_portal_user)):
     from app.api.routes.crm import activity
     from app.models.crm import CrmDeal, CrmInbound, CrmTask
     check_origin(request)
-    _, row = await _demo_context(db, user, project_id)
+    project, row = await _demo_context(db, user, project_id)
     answers = _clean(payload.answers)
-    lead = await db.get(CrmInbound, row.lead_id)
+    lead = await _lead_for(db, project, row)
     if not lead:
-        raise HTTPException(404, "Заявка не найдена")
+        lead = await _new_agency_lead(db, project, answers)
+        if not lead:
+            raise HTTPException(503, "Приём заявок агентства пока не настроен")
     previous = (lead.raw_payload or {}).get("launch_request") or {}
     if previous.get("at") and datetime.fromisoformat(previous["at"]) > datetime.now(timezone.utc) - timedelta(minutes=2):
         return {"ok": True, "booking_url": settings.brief_booking_url}
@@ -119,13 +158,76 @@ async def launch_submit(project_id: int, payload: LaunchIn, request: Request, db
     try:
         from app.services import monitor
         url = settings.frontend_origin.rstrip("/") + f"/crm?project_id={lead.project_id}" + (f"&deal={deal.id}" if deal else "")
-        await monitor.send(db, f"🔥 Из демо хотят свой портал\n{escape(row.answers.get('name', ''))} · {escape(row.answers.get('what', ''))}\n"
+        who = (row.answers if row else {}) or {}
+        await monitor.send(db, f"🔥 Из демо хотят свой портал\n{escape(who.get('name') or project.name)} · {escape(who.get('what') or answers['directions'][:80])}\n"
                                f"Бюджет: {escape(answers['budget'])} · старт: {escape(answers['start'])}\n"
                                f"Созвон: {escape(answers['call'])} · {escape(answers['contact'])}\n"
                                f'<a href="{escape(url, quote=True)}">Открыть заявку</a>')
     except Exception:
         logger.exception("launch alert failed")
     return {"ok": True, "booking_url": settings.brief_booking_url}
+
+
+# ------------------------------------------------------------------ живое демо
+
+LIVE_DAYS = 7
+
+
+@router.post("/brief/demo/go-live")
+async def go_live(project_id: int, request: Request, db: AsyncSession = Depends(get_db),
+                  user: PortalUser = Depends(require_portal_user)):
+    """«Очистить демо и подключить свои кабинеты»: новый пустой кабинет-демо на 7 дней, человек переносится туда,
+    кабинет с вымышленными данными удаляется. Рекламные кабинеты подключаются только на чтение (тариф «Демо»)."""
+    from app.services import workspace_archive
+    check_origin(request)
+    project, row = await _demo_context(db, user, project_id)
+    if project.status != "demo":
+        raise HTTPException(409, "Демо уже очищено — подключайте свои рекламные кабинеты в разделе «Реклама»")
+    if user.role != "client_owner":
+        raise HTTPException(403, "Очистить демо может владелец демо-кабинета")
+    old = await db.get(ClientWorkspace, project.workspace_id)
+    now = datetime.now(timezone.utc)
+    base = re.sub(r"^Демо · ", "", old.name).split(" · ")[0][:120]
+    workspace = ClientWorkspace(name=f"Живое демо · {base} · {secrets.token_hex(2)}", plan="trial")
+    db.add(workspace); await db.flush()
+    live = await default_project(db, workspace.id)
+    live.name, live.status = project.name, "trial"
+    state = {k: v for k, v in (project.portal_state or {}).items() if k in {"ai", "brief_demo", "demo_launch_lead_id"}}
+    state["demo_live"] = {"started_at": now.isoformat(), "expires_at": (now + timedelta(days=LIVE_DAYS)).isoformat()}
+    live.portal_state = state
+    user.workspace_id = workspace.id
+    if row:
+        row.demo_workspace_id = workspace.id
+        row.expires_at = now + timedelta(days=LIVE_DAYS)
+    lead = await _lead_for(db, project, row)
+    if lead:
+        lead.raw_payload = {**(lead.raw_payload or {}), "demo_workspace_id": workspace.id}
+    await db.flush()
+    await workspace_archive.delete_workspace(db, old)  # пользователь уже перенесён — его сессия не трогается
+    await db.commit()
+    return {"project_id": live.id, "expires_at": state["demo_live"]["expires_at"]}
+
+
+async def expire_live_demos(db: AsyncSession, now: datetime | None = None) -> int:
+    """Через 7 дней живое демо удаляется вместе с ключами доступа к рекламным кабинетам."""
+    from app.models.marketing import AdConnection
+    from app.services import workspace_archive
+    now = now or datetime.now(timezone.utc)
+    count = 0
+    for project in (await db.scalars(select(Project).where(Project.status == "trial"))).all():
+        until = ((project.portal_state or {}).get("demo_live") or {}).get("expires_at")
+        if not until or datetime.fromisoformat(until) > now:
+            continue
+        workspace = await db.get(ClientWorkspace, project.workspace_id)
+        if not workspace or workspace.status == "deleted":
+            continue
+        for connection in (await db.scalars(select(AdConnection).where(AdConnection.workspace_id == workspace.id))).all():
+            connection.access_token_encrypted = ""
+            connection.vk_refresh_token_encrypted = connection.vk_client_secret_encrypted = None
+        await workspace_archive.delete_workspace(db, workspace)
+        count += 1
+    await db.commit()
+    return count
 
 
 # ------------------------------------------------------------------ админка: перевод в клиента
@@ -166,70 +268,68 @@ def brief_answers(express: dict, launch: dict) -> dict:
     return {k: str(v)[:10000] for k, v in mapped.items() if v and k in brief_service.ALL_QUESTIONS}
 
 
+async def _launch_leads(db: AsyncSession):
+    from app.models.crm import CrmInbound
+    rows = (await db.scalars(select(CrmInbound).where(CrmInbound.workspace_id == settings.agency_workspace_id)
+                             .order_by(CrmInbound.id.desc()).limit(1000))).all() if settings.agency_workspace_id else []
+    return [lead for lead in rows if (lead.raw_payload or {}).get("launch_request")]
+
+
+async def _express_for(db: AsyncSession, lead):
+    aid = (lead.raw_payload or {}).get("assessment_id")
+    return await db.get(ExpressAssessment, int(aid)) if aid else None
+
+
 @admin.get("")
 async def launch_requests(db: AsyncSession = Depends(get_db)):
-    from app.models.crm import CrmInbound
-    rows = (await db.execute(select(ExpressAssessment, CrmInbound).join(CrmInbound, CrmInbound.id == ExpressAssessment.lead_id)
-                             .order_by(ExpressAssessment.id.desc()).limit(300))).all()
     out = []
-    for row, lead in rows:
-        launch = (lead.raw_payload or {}).get("launch_request")
-        if not launch:
-            continue
-        a = row.answers or {}
-        out.append({"assessment_id": row.id, "lead_id": lead.id, "name": a.get("name"), "company": a.get("company") or a.get("what"),
-                    "what": a.get("what"), "city": a.get("city"), "contact": a.get("contact"), "launch": launch,
-                    "converted_workspace_id": (lead.raw_payload or {}).get("converted_workspace_id"),
-                    "demo_workspace_id": row.demo_workspace_id})
+    for lead in await _launch_leads(db):
+        row = await _express_for(db, lead)
+        a = (row.answers if row else {}) or {}
+        launch = lead.raw_payload["launch_request"]
+        out.append({"lead_id": lead.id, "name": a.get("name") or lead.name, "company": a.get("company") or a.get("what") or lead.name,
+                    "what": a.get("what"), "city": a.get("city"), "contact": a.get("contact") or launch["answers"].get("contact"),
+                    "launch": launch, "converted_workspace_id": (lead.raw_payload or {}).get("converted_workspace_id"),
+                    "demo_workspace_id": (row.demo_workspace_id if row else None) or (lead.raw_payload or {}).get("demo_workspace_id")})
     return out
 
 
 class ConvertIn(BaseModel):
     company_name: str = Field(min_length=2, max_length=180)
-    owner_name: str = Field(min_length=2, max_length=180)
-    owner_username: str = Field(min_length=3, max_length=80, pattern=r"^[a-zA-Z0-9._@-]+$")
     bot_token: str | None = Field(default=None, max_length=128)
     delete_demo: bool = True
 
 
-@admin.post("/{assessment_id}/convert")
-async def convert(assessment_id: int, payload: ConvertIn, request: Request, db: AsyncSession = Depends(get_db)):
+@admin.post("/{lead_id}/convert")
+async def convert(lead_id: int, payload: ConvertIn, request: Request, db: AsyncSession = Depends(get_db)):
+    """Новый чистый кабинет без пользователей: доступы агентство выдаёт само в карточке клиента."""
     from app.api.routes.crm import activity
     from app.models.crm import CrmDeal, CrmInbound
     from app.services import workspace_archive
     check_origin(request)
-    row = await db.get(ExpressAssessment, assessment_id)
-    lead = await db.get(CrmInbound, row.lead_id) if row else None
-    if not row or not lead:
+    lead = await db.get(CrmInbound, lead_id)
+    if not lead or lead.workspace_id != settings.agency_workspace_id or not (lead.raw_payload or {}).get("launch_request"):
         raise HTTPException(404, "Заявка не найдена")
     if (lead.raw_payload or {}).get("converted_workspace_id"):
         raise HTTPException(409, "Кабинет по этой заявке уже создан")
     name = payload.company_name.strip()
     if await db.scalar(select(ClientWorkspace.id).where(func.lower(ClientWorkspace.name) == name.lower())):
         raise HTTPException(409, "Клиент с таким названием уже существует")
-    username = payload.owner_username.strip().lower()
-    if await db.scalar(select(PortalUser.id).where(PortalUser.username == username)):
-        raise HTTPException(409, "Логин уже занят")
-    express, launch = row.answers or {}, ((lead.raw_payload or {}).get("launch_request") or {}).get("answers") or {}
+    row = await _express_for(db, lead)
+    express, launch = (row.answers if row else {}) or {}, lead.raw_payload["launch_request"].get("answers") or {}
     workspace = ClientWorkspace(name=name)
     db.add(workspace); await db.flush()
     project = await default_project(db, workspace.id)
-    project.name = (express.get("what") or name)[:180]
-    if launch.get("site") and hasattr(project, "website"):
+    project.name = (express.get("what") or (launch.get("directions") or "").split("\n")[0] or name)[:180]
+    if launch.get("site"):
         project.website = launch["site"][:500]
-    password = secrets.token_urlsafe(12)
-    owner = PortalUser(workspace_id=workspace.id, username=username, display_name=payload.owner_name.strip(), role="client_owner",
-                       password_hash=await run_in_threadpool(hash_password, password))
-    if hasattr(owner, "must_change_password"):
-        owner.must_change_password = True
-    db.add(owner); await db.flush()
-    db.add(PortalProjectAccess(user_id=owner.id, project_id=project.id))
     answers = brief_answers(express, launch)
     db.add(ClientBrief(workspace_id=workspace.id, project_id=project.id, lead_id=lead.id, answers=answers, source="demo", status="draft"))
     knowledge = brief_service.fallback_knowledge(answers)
     state = dict(project.portal_state or {})
     state["ai"] = {**dict(state.get("ai") or {}), **{k: knowledge[k] for k in ("knowledge", "tone", "goal")}}
-    state["baseline"] = brief_service.baseline_from_answers(express, express=True)
+    if express:
+        state["baseline"] = brief_service.baseline_from_answers(express, express=True)
     project.portal_state = state
     await db.flush()
     funnels = brief_funnels.parse(answers.get(brief_funnels.KEY))
@@ -237,13 +337,25 @@ async def convert(assessment_id: int, payload: ConvertIn, request: Request, db: 
         from app.api.routes.crm import pipeline_for
         await pipeline_for(db, project.id, commit=False)
         await brief_funnels.plan(db, project, funnels, apply=True)
-    demo = await db.get(ClientWorkspace, row.demo_workspace_id) if row.demo_workspace_id else None
+    demo_id = (row.demo_workspace_id if row else None) or (lead.raw_payload or {}).get("demo_workspace_id")
+    demo = await db.get(ClientWorkspace, int(demo_id)) if demo_id else None
+    moved = 0
+    if demo and demo.plan == "trial" and demo.status != "deleted":
+        # Кабинеты, подключённые в живом демо, переезжают в настоящий кабинет — переподключать не нужно.
+        from app.models.marketing import AdConnection, ProjectSource
+        for connection in (await db.scalars(select(AdConnection).where(AdConnection.workspace_id == demo.id))).all():
+            connection.workspace_id, connection.project_id = workspace.id, project.id
+            moved += 1
+        demo_projects = [p.id for p in (await db.scalars(select(Project).where(Project.workspace_id == demo.id))).all()]
+        for source in (await db.scalars(select(ProjectSource).where(ProjectSource.project_id.in_(demo_projects),
+                                                                   ProjectSource.connection_id.is_not(None)))).all() if demo_projects else []:
+            source.project_id = project.id
     if payload.delete_demo and demo and demo.status != "deleted":
         await workspace_archive.delete_workspace(db, demo)
     lead.raw_payload = {**(lead.raw_payload or {}), "converted_workspace_id": workspace.id}
     deal = await db.get(CrmDeal, lead.deal_id) if lead.deal_id else None
     if deal:
-        activity(db, deal, None, "COMMENT_ADDED", {"text": f"Создан кабинет клиента «{name}», владелец {username}"})
+        activity(db, deal, None, "COMMENT_ADDED", {"text": f"Создан кабинет клиента «{name}». Доступы выдаются в карточке клиента."})
     await db.commit()
     bot = None
     if payload.bot_token and payload.bot_token.strip():
@@ -252,8 +364,7 @@ async def convert(assessment_id: int, payload: ConvertIn, request: Request, db: 
             bot = (await client_bots.connect(db, workspace.id, payload.bot_token, name)).username
         except client_bots.BotTokenError as exc:
             bot = f"не подключён: {exc}"
-    return {"workspace_id": workspace.id, "project_id": project.id, "username": username, "password": password,
-            "login_url": settings.frontend_origin.rstrip("/") + "/login", "pipelines": len(funnels) or 1,
+    return {"workspace_id": workspace.id, "project_id": project.id, "pipelines": len(funnels) or 1, "ad_connections": moved,
             "brief_answers": len(answers), "demo_deleted": bool(payload.delete_demo and demo), "bot": bot}
 
 
