@@ -1,0 +1,17 @@
+.pbShell{min-height:100vh;background:#f3f6fb;padding:28px 16px;--b-ink:#101c31;--b-text:#1f3049;--b-muted:#687b98;--b-accent:#1a6cff;color:#101c31;font-family:inherit}
+.pbWrap{max-width:1080px;margin:0 auto}.pbCard{max-width:520px;margin:60px auto;padding:28px;background:#fff;border-radius:16px;box-shadow:0 10px 40px #0f1d3214}
+.pbCard h1{margin:18px 0 8px;font-size:22px}.pbCard p{color:#5b6d87;line-height:1.55}
+.pbHeader{display:flex;gap:18px;align-items:center;margin-bottom:16px}.pbHeader h1{margin:0;font-size:24px;letter-spacing:-.6px}.pbHeader p{margin:4px 0 0;color:#5b6d87;font-size:13px;max-width:640px}
+.pbProgress{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:12px 14px;background:#fff;border-radius:12px;margin-bottom:14px;font-size:12px}
+.pbProgress progress{flex:1;min-width:120px;height:6px}.pbProgress span{color:#8795a9}
+.pbLayout{display:grid;grid-template-columns:230px minmax(0,1fr);gap:14px;align-items:start}
+.pbLayout .briefRail{position:sticky;top:16px;display:flex;flex-direction:column;gap:4px;background:#fff;border-radius:12px;padding:10px}
+.pbLayout .briefRail button{text-align:left;border:0;background:none;padding:8px 10px;border-radius:8px;font-size:12px;cursor:pointer;color:#1f3049}
+.pbLayout .briefRail button[aria-current=step]{background:#e8f1ff;color:#0f56cb;font-weight:700}.pbLayout .briefRail small{color:#8795a9;margin-left:4px}
+.pbSection{background:#fff;border-radius:12px;padding:20px 22px}.pbSection h2{margin:0 0 4px}.pbSection>p{margin:0 0 14px;color:#5b6d87;font-size:13px}
+.pbSection input,.pbSection textarea{width:100%;border:1px solid #d8e2f1;border-radius:9px;padding:9px 11px;font:inherit;font-size:13px;box-sizing:border-box}
+.pbField{display:flex;flex-direction:column;gap:5px;margin-bottom:12px;font-size:13px;font-weight:650;max-width:460px}
+.pbSection .briefActions{display:flex;gap:8px;margin-top:18px}.pbSection .briefActions button{min-height:38px;padding:0 18px;border:1px solid #d8e2f1;border-radius:9px;background:#fff;cursor:pointer;font-weight:650}
+.pbSection .briefActions .pbSubmit{background:#1a6cff;border-color:#1a6cff;color:#fff}
+.pbPrivacy{display:block;margin-top:10px;color:#8795a9;font-size:11px}
+@media(max-width:760px){.pbLayout{grid-template-columns:1fr}.pbLayout .briefRail{position:static;flex-direction:row;overflow-x:auto}.pbLayout .briefRail button{white-space:nowrap}.pbHeader{flex-direction:column;align-items:flex-start}}
