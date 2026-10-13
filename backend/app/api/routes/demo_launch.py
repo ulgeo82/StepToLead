@@ -230,6 +230,101 @@ async def expire_live_demos(db: AsyncSession, now: datetime | None = None) -> in
     return count
 
 
+# ------------------------------------------------------------------ ИИ-разбор аудита: один на демо, дёшево
+
+AUDIT_PROMPT = ("Ты — маркетолог агентства StepToLead. По данным экспресс-аудита рекламы за 30 дней напиши владельцу бизнеса "
+                "коротко и по делу: 3 главные потери и что сделать с каждой (1–2 предложения). Используй только цифры из данных, "
+                "ничего не придумывай и не обещай результат. Если находок нет — скажи, каких данных не хватает для вывода. "
+                "Без приветствий, без markdown-таблиц, до 120 слов.")
+
+
+@router.post("/result/audit/ai")
+async def audit_ai(project_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    """Демо: один разбор на кабинет (≈600 токенов ответа, дешевле 1 ₽). Клиенты: по тарифу с ИИ, раз в сутки."""
+    from app.api.routes.result import advertising_audit, scoped_project
+    from app.services import ai, plans
+    check_origin(request)
+    project, _, _ = await scoped_project(db, request, project_id)
+    demo = project.status in {"demo", "trial"}
+    saved = (project.portal_state or {}).get("audit_ai") or {}
+    today = datetime.now(timezone.utc).date().isoformat()
+    if saved.get("text") and (demo or saved.get("date") == today):
+        return {**saved, "repeat": False}
+    if not demo:
+        await plans.require(db, project.workspace_id, "ai_chat")
+    if not ai.configured("summary"):
+        raise HTTPException(409, "ИИ-разбор временно недоступен — смотрите находки аудита выше")
+    data = await advertising_audit(request, project_id, db)
+    compact = {"spend_rub": data.get("spend"), "leads": data.get("leads"), "loss_rub": data.get("total_loss_rub"),
+               "niche": project.name, "findings": [{"title": f["title"], "loss_rub": f["loss_rub"],
+                                                    "campaigns": [c["campaign_name"] for c in f["campaigns"]][:5]}
+                                                   for f in data.get("findings", [])[:8]]}
+    try:
+        text_ = await ai.complete(AUDIT_PROMPT, [{"role": "user", "content": json.dumps(compact, ensure_ascii=False)}],
+                                  max_tokens=500, temperature=0.2, feature="summary", workspace_id=project.workspace_id)
+    except ai.AIError as exc:
+        raise HTTPException(409, str(exc)) from None
+    result = {"text": text_.strip()[:2000], "date": today}
+    project = await db.scalar(select(Project).where(Project.id == project.id).with_for_update().execution_options(populate_existing=True))
+    project.portal_state = {**(project.portal_state or {}), "audit_ai": result}
+    await db.commit()
+    return {**result, "repeat": False}
+
+
+# ------------------------------------------------------------------ тестовая заявка по QR: «заявка за секунду»
+
+@router.get("/brief/demo/test-lead")
+async def test_lead_link(project_id: int, db: AsyncSession = Depends(get_db), user: PortalUser = Depends(require_portal_user)):
+    import io
+    import segno
+    project, _ = await _demo_context(db, user, project_id)
+    state = dict(project.portal_state or {})
+    token = state.get("demo_test_token")
+    if not token:
+        token = secrets.token_urlsafe(18)
+        project.portal_state = {**state, "demo_test_token": token}
+        await db.commit()
+    url = settings.frontend_origin.rstrip("/") + f"/try/{token}"
+    buffer = io.BytesIO()
+    segno.make(url, error="m").save(buffer, kind="svg", scale=5, border=2, dark="#101c31", xmldecl=False)
+    return {"url": url, "svg": buffer.getvalue().decode()}
+
+
+class TestLeadIn(BaseModel):
+    name: str = Field(min_length=2, max_length=120)
+    phone: str = Field(min_length=5, max_length=40)
+    comment: str = Field(default="", max_length=500)
+
+
+@router.post("/public/try/{token}")
+async def test_lead_submit(token: str, payload: TestLeadIn, request: Request, db: AsyncSession = Depends(get_db)):
+    from app.api.routes.access import rate_limit
+    from app.api.routes.portal import InboundLead
+    from app.models.marketing import LeadInboundSource
+    from app.services.inbound_lead import create_inbound
+    from app.services.notifications import flush_telegram
+    await rate_limit(request, "demo_test_lead", 10, 3600)
+    if len(token) < 16:
+        raise HTTPException(404, "Ссылка не найдена")
+    projects = (await db.scalars(select(Project).where(Project.status.in_(("demo", "trial"))))).all()
+    project = next((p for p in projects if secrets.compare_digest(str((p.portal_state or {}).get("demo_test_token") or ""), token)), None)
+    if not project:
+        raise HTTPException(404, "Ссылка устарела")
+    source = await db.scalar(select(LeadInboundSource).where(LeadInboundSource.project_id == project.id,
+                                                              LeadInboundSource.name == "Тестовая заявка"))
+    if not source:
+        source = LeadInboundSource(workspace_id=project.workspace_id, project_id=project.id, name="Тестовая заявка",
+                                   token_hash=secrets.token_hex(32), token_prefix="try", active=False, auto_assign=True, auto_accept=False)
+        db.add(source); await db.flush()
+    await create_inbound(db, source, InboundLead(full_name=payload.name.strip(), phone=payload.phone.strip(), contact=payload.phone.strip(),
+                                                 contact_method="Телефон", source="Тестовая заявка", contact_consent=True,
+                                                 notes=payload.comment.strip() or "Тестовая заявка с телефона"),
+                         allow_raw_contact=True, commit=False)
+    await db.commit()
+    flush_telegram(db)
+    return {"ok": True}
+
+
 # ------------------------------------------------------------------ админка: перевод в клиента
 
 def _template_for(name: str) -> str:

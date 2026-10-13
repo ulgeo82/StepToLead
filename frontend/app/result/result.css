@@ -24,3 +24,6 @@
 @media(max-width:420px){.resultKpis{grid-template-columns:1fr}.resultKpi{min-height:110px}.resultModalGrid{grid-template-columns:1fr}.resultHeader h1{font-size:34px}}
 .resultEconomicsAction{width:100%;margin:12px 0 6px;background:#fff;cursor:pointer}.resultEconomicsAction+.resultOutlineLink{margin-top:0}.resultHeader,.resultControls{align-items:flex-end}
 .resultSidebarFoot button{padding:0;border:0;background:none;color:#c0cbd9;font-size:10px;text-decoration:underline;cursor:pointer}
+.resultAuditAi{margin-top:14px;padding:12px 14px;border-radius:10px;background:#f4f8ff;border:1px solid #dbe8ff}
+.resultAuditAi h3{margin:0 0 6px;font-size:13px}.resultAuditAi p{margin:0;white-space:pre-line;font-size:12px;line-height:1.55;color:#1f3049}
+.resultAuditAi small{display:block;margin-top:6px;color:#d9434f}

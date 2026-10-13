@@ -122,3 +122,5 @@
 .demoLaunchError{color:#d9434f;font-size:12px}
 .briefDemoGhost{display:block;width:100%;margin-top:8px;min-height:30px;border:1px solid #ffffff33;border-radius:8px;background:none;color:#dfe7f2;font-size:10px;font-weight:650;cursor:pointer}
 .briefDemoGhost:hover{border-color:#63a5ff;color:#fff}.briefDemoError{display:block;margin-top:6px;color:#ff8a94}
+.demoQr{text-align:center}.demoQrCode{display:flex;justify-content:center;margin:12px 0}.demoQrCode svg{width:220px;height:220px}
+.demoQr a{font-size:11px;color:#1a6cff;word-break:break-all}

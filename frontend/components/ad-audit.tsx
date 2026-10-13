@@ -23,6 +23,14 @@ export function AdAudit({ projectId }: { projectId: number }) {
   const [error, setError] = useState("");
   const [revision, setRevision] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [ai, setAi] = useState<{ text: string } | null>(null);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiError, setAiError] = useState("");
+  async function explain() {
+    setAiBusy(true); setAiError("");
+    try { setAi(await api<{ text: string }>(`/result/audit/ai?project_id=${projectId}`, { method: "POST", timeoutMs: 90_000 })); }
+    catch (e) { setAiError(e instanceof Error ? e.message : "Не удалось получить разбор"); } finally { setAiBusy(false); }
+  }
 
   useEffect(() => {
     const controller = new AbortController();
@@ -60,6 +68,9 @@ export function AdAudit({ projectId }: { projectId: number }) {
             {finding.loss_rub === 0 && <small>Денежная потеря не подтверждена.</small>}
           </li>)}
         </ul>
+        <div className="resultAuditAi">{ai ? <><h3>Разбор ИИ</h3><p>{ai.text}</p></>
+          : <button className="resultOutlineLink" disabled={aiBusy} onClick={() => void explain()}>{aiBusy ? "ИИ разбирает находки…" : "✨ Разбор ИИ: что делать с этими потерями"}</button>}
+          {aiError && <small role="alert">{aiError}</small>}</div>
       </> : <p className="resultCalm">{data.spend === 0
         ? "Подключите рекламный кабинет — аудит построится автоматически"
         : "По доступным данным проблем не найдено. Правила без достаточных данных пропущены."}</p>}

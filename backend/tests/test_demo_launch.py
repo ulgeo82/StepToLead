@@ -128,6 +128,30 @@ class DemoLaunchTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(conn.access_token_encrypted, "")
             self.assertEqual((await db.get(ClientWorkspace, 11)).status, "deleted")
 
+    async def test_ai_audit_once_in_demo_and_test_lead(self):
+        from unittest.mock import AsyncMock
+        async with self.sessions() as db:
+            demo = await db.get(Project, 90); demo.status = "trial"; demo.portal_state = {"demo_test_token": "t" * 24}
+            await db.commit()
+            complete = AsyncMock(return_value="1) Кампания «Кухни» потратила 12 000 ₽ без заявок — проверьте цели.")
+            audit_data = {"spend": 12000, "leads": 0, "total_loss_rub": 12000, "findings": [
+                {"title": "Расход без заявок и целей", "loss_rub": 12000, "campaigns": [{"campaign_name": "Кухни"}]}]}
+            with patch.object(demo_launch, "check_origin"), \
+                    patch("app.api.routes.result.scoped_project", AsyncMock(return_value=(demo, "client", None))), \
+                    patch("app.api.routes.result.advertising_audit", AsyncMock(return_value=audit_data)), \
+                    patch("app.services.ai.configured", return_value=True), patch("app.services.ai.complete", complete):
+                first = await demo_launch.audit_ai(90, None, db)
+                second = await demo_launch.audit_ai(90, None, db)
+            self.assertIn("12 000", first["text"])
+            self.assertEqual(second["text"], first["text"])
+            self.assertEqual(complete.await_count, 1)  # в демо — один разбор, повтор бесплатно из сохранённого
+            self.assertLessEqual(complete.await_args.kwargs["max_tokens"], 600)
+            with patch("app.api.routes.access.rate_limit", AsyncMock()):
+                await demo_launch.test_lead_submit("t" * 24, demo_launch.TestLeadIn(name="Тест", phone="+79990001122"), None, db)
+            leads = (await db.scalars(select(CrmInbound).where(CrmInbound.project_id == 90))).all()
+            self.assertEqual(len(leads), 1)
+            self.assertEqual(leads[0].status, "NEW")
+
 
 if __name__ == "__main__":
     unittest.main()

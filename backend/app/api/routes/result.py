@@ -26,6 +26,8 @@ async def advertising_audit(request: Request, project_id: int, db: AsyncSession 
     require_actor_permission(kind, user, "view_analytics")
     current = datetime.now(timezone.utc)
     cached = (project.portal_state or {}).get("audit_cache") or {}
+    if not isinstance(cached, dict):
+        cached = {}
     try:
         saved = datetime.fromisoformat(cached["created_at"])
         age = (current - saved).total_seconds()
@@ -46,6 +48,8 @@ async def advertising_audit(request: Request, project_id: int, db: AsyncSession 
     if calculation:
         for source in (calculation.inputs or {}, calculation.results or {},
                        (calculation.results or {}).get("metrics", {})):
+            if not isinstance(source, dict):
+                continue
             for field in ("allowable_cpl", "limit_cpl"):
                 if source.get(field) is not None:
                     economics[field] = source[field]
