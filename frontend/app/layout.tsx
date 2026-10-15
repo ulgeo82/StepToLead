@@ -7,7 +7,7 @@ export const metadata: Metadata = {
   description: "Оцените экономику бизнеса, запас прочности и готовность к тестированию маркетинга.",
   manifest: "/manifest.webmanifest",
   appleWebApp: { capable: true, title: "StepToLead", statusBarStyle: "default" },
-  icons: { icon: "/icon-192.png", apple: "/apple-touch-icon.png" },
+  icons: { icon: [{ url: "/favicon-stl.png?v=3", type: "image/png", sizes: "192x192" }], shortcut: "/favicon-stl.png?v=3", apple: "/apple-touch-icon.png?v=3" },
 };
 
 export const viewport: Viewport = { themeColor: "#006bfd", width: "device-width", initialScale: 1 };
