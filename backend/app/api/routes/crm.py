@@ -747,6 +747,7 @@ async def deal_detail(deal_id: int, db: AsyncSession = Depends(get_db), user: Po
                 key=lambda item: item["created_at"], reverse=True),
             "form_data": inbound.raw_payload if inbound else None,
             "quality": lead.quality if lead else None, "quality_reason": lead.quality_reason if lead else None,
+            "exclude_from_analytics": bool(lead.exclude_from_analytics) if lead else False,
             "contact": contact_json(contact, inbound.raw_payload if inbound else None),
             "sales": [{"id": s.id, "amount": float(s.amount) if s.amount is not None else None,
                        "occurred_at": s.occurred_at} for s in sales]}
@@ -944,6 +945,29 @@ async def create_deal_sale(deal_id: int, payload: SaleCreate, request: Request, 
 
 
 QUALITY_REASONS = ["Спам или ошибка", "Не та услуга", "Не наш регион", "Нет бюджета", "Дубль", "Не выходит на связь", "Другое"]
+
+
+class AnalyticsFlagIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    exclude: bool
+
+
+@router.post("/deals/{deal_id}/analytics")
+async def set_analytics_flag(deal_id: int, payload: AnalyticsFlagIn, request: Request, db: AsyncSession = Depends(get_db),
+                             user: PortalUser = Depends(require_portal_user)):
+    """«Не считать в аналитику»: лид, квалификация и продажи сделки пропадают из «Результата» и «Аналитики»."""
+    check_origin(request); require_permission(user, "edit_deal")
+    deal = await deal_for(db, user, deal_id)
+    lead = await db.get(ClientLead, deal.lead_id) if deal.lead_id else None
+    if lead is None:
+        raise HTTPException(422, "У сделки нет лида для аналитики")
+    if bool(lead.exclude_from_analytics) != payload.exclude:
+        lead.exclude_from_analytics = payload.exclude
+        activity(db, deal, user, "ANALYTICS_FLAG_CHANGED", {
+            "exclude": payload.exclude,
+            "text": "Сделка не считается в аналитике" if payload.exclude else "Сделка снова считается в аналитике"})
+        await db.commit()
+    return {"exclude_from_analytics": payload.exclude}
 
 
 class QualityIn(BaseModel):

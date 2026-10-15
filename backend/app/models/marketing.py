@@ -106,6 +106,8 @@ class AdHypothesis(Base):
     offer: Mapped[str | None] = mapped_column(Text)
     landing_url: Mapped[str | None] = mapped_column(String(1000))
     status: Mapped[str] = mapped_column(String(32), default="testing", index=True)
+    # «Не считать в аналитику»: лиды, продажи и расходы кампаний гипотезы не входят в отчёты.
+    exclude_from_analytics: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -202,6 +204,8 @@ class ClientLead(Base):
     # Lead quality marked by sales: target | non_target (None = not marked yet). Drives "доля целевых".
     quality: Mapped[str | None] = mapped_column(String(16), index=True)
     quality_reason: Mapped[str | None] = mapped_column(String(120))
+    # «Не считать в аналитику» из карточки сделки: лид, его квалификация и продажи пропадают из отчётов.
+    exclude_from_analytics: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

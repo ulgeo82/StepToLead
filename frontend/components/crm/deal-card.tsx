@@ -155,6 +155,10 @@ export function DealCard({ dealId, projectId, pipelines, team, sources, fields, 
             {pickReason && <div className="crmQualityReasons">{qualityReasons.map(reason => <button key={reason} disabled={busy}
               onClick={async () => { setPickReason(false); await run(() => request(`/crm/deals/${dealId}/quality`, "POST", { quality: "non_target", reason })); }}>{reason}</button>)}</div>}
           </div>}
+          {deal.lead_id && <label className="crmAnalyticsFlag" title="Лид, квалификация и продажа этой сделки не попадут в «Результат» и «Аналитику»">
+            <input type="checkbox" disabled={!can("edit_deal") || busy} checked={!!deal.exclude_from_analytics}
+              onChange={e => { const exclude = e.target.checked; run(() => request(`/crm/deals/${dealId}/analytics`, "POST", { exclude })); }}/>
+            Не считать в аналитику</label>}
           <div className="crmFieldGrid">
           <label>Ответственный<select disabled={!can("edit_deal")} value={deal.responsible_user_id || ""} onChange={e => patch({ responsible_user_id: Number(e.target.value) || null }, "Ответственный изменён")}><option value="">Не назначен</option>{team.map(m => <option key={m.id} value={m.id}>{m.display_name}</option>)}</select></label>
           <label>Бюджет, ₽<input type="number" min="0" disabled={!can("edit_deal")} defaultValue={deal.amount ?? ""} key={`a${deal.amount}`} onBlur={e => { const v = e.target.value ? Number(e.target.value) : null; if (v !== deal.amount) patch({ amount: v }); }}/></label>

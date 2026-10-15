@@ -23,7 +23,7 @@ type Exposure = { impressions: number | null; clicks: number | null; cpc: number
   qualified_to_sale: number | null; lead_to_sale: number | null; sources: Source[] };
 type Campaign = Totals & { id: string; kind?: "ad" | "channel"; external_campaign_id: string; name: string; connection_id: number | null;
   connection_name: string; platform: string; hypothesis_id: number | null; hypothesis_name: string | null;
-  status: string | null; impressions: number | null; clicks: number | null; cpc: number | null };
+  status: string | null; impressions: number | null; clicks: number | null; cpc: number | null; excluded?: boolean };
 type ReportingPoint = { label: string } & Record<Metric, number | null>;
 type Analytics = {
   project: { id: number; name: string; workspace_id: number; meeting_enabled: boolean };
@@ -33,7 +33,7 @@ type Analytics = {
   analysis: { current: Exposure; previous: Exposure;
     sales_cycle_days: number | null;
     connections: { id: number; name: string; platform: string; status: string; last_synced_at: string | null }[];
-    hypotheses: { id: number; name: string; status: string }[]; campaigns: Campaign[];
+    hypotheses: { id: number; name: string; status: string; exclude_from_analytics?: boolean }[]; campaigns: Campaign[];
     lost_reasons: { label: string; count: number }[]; non_target_reasons?: { label: string; count: number }[] };
   viewer: { role: string };
 };
@@ -79,7 +79,8 @@ const PLATFORM_NAMES: Record<string, string> = { yandex: "Яндекс Дире�
 type CampaignNode = { key: string; name: string; note?: string; rows: Campaign[]; children: CampaignNode[]; depth: number };
 type CampaignSum = Pick<Campaign, "spend" | "clicks" | "cpc" | "leads" | "qualified" | "sales" | "revenue" | "cpl" | "cpql" | "cac" | "romi" | "target" | "non_target" | "target_share">;
 
-function sumCampaigns(rows: Campaign[], margin: number | null): CampaignSum {
+function sumCampaigns(allRows: Campaign[], margin: number | null): CampaignSum {
+  const rows = allRows.filter(row => !row.excluded);
   const total = (f: (r: Campaign) => number | null | undefined) => { const v = rows.map(f).filter((x): x is number => x != null); return v.length ? v.reduce((a, b) => a + Number(b), 0) : null; };
   const spend = total(r => r.spend), clicks = total(r => r.clicks), leads = total(r => r.leads), qualified = total(r => r.qualified);
   const sales = total(r => r.sales), revenue = total(r => r.revenue), target = total(r => r.target) || 0, non_target = total(r => r.non_target) || 0;
@@ -163,6 +164,15 @@ export default function AnalyticsPage() {
   const [loading, setLoading] = useState(true);
   const [granularity, setGranularity] = useState("day");
   const [tab, setTab] = useState<Tab>("overview");
+  const [reloadKey, setReloadKey] = useState(0);
+  const [flagError, setFlagError] = useState("");
+  async function toggleHypothesis(id: number, exclude: boolean) {
+    setFlagError("");
+    try {
+      await api(`/analytics/hypotheses/${id}/exclude`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ exclude }) });
+      setReloadKey(value => value + 1);
+    } catch (exc) { setFlagError((exc as Error).message); }
+  }
   const [chartMetric, setChartMetric] = useState<Metric>("leads");
   const [salesMetric, setSalesMetric] = useState<"revenue" | "sales" | "average_check">("revenue");
   const [sourceMetric, setSourceMetric] = useState<Metric>("leads");
@@ -191,7 +201,7 @@ export default function AnalyticsPage() {
       .catch(exc => { if (!cancelled) setError(exc.message); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [projectId, start, end, granularity]);
+  }, [projectId, start, end, granularity, reloadKey]);
   // Live: new leads and fresh ad spend show up without reloading (quiet refresh while the tab is visible).
   useEffect(() => { if (!projectId) return;
     const query = new URLSearchParams({ project_id: String(projectId), start, end, granularity });
@@ -231,7 +241,7 @@ export default function AnalyticsPage() {
   const campaignCells = (v: CampaignSum, ad: boolean) => <><td>{ad ? money(v.spend) : "—"}</td><td>{ad ? count(v.clicks) : "—"}</td><td>{ad ? money(v.cpc) : "—"}</td><td>{count(v.leads)}</td><td title="Отметки отдела продаж: целевые / всего отмеченных">{quality(v)}</td><td>{count(v.qualified)}</td><td>{count(v.sales)}</td><td>{money(v.revenue)}</td><td>{ad ? money(v.cpl) : "—"}</td><td>{ad ? money(v.cpql) : "—"}</td><td>{ad ? money(v.cac) : "—"}</td><td>{ad ? percent(v.romi) : "—"}</td></>;
   const campaignRow = (row: Campaign, depth: number) => row.kind === "channel"
     ? <tr key={row.id} className={`analyticsChannelCampaign analyticsDepth${depth}`}><td><strong>{row.name}</strong><small>{row.external_campaign_id ? "utm_campaign" : "Заявки без рекламной метки"}</small></td><td>{row.platform}</td><td>—</td>{campaignCells(row, false)}<td>—</td></tr>
-    : <tr key={row.id} className={`analyticsClickableRow analyticsDepth${depth}`} onClick={() => setSelectedCampaign(row)} tabIndex={0} onKeyDown={event => { if (event.key === "Enter") setSelectedCampaign(row); }}><td><strong>{row.name}</strong><small>ID {row.external_campaign_id} · {row.connection_name}</small></td><td>{PLATFORM_NAMES[row.platform] || row.platform}</td><td>{row.hypothesis_name || "—"}</td>{campaignCells(row, true)}<td>{row.status || "—"}</td></tr>;
+    : <tr key={row.id} className={`analyticsClickableRow analyticsDepth${depth}${row.excluded ? " analyticsExcluded" : ""}`} onClick={() => setSelectedCampaign(row)} tabIndex={0} onKeyDown={event => { if (event.key === "Enter") setSelectedCampaign(row); }}><td><strong>{row.name}</strong><small>ID {row.external_campaign_id} · {row.connection_name}{row.excluded ? " · не в аналитике" : ""}</small></td><td>{PLATFORM_NAMES[row.platform] || row.platform}</td><td>{row.hypothesis_name || "—"}</td>{campaignCells(row, true)}<td>{row.status || "—"}</td></tr>;
   function campaignNodeRows(node: CampaignNode): React.ReactNode[] {
     if (node.depth === 0 && node.rows.length === 1 && !node.children.length) return [campaignRow(node.rows[0], 0)];
     const open = expandAllCampaigns || openCampaignNodes.includes(node.key);
@@ -314,7 +324,7 @@ export default function AnalyticsPage() {
           <p>Отметку ставит менеджер в карточке сделки — по ней маркетолог отключает неработающие кампании и ключи.</p></section>
       </>}
       {tab === "accounts" && <section className="resultPanel analyticsListPanel"><div className="resultPanelHead"><h2>Рекламные кабинеты</h2></div>{data.analysis.connections.length ? <div className="analyticsEntityGrid">{data.analysis.connections.map(account => <article key={account.id}><span>{account.platform}</span><strong>{account.name}</strong><small>Статус: {account.status} · синхронизация: {account.last_synced_at ? new Date(account.last_synced_at).toLocaleDateString("ru-RU") : "—"}</small>{data.viewer.role === "admin" && <Link href={`/admin/advertising/${data.project.workspace_id}`}>Открыть рекламную аналитику →</Link>}</article>)}</div> : <p className="resultTableEmpty">Рекламные кабинеты для проекта не подключены.</p>}</section>}
-      {tab === "hypotheses" && <section className="resultPanel analyticsListPanel"><div className="resultPanelHead"><h2>Гипотезы проекта</h2></div>{data.analysis.hypotheses.length ? <div className="analyticsEntityGrid">{data.analysis.hypotheses.map(hypothesis => <article key={hypothesis.id}><span>Гипотеза #{hypothesis.id}</span><strong>{hypothesis.name}</strong><small>Статус: {hypothesis.status}</small><button onClick={() => { setFilterHypothesis(String(hypothesis.id)); setTab("campaigns"); }}>Кампании: {data.analysis.campaigns.filter(campaign => campaign.hypothesis_id === hypothesis.id).length} →</button></article>)}</div> : <p className="resultTableEmpty">Гипотезы для проекта пока не созданы.</p>}</section>}
+      {tab === "hypotheses" && <section className="resultPanel analyticsListPanel"><div className="resultPanelHead"><h2>Гипотезы проекта</h2></div>{flagError && <p className="resultTableEmpty" role="alert">{flagError}</p>}{data.analysis.hypotheses.length ? <div className="analyticsEntityGrid">{data.analysis.hypotheses.map(hypothesis => <article key={hypothesis.id} className={hypothesis.exclude_from_analytics ? "analyticsExcluded" : ""}><span>Гипотеза #{hypothesis.id}</span><strong>{hypothesis.name}</strong><small>Статус: {hypothesis.status}</small><label className="analyticsFlag" title="Лиды, продажи и расходы кампаний гипотезы не попадут в «Результат» и «Аналитику»"><input type="checkbox" checked={!!hypothesis.exclude_from_analytics} onChange={event => toggleHypothesis(hypothesis.id, event.target.checked)}/>Не считать в аналитику</label><button onClick={() => { setFilterHypothesis(String(hypothesis.id)); setTab("campaigns"); }}>Кампании: {data.analysis.campaigns.filter(campaign => campaign.hypothesis_id === hypothesis.id).length} →</button></article>)}</div> : <p className="resultTableEmpty">Гипотезы для проекта пока не созданы.</p>}</section>}
       {tab === "campaigns" && CampaignTable()}
       {tab === "website" && projectId && <WebsiteAnalytics projectId={projectId} start={start} end={end} role={data.viewer.role} />}
     </>}

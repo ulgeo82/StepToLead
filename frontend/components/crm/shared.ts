@@ -15,7 +15,7 @@ export type Deal = { id: number; name: string; amount: number | null; contact: C
   days_in_stage: number | null; idle_days: number | null; first_response_at?: string | null;
   lost_reason_id?: number | null; lost_comment?: string | null; closed_at?: string | null;
   form_data?: Record<string, unknown> | null; tasks?: Task[]; activities?: Activity[];
-  quality?: "target" | "non_target" | null; quality_reason?: string | null;
+  quality?: "target" | "non_target" | null; quality_reason?: string | null; exclude_from_analytics?: boolean;
   sales?: { id: number; amount: number | null; occurred_at: string }[] };
 export type Stage = { id: number; name: string; analytics_type: string; color: string; position?: number; required_fields: string[] };
 export type Pipeline = { id: number; name: string; is_default?: boolean; stages: Stage[] };

@@ -11,7 +11,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.access import GrowthCalculation
-from app.models.marketing import (AdConnection, AdMetricDaily, ClientLead, ClientLeadAttribution,
+from app.models.marketing import (AdCampaignMetricDaily, AdConnection, AdHypothesis, AdHypothesisCampaign,
+                                  AdMetricDaily, ClientLead, ClientLeadAttribution,
                                   ClientSale, LeadInboundSource, Project, ProjectEconomics,
                                   ProjectSource, SourceMetricDaily)
 
@@ -49,7 +50,50 @@ LeadRow = namedtuple("LeadRow", "id created_at qualified_at meeting_at source_id
 AttributionRow = namedtuple("AttributionRow", "connection_id source_id external_campaign_id utm_campaign")
 
 
-async def load_lead_rows(db: AsyncSession, project_id: int) -> list[tuple[LeadRow, AttributionRow | None]]:
+Exclusions = namedtuple("Exclusions", "lead_ids hypothesis_ids campaigns")
+
+
+async def analytics_exclusions(db: AsyncSession, project_id: int) -> Exclusions:
+    """Что не считается в аналитике: лиды с отметкой в CRM и всё по гипотезам с отметкой
+    (их лиды — по гипотезе в атрибуции или по кампании гипотезы; расходы — по кампаниям гипотезы)."""
+    hypothesis_ids = set((await db.scalars(select(AdHypothesis.id).where(
+        AdHypothesis.project_id == project_id, AdHypothesis.exclude_from_analytics.is_(True)))).all())
+    campaigns = set()
+    if hypothesis_ids:
+        campaigns = {(row.connection_id, row.external_campaign_id) for row in (await db.execute(
+            select(AdHypothesisCampaign.connection_id, AdHypothesisCampaign.external_campaign_id)
+            .where(AdHypothesisCampaign.hypothesis_id.in_(hypothesis_ids)))).all()}
+    rows = (await db.execute(select(
+        ClientLead.id, ClientLead.exclude_from_analytics, ClientLeadAttribution.hypothesis_id,
+        ClientLeadAttribution.connection_id, ClientLeadAttribution.external_campaign_id)
+        .outerjoin(ClientLeadAttribution, ClientLeadAttribution.lead_id == ClientLead.id)
+        .where(ClientLead.project_id == project_id))).all()
+    lead_ids = {lead_id for lead_id, flag, hypothesis_id, connection_id, campaign_id in rows
+                if flag or (hypothesis_id is not None and hypothesis_id in hypothesis_ids)
+                or (connection_id is not None and (connection_id, campaign_id) in campaigns)}
+    return Exclusions(lead_ids, hypothesis_ids, campaigns)
+
+
+async def excluded_campaign_spend(db: AsyncSession, exclusions: Exclusions, first: date, last: date) -> dict:
+    """Расходы кампаний исключённых гипотез по (кабинет, день) — вычитаются из расходов кабинета."""
+    if not exclusions.campaigns:
+        return {}
+    connection_ids = {connection_id for connection_id, _ in exclusions.campaigns}
+    rows = (await db.execute(select(AdCampaignMetricDaily.connection_id, AdCampaignMetricDaily.external_campaign_id,
+                                    AdCampaignMetricDaily.date, AdCampaignMetricDaily.spend).where(
+        AdCampaignMetricDaily.connection_id.in_(connection_ids),
+        AdCampaignMetricDaily.date >= first, AdCampaignMetricDaily.date <= last))).all()
+    spend = defaultdict(float)
+    for connection_id, campaign_id, day, value in rows:
+        if (connection_id, campaign_id) in exclusions.campaigns and value is not None:
+            spend[(connection_id, day)] += float(value)
+    return spend
+
+
+async def load_lead_rows(db: AsyncSession, project_id: int,
+                         exclusions: Exclusions | None = None) -> list[tuple[LeadRow, AttributionRow | None]]:
+    if exclusions is None:
+        exclusions = await analytics_exclusions(db, project_id)
     rows = await db.execute(select(
         ClientLead.id, ClientLead.created_at, ClientLead.qualified_at, ClientLead.meeting_at, ClientLead.source_id,
         ClientLead.source, ClientLead.full_name, ClientLead.status, ClientLead.quality, ClientLead.quality_reason,
@@ -57,7 +101,8 @@ async def load_lead_rows(db: AsyncSession, project_id: int) -> list[tuple[LeadRo
         ClientLeadAttribution.external_campaign_id, ClientLeadAttribution.utm_campaign)
         .outerjoin(ClientLeadAttribution, ClientLeadAttribution.lead_id == ClientLead.id)
         .where(ClientLead.project_id == project_id))
-    return [(LeadRow(*r[:10]), AttributionRow(*r[11:]) if r[10] is not None else None) for r in rows]
+    return [(LeadRow(*r[:10]), AttributionRow(*r[11:]) if r[10] is not None else None) for r in rows
+            if r[0] not in exclusions.lead_ids]
 
 
 def channel_group(name: str | None) -> str | None:
@@ -126,10 +171,13 @@ async def result_facts(db: AsyncSession, project: Project, start: date, end: dat
     earliest = prior_start
     latest = end
 
-    lead_rows = await load_lead_rows(db, project.id)
+    exclusions = await analytics_exclusions(db, project.id)
+    lead_rows = await load_lead_rows(db, project.id, exclusions)
     connections, custom, sources, lead_source = await source_catalog(db, project, lead_rows)
     connection_key = {row.id: f"ad:{row.id}" for row in connections}
-    sales = (await db.scalars(select(ClientSale).where(ClientSale.project_id == project.id))).all()
+    sales = [sale for sale in (await db.scalars(select(ClientSale).where(ClientSale.project_id == project.id))).all()
+             if sale.lead_id not in exclusions.lead_ids]
+    excluded_spend = await excluded_campaign_spend(db, exclusions, earliest, latest)
 
     ad_rows = []
     if connections:
@@ -158,7 +206,8 @@ async def result_facts(db: AsyncSession, project: Project, start: date, end: dat
             if first <= row.date <= last:
                 key = connection_key[row.connection_id]
                 cell = day_rows[row.date][key]
-                cell["spend"] = (cell["spend"] or 0) + float(row.spend)
+                spend = max(0.0, float(row.spend) - excluded_spend.get((row.connection_id, row.date), 0.0))
+                cell["spend"] = (cell["spend"] or 0) + spend
                 presence[key]["spend"].add(row.date)
         for row in source_rows:
             if first <= row.date <= last:

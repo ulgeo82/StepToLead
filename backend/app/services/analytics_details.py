@@ -1,6 +1,7 @@
 """Project-scoped drilldowns layered on the same facts used by /result."""
 from collections import defaultdict
 from datetime import date
+from types import SimpleNamespace
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,7 +10,8 @@ from app.models.marketing import (AdCampaignMetricDaily, AdConnection, AdHypothe
                                   AdHypothesisCampaign, AdMetricDaily, ClientLead,
                                   ClientLeadAttribution, ClientLeadEvent, ClientSale, Project,
                                   SourceMetricDaily)
-from app.services.result_analytics import _derived, _ratio, _sum, load_lead_rows, quality_fields, source_catalog
+from app.services.result_analytics import (_derived, _ratio, _sum, analytics_exclusions, load_lead_rows,
+                                           quality_fields, source_catalog)
 
 
 def defaultdict_count(values) -> dict:
@@ -93,9 +95,24 @@ async def analytics_details(db: AsyncSession, project: Project, start: date, end
                    for row in assignment_rows if row.hypothesis_id in hypothesis_map}
 
     previous_start = date.fromisoformat(str(result["period"]["previous_start"]))
+    exclusions = await analytics_exclusions(db, project.id)
     ad_rows = (await db.scalars(select(AdMetricDaily).where(
         AdMetricDaily.connection_id.in_(connection_ids), AdMetricDaily.date >= previous_start,
         AdMetricDaily.date <= end))).all() if connection_ids else []
+    if exclusions.campaigns and ad_rows:
+        # Показы и клики кампаний исключённых гипотез вычитаются из кабинета, как и расходы в result_facts.
+        minus = defaultdict(lambda: [0, 0])
+        for row in (await db.scalars(select(AdCampaignMetricDaily).where(
+                AdCampaignMetricDaily.connection_id.in_({c for c, _ in exclusions.campaigns}),
+                AdCampaignMetricDaily.date >= previous_start, AdCampaignMetricDaily.date <= end))).all():
+            if (row.connection_id, row.external_campaign_id) in exclusions.campaigns:
+                minus[(row.connection_id, row.date)][0] += int(row.impressions or 0)
+                minus[(row.connection_id, row.date)][1] += int(row.clicks or 0)
+        ad_rows = [SimpleNamespace(
+            connection_id=row.connection_id, date=row.date,
+            impressions=None if row.impressions is None else max(0, int(row.impressions) - minus[(row.connection_id, row.date)][0]),
+            clicks=None if row.clicks is None else max(0, int(row.clicks) - minus[(row.connection_id, row.date)][1]))
+            for row in ad_rows]
     custom_ids = [int(source["id"].split(":")[1]) for source in result["current"]["sources"]
                   if source["id"].startswith("source:")]
     source_rows = (await db.scalars(select(SourceMetricDaily).where(
@@ -110,7 +127,7 @@ async def analytics_details(db: AsyncSession, project: Project, start: date, end
     campaign_rows = (await db.scalars(select(AdCampaignMetricDaily).where(
         AdCampaignMetricDaily.connection_id.in_(connection_ids),
         AdCampaignMetricDaily.date >= start, AdCampaignMetricDaily.date <= end))).all() if connection_ids else []
-    lead_rows = await load_lead_rows(db, project.id)
+    lead_rows = await load_lead_rows(db, project.id, exclusions)
     _, _, catalog, lead_source = await source_catalog(db, project, lead_rows)
     attribution = {}
     campaign_leads = defaultdict(list)
@@ -136,7 +153,7 @@ async def analytics_details(db: AsyncSession, project: Project, start: date, end
         ClientLead.project_id == project.id, ClientLeadEvent.event_type == "LEAD_LOST"))).all()
     lost_counts = defaultdict(int)
     for event in lost_events:
-        if start <= event.created_at.date() <= end:
+        if event.lead_id not in exclusions.lead_ids and start <= event.created_at.date() <= end:
             label = (event.description or "Не определено").split(": ", 1)[0]
             lost_counts[label] += 1
     campaign_sales = defaultdict(list)
@@ -192,6 +209,7 @@ async def analytics_details(db: AsyncSession, project: Project, start: date, end
                           "connection_id": connection_id, "connection_name": connection.name,
                           "platform": connection.platform, "hypothesis_id": hypothesis_id,
                           "hypothesis_name": hypothesis_map[hypothesis_id].name if hypothesis_id else None,
+                          "excluded": key in exclusions.campaigns or hypothesis_id in exclusions.hypothesis_ids,
                           "status": None, "clicks": clicks, "impressions": impressions,
                           "cpc": _ratio(spend, clicks), **values})
     campaigns.sort(key=lambda row: (row["spend"] or 0, row["name"]), reverse=True)
@@ -232,6 +250,7 @@ async def analytics_details(db: AsyncSession, project: Project, start: date, end
                 key=lambda item: (-item[1], item[0]))],
             "connections": [{"id": row.id, "name": row.name, "platform": row.platform,
                              "status": row.status, "last_synced_at": row.last_synced_at} for row in connections],
-            "hypotheses": [{"id": row.id, "name": row.name, "status": row.status}
+            "hypotheses": [{"id": row.id, "name": row.name, "status": row.status,
+                            "exclude_from_analytics": bool(row.exclude_from_analytics)}
                             for row in hypotheses],
             "campaigns": campaigns}
