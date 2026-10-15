@@ -141,13 +141,17 @@ export default function AdsPage() {
     if (failed.length) setError(`Синхронизировано ${completed} из ${activeAccounts.length}. ${failed.join("; ")}`);
     else setNotice(`Синхронизировано кабинетов: ${completed}.`);
   }
+  async function removeForever(item: Account) {
+    if (!window.confirm(`Удалить кабинет «${item.name}» навсегда? Показатели и кампании удалятся, восстановить будет нельзя.`)) return;
+    if (await callAction(`/ads/connections/${item.id}/permanent`, "DELETE", undefined, item.id)) setNotice("Кабинет удалён.");
+  }
   async function disconnect(item: Account) {
     if (!window.confirm(`Отключить «${item.name}»? Исторические показатели сохранятся.`)) return;
     if (await callAction(`/ads/connections/${item.id}`, "DELETE", undefined, item.id)) setNotice("Кабинет отключён. История сохранена.");
   }
 
   const summary = (item: Metrics, platformId?: string) => <div className="adsMetricStrip">{(["spend","clicks","cpc","leads","cpl","romi"] as const).map(key => <div key={key}><span>{key === "spend" ? "Расходы" : key === "clicks" ? (platformId === "avito_items" ? "Просмотры" : isMap(platformId) ? "Переходы" : "Клики") : key === "cpc" && platformId === "avito_items" ? "Цена просмотра" : key === "leads" ? "Лиды" : key.toUpperCase()}</span><strong>{valueOf(key, item[key])}</strong></div>)}</div>;
-  const actionButtons = (item: Account) => canManage && (isMap(selectedPlatform) ? <div className="adsAccountActions"><button disabled={busy !== null || item.status === "disconnected"} onClick={() => disconnect(item)}>Отключить</button></div> : <div className="adsAccountActions"><button disabled={busy !== null} onClick={() => callAction(`/ads/connections/${item.id}/test`, "POST", undefined, item.id)}>Проверить</button><button disabled={busy !== null || item.status === "disconnected"} onClick={() => callAction(`/ads/connections/${item.id}/sync`, "POST", undefined, item.id)}>Синхронизировать</button><button onClick={() => { setTokenAccount(item); setModal("token"); }}>{usesClientKeys(selectedPlatform) ? "Обновить API-ключи" : "Обновить токен"}</button><button disabled={busy !== null || item.status === "disconnected"} onClick={() => disconnect(item)}>Отключить</button></div>);
+  const actionButtons = (item: Account) => canManage && (isMap(selectedPlatform) ? <div className="adsAccountActions"><button disabled={busy !== null || item.status === "disconnected"} onClick={() => disconnect(item)}>Отключить</button><button disabled={busy !== null} className="adsDanger" onClick={() => removeForever(item)}>Удалить</button></div> : <div className="adsAccountActions"><button disabled={busy !== null} onClick={() => callAction(`/ads/connections/${item.id}/test`, "POST", undefined, item.id)}>Проверить</button><button disabled={busy !== null || item.status === "disconnected"} onClick={() => callAction(`/ads/connections/${item.id}/sync`, "POST", undefined, item.id)}>Синхронизировать</button><button onClick={() => { setTokenAccount(item); setModal("token"); }}>{usesClientKeys(selectedPlatform) ? "Обновить API-ключи" : "Обновить токен"}</button><button disabled={busy !== null || item.status === "disconnected"} onClick={() => disconnect(item)}>Отключить</button><button disabled={busy !== null} className="adsDanger" onClick={() => removeForever(item)}>Удалить</button></div>);
 
   return <div className="resultShell"><ProjectSidebar project={project} projectId={projectId} active="ads" role={data?.viewer.role}/>
     <main className="resultMain adsMain"><div className="resultBreadcrumb">StepToLead <span>/</span> Реклама</div>

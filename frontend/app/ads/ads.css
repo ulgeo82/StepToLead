@@ -60,3 +60,4 @@
 .mapsMonth .adsBlueButton{align-self:flex-start}
 @media(max-width:900px){.mapsTiles{grid-template-columns:repeat(3,minmax(0,1fr))}.mapsGrid{grid-template-columns:1fr}.mapsFields{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:520px){.mapsTiles,.mapsFields{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.adsDanger{color:#b42318;border-color:#f0c4bf}

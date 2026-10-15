@@ -1,10 +1,9 @@
 import Image from "next/image";
 import Link from "next/link";
 
-// Знак — public/brand/steptolead-mark-*.png (прозрачный фон), надпись — текстом, чтобы была резкой.
+// Логотип StepToLead (wordmark для тёмного фона), public/brand/steptolead-wordmark-light.png.
 export default function Logo() {
-  return <Link href="/admin" className="brand" aria-label="Steptolead — главная админки">
-    <Image src="/brand/steptolead-mark-128.png" alt="" width={40} height={40} priority className="brandLogo" />
-    <span className="brandText">Step<span className="brandAccent">to</span>lead</span>
+  return <Link href="/admin" className="brand" aria-label="StepToLead — главная админки">
+    <Image src="/brand/steptolead-wordmark-light.png" alt="StepToLead" width={772} height={158} priority className="brandLogo" />
   </Link>;
 }

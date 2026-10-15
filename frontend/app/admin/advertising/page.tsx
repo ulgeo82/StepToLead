@@ -66,6 +66,13 @@ export default function AdvertisingPage() {
     }
     catch (e) { setError(e instanceof Error ? e.message : "Синхронизация не прошла"); await load(); } finally { setBusy(null); }
   }
+  async function deleteConnectionForever(item: AdConnection) {
+    if (!window.confirm(`Удалить «${item.name}» навсегда? Показатели и кампании удалятся, восстановить будет нельзя.`)) return;
+    setBusy(item.id); setError(""); setNotice("");
+    try { await api(`/marketing/connections/${item.id}/permanent`, { method: "DELETE" }); setNotice("Рекламное подключение удалено."); await load(); }
+    catch (e) { setError(e instanceof Error ? e.message : "Не удалось удалить подключение"); }
+    finally { setBusy(null); }
+  }
   async function removeConnection(item: AdConnection) {
     if (!window.confirm(`Отключить «${item.name}»? Историческая статистика сохранится.`)) return;
     setBusy(item.id); setError(""); setNotice("");
@@ -92,7 +99,7 @@ export default function AdvertisingPage() {
         <div className="adConnectionTop"><span className={`platformLogo ${item.platform}`}>{item.platform === "meta" ? "M" : item.platform === "vk_ads" ? "VK" : "Я"}</span><div><strong>{item.name}</strong><small>{item.workspace_name} · {item.platform_name}</small></div><span className={`adStatus ${item.status}`}>{item.status === "connected" ? "Подключён" : item.status === "error" ? "Ошибка" : item.status === "syncing" ? "Синхронизация" : item.status === "disconnected" ? "Отключён" : "Не проверен"}</span></div>
         <dl><div><dt>ID кабинета</dt><dd>{item.external_account_id}</dd></div><div><dt>Последняя синхронизация</dt><dd>{item.last_synced_at ? new Date(item.last_synced_at).toLocaleString("ru-RU") : "Ещё не запускалась"}</dd></div></dl>
         {item.last_error && <p className="adError">{item.last_error}</p>}
-        <div className="adActions"><Link href={`/admin/advertising/${item.workspace_id}`}>Открыть аналитику</Link><button onClick={() => { setSelectedConnection(item); setModal("token"); }}>{item.platform === "vk_ads" ? "Обновить API-ключи" : "Обновить токен"}</button><button onClick={() => test(item.id)} disabled={busy === item.id}>{busy === item.id ? "Проверяем…" : "Проверить"}</button><button className="sync" onClick={() => sync(item.id)} disabled={busy === item.id || item.status === "disconnected"}>{busy === item.id ? "Загружаем историю…" : "Загрузить доступную историю"}</button><button className="danger" onClick={() => removeConnection(item)} disabled={busy === item.id || item.status === "disconnected"}>Отключить</button></div>
+        <div className="adActions"><Link href={`/admin/advertising/${item.workspace_id}`}>Открыть аналитику</Link><button onClick={() => { setSelectedConnection(item); setModal("token"); }}>{item.platform === "vk_ads" ? "Обновить API-ключи" : "Обновить токен"}</button><button onClick={() => test(item.id)} disabled={busy === item.id}>{busy === item.id ? "Проверяем…" : "Проверить"}</button><button className="sync" onClick={() => sync(item.id)} disabled={busy === item.id || item.status === "disconnected"}>{busy === item.id ? "Загружаем историю…" : "Загрузить доступную историю"}</button><button className="danger" onClick={() => removeConnection(item)} disabled={busy === item.id || item.status === "disconnected"}>Отключить</button><button className="danger" onClick={() => deleteConnectionForever(item)} disabled={busy === item.id}>Удалить</button></div>
       </article>)}{!connections.length && <div className="empty adEmpty"><span>↗</span><h3>Реклама ещё не подключена</h3><p>Сначала создайте клиента, затем добавьте кабинет Meta Ads или Яндекс Директ.</p></div>}</div>
     </section>
     <section className="adGuide"><strong>Как это работает по-настоящему</strong><span>1. Создаёте клиента</span><span>2. Получаете официальный OAuth-токен платформы</span><span>3. Добавляете ID кабинета и токен</span><span>4. StepToLead проверяет API и загружает всю доступную историю</span></section>

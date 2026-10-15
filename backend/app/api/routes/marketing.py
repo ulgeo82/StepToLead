@@ -139,6 +139,25 @@ def _request(url: str, *, method: str = "GET", headers: dict | None = None, payl
 VK_API = "https://ads.vk.ru"
 
 
+def _vk_oauth_error(exc: urllib.error.HTTPError) -> str:
+    """Понятная причина отказа VK. Берём только код и описание ошибки — ни тело с секретами, ни реквизиты не показываем."""
+    try:
+        body = json.loads(exc.read().decode("utf-8", errors="replace") or "{}")
+    except (ValueError, OSError):
+        body = {}
+    code = str(body.get("error") or body.get("code") or "").lower()
+    text = str(body.get("error_description") or body.get("message") or "")[:200].lower()
+    if "limit" in code or "limit" in text:
+        return ("VK: у этого Client ID уже 5 активных токенов — лимит VK. Удалите старые токены: "
+                "VK Реклама → Настройки → Доступ к API → «Удалить все токены», затем нажмите «Проверить».")
+    if code in {"invalid_client", "unauthorized_client"} or exc.code == 401:
+        return ("VK не принял Client ID и Client Secret. Возьмите их в VK Рекламе: Настройки → Доступ к API "
+                "(не из VK ID и не из приложения ВКонтакте). Если раздела нет или доступ «на рассмотрении» — "
+                "запросите API-доступ и дождитесь одобрения."
+                + (f" Ответ VK: {code}" if code else ""))
+    return f"VK отклонил авторизацию (HTTP {exc.code}{', ' + code if code else ''}). Проверьте API-доступ и реквизиты."
+
+
 def _vk_oauth(fields: dict[str, str]) -> dict:
     """VK OAuth uses form encoding; never include credentials or response bodies in errors."""
     request = urllib.request.Request(
@@ -150,7 +169,7 @@ def _vk_oauth(fields: dict[str, str]) -> dict:
         with urllib.request.urlopen(request, timeout=25) as response:
             result = json.load(response)
     except urllib.error.HTTPError as exc:
-        raise ValueError(f"VK отклонил авторизацию (HTTP {exc.code}). Проверьте API-доступ и реквизиты.") from None
+        raise ValueError(_vk_oauth_error(exc)) from None
     except urllib.error.URLError as exc:
         raise ValueError("VK API недоступен. Повторите проверку позже.") from None
     if not isinstance(result, dict) or not result.get("access_token"):
@@ -805,6 +824,16 @@ async def remove_connection(connection_id: int, request: Request, db: AsyncSessi
     row = await db.get(AdConnection, connection_id)
     if not row: raise HTTPException(404, "Подключение не найдено")
     row.status = "disconnected"
+    await db.commit()
+
+
+@router.delete("/connections/{connection_id}/permanent", status_code=204)
+async def delete_connection_permanently(connection_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    """Полное удаление кабинета: показатели и кампании удаляются каскадом, лиды остаются без привязки."""
+    check_origin(request)
+    row = await db.get(AdConnection, connection_id)
+    if not row: raise HTTPException(404, "Подключение не найдено")
+    await db.delete(row)
     await db.commit()
 
 

@@ -8,9 +8,8 @@
 .logo { display:flex; align-items:center; justify-content:space-between; flex-shrink:0; }
 .logo :global(.brand) { display:flex; padding:0 10px 24px; color:white; }
 .logo :global(.brand) { align-items:center; gap:12px; text-decoration:none; }
-.logo :global(.brandLogo) { width:40px; height:40px; flex-shrink:0; }
-.logo :global(.brandText) { display:inline; font-size:22px; font-weight:800; letter-spacing:-.02em; line-height:1; color:#fff; }
-.logo :global(.brandAccent) { color:#1E6FFF; }
+.logo :global(.brandLogo) { height:34px; width:auto; flex-shrink:0; }
+@media (max-width:860px) { .logo :global(.brandLogo) { display:none; } }
 .workspace { display:grid; grid-template-columns:34px minmax(0,1fr) auto; align-items:center; gap:10px; padding:12px; border:1px solid #26324D; border-radius:13px; margin-bottom:16px; }
 .workspace>span:nth-child(2),.status>div { display:flex; flex-direction:column; }
 .workspace small { font-size:10px; color:#7C8AA8; }

@@ -231,6 +231,13 @@ async def disconnect_account(connection_id: int, request: Request, db: AsyncSess
     return await marketing.remove_connection(connection_id, request, db)
 
 
+@router.delete("/connections/{connection_id}/permanent", status_code=204)
+async def delete_account_permanently(connection_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    check_origin(request)
+    await scoped_connection(db, request, connection_id)
+    return await marketing.delete_connection_permanently(connection_id, request, db)
+
+
 @router.get("/connections/{connection_id}/vk-campaigns")
 async def vk_campaigns(connection_id: int, request: Request, db: AsyncSession = Depends(get_db)):
     row, project = await readable_vk_connection(db, request, connection_id)
