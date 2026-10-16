@@ -99,7 +99,8 @@ async def analytics_details(db: AsyncSession, project: Project, start: date, end
 
     previous_start = date.fromisoformat(str(result["period"]["previous_start"]))
     exclusions = await analytics_exclusions(db, project.id, exclude.hypotheses if exclude else (),
-                                            exclude.campaigns if exclude else ())
+                                            exclude.campaigns if exclude else (),
+                                            exclude.leads if exclude else ())
     ad_rows = (await db.scalars(select(AdMetricDaily).where(
         AdMetricDaily.connection_id.in_(connection_ids), AdMetricDaily.date >= previous_start,
         AdMetricDaily.date <= end))).all() if connection_ids else []

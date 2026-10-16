@@ -1,11 +1,11 @@
 "use client";
-// «Отчёты»: конструктор (даты, разделы, матрёшка исключений, текст и план) с живым превью,
-// сохранённые отчёты со ссылкой для клиента, копирование в Google Таблицы и PDF через печать.
+// «Отчёты»: конструктор с живым превью. Галочка = учитывать в расчёте (снял — пропадает из всех итогов),
+// глазик = только скрыть строку (цифры остаются в итогах). Настройки сохраняются шаблоном проекта.
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { dateInput, ProjectSidebar, ReportingProject } from "@/components/reporting";
-import { autoSummary, copyForSheets, periodTitle, ReportData, ReportView } from "@/components/report/report-view";
+import { autoSummary, copyForSheets, HERO, periodTitle, ReportData, ReportView, rub } from "@/components/report/report-view";
 import "../result/result.css";
 import "./reports.css";
 
@@ -15,18 +15,24 @@ type Campaign = { id: string; kind?: string; name: string; connection_id: number
 type Catalog = { current: { sources: Source[] }; analysis: { campaigns: Campaign[] }; viewer: { role: string } };
 type Saved = { id: number; title: string; token: string; created_at: string; start: string | null; end: string | null; headline: string | null };
 type PlanItem = { text: string; owner: string };
+type FactItem = { text: string; owner: string | null; done: boolean; note: string };
+type Cost = { name: string; amount: string };
+type Settings = { sections: string[]; exclude: { channels: string[]; hypotheses: number[]; campaigns: string[]; leads: number[] };
+  hidden: { channels: string[]; hypotheses: number[]; campaigns: string[] }; metrics: string[]; granularity: string | null;
+  bottleneck: string | null; exclude_managers: number[]; extra_costs: { name: string; amount: number }[]; budget_plan: number | null };
 
 const SECTIONS: [string, string, string][] = [
   ["summary", "Главное за период", "вывод одной фразой и 4 большие цифры"],
   ["kpi", "Ключевые показатели", "лиды, цена лида, продажи, чек"],
   ["funnel", "Путь клиента", "воронка и узкое место"],
-  ["trend", "Динамика", "расходы и заявки по дням или неделям"],
+  ["trend", "Динамика", "расходы и заявки"],
   ["channels", "Каналы", "кто принёс деньги"],
   ["hypotheses", "Гипотезы", "сработало / не сработало / тестируем"],
-  ["sales", "Отдел продаж", "скорость ответа, менеджеры"],
-  ["plan", "План на следующий период", "шаги и кто отвечает"],
+  ["sales", "Отдел продаж", "скорость ответа, менеджеры, просрочки"],
+  ["plan", "План", "что обещали, что дальше, прогноз"],
 ];
 const OWNERS = ["Агентство", "Отдел продаж", "Решение клиента"];
+const DEFAULT_METRICS = ["revenue", "romi", "spend", "cac"];
 
 function lastMonth() {
   const now = new Date();
@@ -34,6 +40,15 @@ function lastMonth() {
 }
 const fmtDate = (s: string | null) => s ? new Date(`${s}T12:00:00`).toLocaleDateString("ru-RU", { day: "numeric", month: "short", year: "numeric" }) : "";
 const short = (n: number | null) => n == null ? "" : `${new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(n)}`;
+const toNumber = (v: string) => { const n = Number(String(v).replace(/\s/g, "").replace(",", ".")); return Number.isFinite(n) && v.trim() ? n : null; };
+
+function Eye({ off, onClick, label }: { off: boolean; onClick: () => void; label: string }) {
+  return <button type="button" className={`reportsEye ${off ? "off" : ""}`} aria-pressed={off} aria-label={off ? `Показать «${label}» в отчёте` : `Скрыть «${label}» из отчёта (цифры останутся в итогах)`}
+    title={off ? "Скрыто из отчёта, цифры в итогах" : "Скрыть строку, цифры оставить в итогах"} onClick={e => { e.preventDefault(); e.stopPropagation(); onClick(); }}>
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" /><circle cx="12" cy="12" r="3" />{off && <path d="M3 3l18 18" />}</svg>
+  </button>;
+}
 
 export default function ReportsPage() {
   const [projects, setProjects] = useState<ReportingProject[]>([]);
@@ -43,8 +58,22 @@ export default function ReportsPage() {
   const [channels, setChannels] = useState<string[]>([]);
   const [hypotheses, setHypotheses] = useState<number[]>([]);
   const [campaigns, setCampaigns] = useState<string[]>([]);
+  const [deals, setDeals] = useState<number[]>([]);
+  const [hiddenChannels, setHiddenChannels] = useState<string[]>([]);
+  const [hiddenHyps, setHiddenHyps] = useState<number[]>([]);
+  const [managersOff, setManagersOff] = useState<number[]>([]);
+  const [metrics, setMetrics] = useState<string[]>(DEFAULT_METRICS);
+  const [granularity, setGranularity] = useState("");
+  const [bottleneck, setBottleneck] = useState("auto");
+  const [costs, setCosts] = useState<Cost[]>([]);
+  const [budget, setBudget] = useState("");
+  const [comments, setComments] = useState<Record<string, string>>({});
+  const [openComment, setOpenComment] = useState<string | null>(null);
   const [summary, setSummary] = useState("");
   const [plan, setPlan] = useState<PlanItem[]>([{ text: "", owner: "Агентство" }]);
+  const [fact, setFact] = useState<FactItem[]>([]);
+  const [lastTitle, setLastTitle] = useState<string | null>(null);
+  const [forecast, setForecast] = useState({ spend: "", leads: "", sales: "", revenue: "" });
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [report, setReport] = useState<ReportData | null>(null);
   const [saved, setSaved] = useState<Saved[]>([]);
@@ -62,18 +91,41 @@ export default function ReportsPage() {
     }).catch(exc => setError(exc.message));
   }, []);
   const loadSaved = (id: number) => api<Saved[]>(`/reports?project_id=${id}`).then(setSaved).catch(() => setSaved([]));
-  useEffect(() => { if (projectId) loadSaved(projectId); }, [projectId]);
-  // Каталог для «матрёшки»: каналы, гипотезы и кампании за выбранный период (без исключений).
+  function applySettings(t: Partial<Settings> | null) {
+    setSections(t?.sections?.length ? t.sections : SECTIONS.map(s => s[0]));
+    setChannels(t?.exclude?.channels || []); setHypotheses(t?.exclude?.hypotheses || []); setCampaigns(t?.exclude?.campaigns || []); setDeals([]);
+    setHiddenChannels(t?.hidden?.channels || []); setHiddenHyps(t?.hidden?.hypotheses || []);
+    setMetrics(t?.metrics?.length ? t.metrics : DEFAULT_METRICS); setGranularity(t?.granularity || ""); setBottleneck(t?.bottleneck || "auto");
+    setManagersOff(t?.exclude_managers || []); setCosts((t?.extra_costs || []).map(c => ({ name: c.name, amount: String(c.amount) })));
+    setBudget(t?.budget_plan ? String(t.budget_plan) : "");
+  }
+  // Новый проект: шаблон (если сохраняли) и план из прошлого отчёта для «Что обещали в прошлый раз».
+  useEffect(() => {
+    if (!projectId) return;
+    loadSaved(projectId);
+    api<{ template: Partial<Settings> | null; last_plan: { text: string; owner: string | null }[]; last_title: string | null }>(`/reports/template?project_id=${projectId}`)
+      .then(data => { applySettings(data.template); setFact(data.last_plan.map(p => ({ text: p.text, owner: p.owner, done: false, note: "" }))); setLastTitle(data.last_title); })
+      .catch(() => applySettings(null));
+  }, [projectId]);
   useEffect(() => {
     if (!projectId || !start || !end || start > end) return;
     const query = new URLSearchParams({ project_id: String(projectId), start, end });
     api<Catalog>(`/analytics?${query}`).then(setCatalog).catch(exc => setError(exc.message));
   }, [projectId, start, end]);
 
-  const body = useMemo(() => ({ project_id: projectId, start, end, sections, summary: summary.trim() || null,
-    exclude: { channels, hypotheses, campaigns }, plan: plan.filter(p => p.text.trim()).map(p => ({ text: p.text.trim(), owner: p.owner || null })) }),
-    [projectId, start, end, sections, summary, channels, hypotheses, campaigns, plan]);
-  // Живое превью: пересобираем через полсекунды после последней правки.
+  const settings: Settings = useMemo(() => ({ sections, exclude: { channels, hypotheses, campaigns, leads: deals },
+    hidden: { channels: hiddenChannels, hypotheses: hiddenHyps, campaigns: [] }, metrics, granularity: granularity || null,
+    bottleneck: bottleneck === "auto" ? null : bottleneck, exclude_managers: managersOff,
+    extra_costs: costs.map(c => ({ name: c.name.trim(), amount: toNumber(c.amount) || 0 })).filter(c => c.name && c.amount > 0),
+    budget_plan: toNumber(budget) }), [sections, channels, hypotheses, campaigns, deals, hiddenChannels, hiddenHyps, metrics, granularity, bottleneck, managersOff, costs, budget]);
+  const body = useMemo(() => {
+    const fc = { spend: toNumber(forecast.spend), leads: toNumber(forecast.leads), sales: toNumber(forecast.sales), revenue: toNumber(forecast.revenue) };
+    return { project_id: projectId, start, end, ...settings, summary: summary.trim() || null,
+      comments: Object.fromEntries(Object.entries(comments).filter(([, v]) => v.trim())),
+      forecast: Object.values(fc).some(v => v != null) ? fc : null,
+      plan: plan.filter(p => p.text.trim()).map(p => ({ text: p.text.trim(), owner: p.owner || null })),
+      plan_fact: fact.filter(p => p.text.trim()).map(p => ({ text: p.text, owner: p.owner, done: p.done, note: p.note.trim() || null })) };
+  }, [projectId, start, end, settings, summary, comments, forecast, plan, fact]);
   useEffect(() => {
     if (!projectId || !start || !end || start > end) return;
     if (timer.current) clearTimeout(timer.current);
@@ -89,9 +141,8 @@ export default function ReportsPage() {
     const ads = catalog.analysis.campaigns.filter(c => c.kind !== "channel");
     return catalog.current.sources.filter(s => s.spend || s.leads || s.sales).map(source => {
       const connectionId = source.id.startsWith("ad:") ? Number(source.id.slice(3)) : null;
-      const own = connectionId ? ads.filter(c => c.connection_id === connectionId) : [];
       const groups = new Map<string, { id: number | null; name: string; items: Campaign[] }>();
-      for (const c of own) {
+      for (const c of connectionId ? ads.filter(c => c.connection_id === connectionId) : []) {
         const key = c.hypothesis_id ? String(c.hypothesis_id) : "none";
         const g = groups.get(key) || { id: c.hypothesis_id, name: c.hypothesis_name || "Без гипотезы", items: [] };
         g.items.push(c); groups.set(key, g);
@@ -100,7 +151,9 @@ export default function ReportsPage() {
     });
   }, [catalog]);
   const toggle = <T,>(list: T[], value: T, set: (v: T[]) => void) => set(list.includes(value) ? list.filter(v => v !== value) : [...list, value]);
-  const excludedCount = channels.length + hypotheses.length + campaigns.length;
+  const excludedCount = channels.length + hypotheses.length + campaigns.length + deals.length;
+  const paidOnly = () => setChannels(tree.filter(({ source }) => !source.id.startsWith("ad:")).map(({ source }) => source.id));
+  const pickMetric = (key: string) => setMetrics(metrics.includes(key) ? metrics.filter(k => k !== key) : metrics.length >= 4 ? [...metrics.slice(1), key] : [...metrics, key]);
 
   async function save() {
     if (!projectId) return;
@@ -112,6 +165,12 @@ export default function ReportsPage() {
       await navigator.clipboard.writeText(link).catch(() => undefined);
       setNotice(`Отчёт сохранён. Ссылка для клиента скопирована: ${link}`);
     } catch (exc) { setError((exc as Error).message); } finally { setBusy(false); }
+  }
+  async function saveTemplate() {
+    if (!projectId) return;
+    try { await api("/reports/template", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project_id: projectId, ...settings, exclude: { ...settings.exclude, leads: [] } }) });
+      setNotice("Шаблон сохранён: в следующий раз отчёт по этому проекту соберётся с этими настройками."); }
+    catch (exc) { setError((exc as Error).message); }
   }
   async function open(id: number) {
     setError("");
@@ -129,12 +188,21 @@ export default function ReportsPage() {
   }
   const selectedProject = projects.find(p => p.id === projectId);
   const shown = opened?.report || report;
+  const funnelLabels = report ? [...(report.clicks ? ["Клики"] : []), ...report.funnel.map(f => f.label)].slice(1) : [];
+
+  const sectionExtra = (key: string) => {
+    if (key === "summary") return <div className="reportsInline"><span>Главные 4 цифры:</span><div className="reportsChips">{Object.entries(HERO).map(([k, h]) =>
+      <button key={k} type="button" aria-pressed={metrics.includes(k)} className={metrics.includes(k) ? "on" : ""} onClick={() => pickMetric(k)}>{h.label}</button>)}</div></div>;
+    if (key === "trend") return <label className="reportsInline">Шаг графика<select value={granularity} onChange={e => setGranularity(e.target.value)}><option value="">Автоматически</option><option value="day">Дни</option><option value="week">Недели</option><option value="month">Месяцы</option></select></label>;
+    if (key === "funnel") return <label className="reportsInline">Узкое место<select value={bottleneck} onChange={e => setBottleneck(e.target.value)}><option value="auto">Определить автоматически</option><option value="hide">Не показывать</option>{funnelLabels.map(l => <option key={l} value={l}>Перед этапом «{l}»</option>)}</select></label>;
+    return null;
+  };
 
   return <div className="resultShell reportsShell"><ProjectSidebar project={selectedProject} projectId={projectId} active="reports" role={catalog?.viewer.role} />
     <main className="resultMain">
       <div className="resultBreadcrumb">StepToLead <span>/</span> Отчёты</div>
-      <header className="resultHeader reportsHeader"><div><h1>Отчёты</h1><p>Цифры подтягиваются из рекламы, заявок и CRM. Уберите лишнее, допишите план — и отправьте клиенту ссылкой, PDF или в Google Таблицы.</p></div>
-        {projects.length > 1 && <label className="resultSelect"><span>Проект</span><select value={projectId || ""} onChange={e => { setProjectId(Number(e.target.value)); setOpened(null); setChannels([]); setHypotheses([]); setCampaigns([]); }}>{projects.map(p => <option key={p.id} value={p.id}>{p.organization_name} · {p.name}</option>)}</select></label>}
+      <header className="resultHeader reportsHeader"><div><h1>Отчёты</h1><p>Цифры подтягиваются из рекламы, заявок и CRM. Галочка — учитывать в расчёте, глазик — только скрыть строку. Всё, что не вошло в расчёт, отчёт честно перечислит в конце.</p></div>
+        {projects.length > 1 && <label className="resultSelect"><span>Проект</span><select value={projectId || ""} onChange={e => { setProjectId(Number(e.target.value)); setOpened(null); }}>{projects.map(p => <option key={p.id} value={p.id}>{p.organization_name} · {p.name}</option>)}</select></label>}
       </header>
       {error && <div className="resultError" role="alert">{error}</div>}
       {notice && <div className="reportsNotice" role="status">{notice}</div>}
@@ -166,33 +234,63 @@ export default function ReportsPage() {
           </section>
 
           <section><h2>2. Что показать</h2>
-            {SECTIONS.map(([key, label, hint]) => <label key={key} className="reportsCheck"><input type="checkbox" checked={sections.includes(key)} onChange={() => toggle(sections, key, setSections)} /><span><strong>{label}</strong> — {hint}</span></label>)}
+            {SECTIONS.map(([key, label, hint]) => <div key={key} className="reportsSection">
+              <label className="reportsCheck"><input type="checkbox" checked={sections.includes(key)} onChange={() => toggle(sections, key, setSections)} /><span><strong>{label}</strong> — {hint}</span>
+                <button type="button" className={`reportsCommentBtn ${comments[key] ? "has" : ""}`} onClick={e => { e.preventDefault(); setOpenComment(openComment === key ? null : key); }}>{comments[key] ? "комментарий ✓" : "+ комментарий"}</button></label>
+              {sections.includes(key) && sectionExtra(key)}
+              {openComment === key && <textarea className="reportsComment" rows={2} maxLength={600} placeholder="Например: 15-го лежал сайт — заявок не было, бюджет остановили" value={comments[key] || ""} onChange={e => setComments({ ...comments, [key]: e.target.value })} aria-label={`Комментарий к блоку «${label}»`} />}
+            </div>)}
           </section>
 
-          <section><h2>3. Что учесть {excludedCount > 0 && <em>убрано: {excludedCount}</em>}</h2>
-            <small>Снимите галочку — канал, гипотеза или кампания не попадёт в этот отчёт: ни лиды, ни продажи, ни расходы. Аналитика портала не меняется.</small>
+          <section><h2>3. Что учесть {excludedCount > 0 && <em>убрано из расчёта: {excludedCount}</em>}</h2>
+            <small>Галочка — учитывать в расчёте. Глазик — скрыть строку, но оставить цифры в итогах.</small>
+            <div className="reportsPresets"><button type="button" onClick={paidOnly}>Только платная реклама</button><button type="button" onClick={() => { setChannels([]); setHypotheses([]); setCampaigns([]); setDeals([]); setHiddenChannels([]); setHiddenHyps([]); }}>Учитывать всё</button></div>
             {!catalog ? <p className="reportsMuted">Загружаем каналы…</p> : !tree.length ? <p className="reportsMuted">За период нет данных.</p> :
               <div className="reportsTree">{tree.map(({ source, groups }) => {
                 const offChannel = channels.includes(source.id);
                 return <details key={source.id} open={groups.length > 0 && !offChannel}>
                   <summary><label className="reportsNode" onClick={e => e.stopPropagation()}><input type="checkbox" checked={!offChannel} onChange={() => toggle(channels, source.id, setChannels)} /><strong>{source.name}</strong></label>
-                    <span className="reportsNodeMeta">{source.spend ? `${short(source.spend)} ₽ · ` : ""}{short(source.leads) || 0} лид.</span></summary>
+                    <span className="reportsNodeMeta">{source.spend ? `${short(source.spend)} ₽ · ` : ""}{short(source.leads) || 0} лид.</span>
+                    {!offChannel && <Eye off={hiddenChannels.includes(source.id)} label={source.name} onClick={() => toggle(hiddenChannels, source.id, setHiddenChannels)} />}</summary>
                   {groups.map(g => {
                     const offHyp = g.id != null && hypotheses.includes(g.id);
                     return <div key={g.id ?? "none"} className="reportsLevel">
-                      {g.id != null ? <label className="reportsNode"><input type="checkbox" disabled={offChannel} checked={!offChannel && !offHyp} onChange={() => toggle(hypotheses, g.id as number, setHypotheses)} /><span>Гипотеза «{g.name}»</span></label>
+                      {g.id != null ? <div className="reportsRow"><label className="reportsNode"><input type="checkbox" disabled={offChannel} checked={!offChannel && !offHyp} onChange={() => toggle(hypotheses, g.id as number, setHypotheses)} /><span>Гипотеза «{g.name}»</span></label>
+                        <Eye off={hiddenHyps.includes(g.id)} label={g.name} onClick={() => toggle(hiddenHyps, g.id as number, setHiddenHyps)} /></div>
                         : <div className="reportsNode reportsMuted">Кампании без гипотезы</div>}
+                      {offHyp && <small className="reportsHint">Карточка гипотезы останется в отчёте с пометкой «не в итогах».</small>}
                       <div className="reportsLevel">{g.items.map(c => <label key={c.id} className="reportsNode small"><input type="checkbox" disabled={offChannel || offHyp} checked={!offChannel && !offHyp && !campaigns.includes(c.id)} onChange={() => toggle(campaigns, c.id, setCampaigns)} />
                         <span>{c.name}</span><span className="reportsNodeMeta">{c.spend ? `${short(c.spend)} ₽` : ""}{c.leads ? ` · ${c.leads} лид.` : ""}</span></label>)}</div>
                     </div>;
                   })}
                 </details>;
               })}</div>}
+            {!!report?.sales_list?.length && <div className="reportsSub"><strong>Крупные продажи</strong><small>Снимите случайную сделку, которая искажает средний чек и ROMI.</small>
+              {report.sales_list.map(s => <label key={s.lead_id} className="reportsNode"><input type="checkbox" checked={!deals.includes(s.lead_id)} onChange={() => toggle(deals, s.lead_id, setDeals)} />
+                <span>{s.name}</span><span className="reportsNodeMeta">{rub(s.amount)}</span></label>)}</div>}
+            {!!report?.sales_team.all_managers?.length && <div className="reportsSub"><strong>Менеджеры в блоке «Отдел продаж»</strong><small>Снимите РОПа с тестовыми лидами или уволенного сотрудника.</small>
+              {report.sales_team.all_managers.map(m => <label key={m.id} className="reportsNode"><input type="checkbox" checked={!managersOff.includes(m.id)} onChange={() => toggle(managersOff, m.id, setManagersOff)} /><span>{m.name}</span></label>)}</div>}
           </section>
 
-          <section><h2>4. Текст для клиента</h2>
-            <label className="reportsField">Главное (можно оставить пустым — напишем сами по цифрам)
+          <section><h2>4. Деньги</h2>
+            <div className="reportsField">Доп. расходы — входят в ROMI и стоимость продажи
+              {costs.map((c, i) => <div key={i} className="reportsCostRow">
+                <input value={c.name} maxLength={120} placeholder="Гонорар агентства" onChange={e => setCosts(costs.map((x, j) => j === i ? { ...x, name: e.target.value } : x))} aria-label="Статья расходов" />
+                <input value={c.amount} inputMode="decimal" placeholder="₽" onChange={e => setCosts(costs.map((x, j) => j === i ? { ...x, amount: e.target.value } : x))} aria-label="Сумма" />
+                <button type="button" aria-label="Убрать" onClick={() => setCosts(costs.filter((_, j) => j !== i))}>×</button></div>)}
+              {costs.length < 20 && <button type="button" className="reportsAdd" onClick={() => setCosts([...costs, { name: "", amount: "" }])}>+ Расход</button>}
+            </div>
+            <label className="reportsField">План бюджета на период, ₽<input value={budget} inputMode="decimal" placeholder="Например, 200 000" onChange={e => setBudget(e.target.value)} /></label>
+          </section>
+
+          <section><h2>5. Текст для клиента</h2>
+            <label className="reportsField">Главное — можно оставить пустым, напишем по цифрам
               <textarea rows={3} maxLength={1500} value={summary} onChange={e => setSummary(e.target.value)} placeholder={report ? autoSummary(report) : ""} /></label>
+            {fact.length > 0 && <div className="reportsField">Что обещали в прошлый раз{lastTitle ? ` («${lastTitle}»)` : ""}
+              {fact.map((p, i) => <div key={i} className="reportsFactRow">
+                <label className="reportsNode"><input type="checkbox" checked={p.done} onChange={() => setFact(fact.map((x, j) => j === i ? { ...x, done: !x.done } : x))} /><span>{p.text}</span></label>
+                <input value={p.note} maxLength={300} placeholder="Комментарий: что получилось" onChange={e => setFact(fact.map((x, j) => j === i ? { ...x, note: e.target.value } : x))} aria-label={`Комментарий к «${p.text}»`} />
+              </div>)}</div>}
             <div className="reportsField">План на следующий период
               {plan.map((item, i) => <div key={i} className="reportsPlanRow">
                 <input value={item.text} maxLength={300} placeholder={i === 0 ? "Например: +30% бюджета на лучшую кампанию" : "Следующий шаг"} onChange={e => setPlan(plan.map((p, j) => j === i ? { ...p, text: e.target.value } : p))} aria-label={`Шаг ${i + 1}`} />
@@ -201,12 +299,17 @@ export default function ReportsPage() {
               </div>)}
               {plan.length < 12 && <button type="button" className="reportsAdd" onClick={() => setPlan([...plan, { text: "", owner: "Агентство" }])}>+ Шаг</button>}
             </div>
+            <div className="reportsField">Прогноз на следующий период
+              <div className="reportsForecast">{([["spend", "Бюджет, ₽"], ["leads", "Лиды"], ["sales", "Продажи"], ["revenue", "Выручка, ₽"]] as const).map(([k, l]) =>
+                <label key={k}>{l}<input value={forecast[k]} inputMode="decimal" onChange={e => setForecast({ ...forecast, [k]: e.target.value })} /></label>)}</div>
+            </div>
           </section>
 
           <div className="reportsBuilderActions">
             <button type="button" className="primary" disabled={busy || !report} onClick={save}>{busy ? "Сохраняем…" : "Сохранить и получить ссылку"}</button>
             <button type="button" disabled={!report} onClick={() => report && copySheets(report)}>Скопировать для Google Таблиц</button>
             <button type="button" disabled={!report} onClick={() => window.print()}>Скачать PDF</button>
+            <button type="button" onClick={saveTemplate}>Сохранить настройки как шаблон проекта</button>
           </div>
         </aside>
         <section className="reportsPreview" aria-label="Превью отчёта">

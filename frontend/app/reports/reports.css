@@ -39,6 +39,29 @@
 .reportsActions{margin-bottom:18px}
 .reportsPreview{flex:999 1 560px;min-width:0;display:flex;flex-direction:column;gap:12px}
 .reportsPreviewLabel{font-size:12px;font-weight:700;letter-spacing:.06em;color:#5B6478}
+.reportsSection{display:flex;flex-direction:column;gap:6px}
+.reportsCheck .reportsCommentBtn{margin-left:auto;flex:none;font:inherit;font-size:11px;font-weight:600;color:#1E4FB8;background:none;border:0;cursor:pointer;padding:2px 0;white-space:nowrap}
+.reportsCommentBtn.has{color:#0E6B4C}
+.reportsComment{font:inherit;font-size:13px;padding:9px 11px;border-radius:10px;border:1px solid #F0DDA8;background:#FFFBEF;resize:vertical}
+.reportsInline{display:flex;flex-direction:column;gap:6px;font-size:12px;color:#5B6478;padding:0 4px 4px 31px}
+.reportsInline select{font:inherit;font-size:13px;color:#14213A;padding:8px 10px;border-radius:9px;border:1px solid #D5DCEA;background:#fff}
+.reportsChips{display:flex;flex-wrap:wrap;gap:6px}
+.reportsChips button{font:inherit;font-size:12px;padding:6px 10px;min-height:32px;border-radius:999px;border:1px solid #D5DCEA;background:#fff;color:#3F4A5F;cursor:pointer}
+.reportsChips button.on{background:#E4ECFF;border-color:#1E5FE0;color:#1E4FB8;font-weight:700}
+.reportsPresets{display:flex;flex-wrap:wrap;gap:6px}
+.reportsPresets button{font:inherit;font-size:12px;font-weight:600;padding:7px 11px;min-height:34px;border-radius:999px;border:1px solid #D5DCEA;background:#fff;color:#14213A;cursor:pointer}
+.reportsRow{display:flex;align-items:center;gap:6px}
+.reportsEye{flex:none;width:32px;height:32px;display:inline-flex;align-items:center;justify-content:center;border-radius:8px;border:0;background:none;color:#5B6478;cursor:pointer}
+.reportsEye:hover{background:#EEF2F8}.reportsEye.off{color:#B4410C}
+.reportsHint{display:block;padding:0 0 4px 26px;color:#5B6478}
+.reportsSub{display:flex;flex-direction:column;gap:2px;border-top:1px solid #EEF2F8;padding-top:10px;margin-top:4px}
+.reportsSub>strong{font-size:13px}
+.reportsCostRow{display:grid;grid-template-columns:minmax(0,1fr) 110px 34px;gap:6px}
+.reportsCostRow input,.reportsField>input,.reportsFactRow input,.reportsForecast input{font:inherit;font-size:14px;color:#14213A;padding:10px 11px;border-radius:10px;border:1px solid #D5DCEA;background:#fff;min-width:0}
+.reportsCostRow button{font:inherit;border:1px solid #D5DCEA;background:#fff;border-radius:10px;cursor:pointer;color:#3F4A5F;min-height:40px}
+.reportsFactRow{display:flex;flex-direction:column;gap:4px;padding:6px 0;border-bottom:1px solid #EEF2F8}
+.reportsForecast{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.reportsForecast label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:#5B6478}
 @media (max-width:900px){.reportsBuilder{position:static;max-width:none;max-height:none}}
 @media print{
   .resultSidebar,.resultBreadcrumb,.reportsHeader,.reportsNotice,.reportsSaved,.reportsBuilder,.reportsActions,.reportsPreviewLabel,.resultError{display:none!important}

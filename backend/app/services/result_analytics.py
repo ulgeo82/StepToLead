@@ -53,7 +53,7 @@ AttributionRow = namedtuple("AttributionRow", "connection_id source_id external_
 Exclusions = namedtuple("Exclusions", "lead_ids hypothesis_ids campaigns")
 # Исключения одного отчёта («матрёшка»): ключи каналов из «Результата» (ad:12, source:3…),
 # id гипотез и кампании «<кабинет>:<id кампании>».
-ReportExclude = namedtuple("ReportExclude", "channels hypotheses campaigns")
+ReportExclude = namedtuple("ReportExclude", "channels hypotheses campaigns leads")
 
 
 def parse_report_exclude(raw) -> ReportExclude | None:
@@ -66,12 +66,14 @@ def parse_report_exclude(raw) -> ReportExclude | None:
         connection_id, _, campaign_id = str(value).partition(":")
         if connection_id.isdigit() and campaign_id:
             campaigns.add((int(connection_id), campaign_id[:180]))
-    if not (channels or hypotheses or campaigns):
+    leads = frozenset(int(value) for value in (raw.get("leads") or [])[:500] if str(value).isdigit())
+    if not (channels or hypotheses or campaigns or leads):
         return None
-    return ReportExclude(channels, hypotheses, frozenset(campaigns))
+    return ReportExclude(channels, hypotheses, frozenset(campaigns), leads)
 
 
-async def analytics_exclusions(db: AsyncSession, project_id: int, hypothesis_ids=(), campaigns=()) -> Exclusions:
+async def analytics_exclusions(db: AsyncSession, project_id: int, hypothesis_ids=(), campaigns=(),
+                               lead_ids=()) -> Exclusions:
     """Что не считается: всегда — лиды с отметкой «не считать в аналитику» в CRM; для отчёта — ещё
     выбранные гипотезы и кампании (их лиды по атрибуции и расходы кампаний)."""
     hypothesis_ids = {int(value) for value in hypothesis_ids}
@@ -85,8 +87,9 @@ async def analytics_exclusions(db: AsyncSession, project_id: int, hypothesis_ids
         ClientLeadAttribution.connection_id, ClientLeadAttribution.external_campaign_id)
         .outerjoin(ClientLeadAttribution, ClientLeadAttribution.lead_id == ClientLead.id)
         .where(ClientLead.project_id == project_id))).all()
+    extra_leads = {int(value) for value in lead_ids}
     lead_ids = {lead_id for lead_id, flag, hypothesis_id, connection_id, campaign_id in rows
-                if flag or (hypothesis_id is not None and hypothesis_id in hypothesis_ids)
+                if lead_id in extra_leads or flag or (hypothesis_id is not None and hypothesis_id in hypothesis_ids)
                 or (connection_id is not None and (connection_id, campaign_id) in campaigns)}
     return Exclusions(lead_ids, hypothesis_ids, campaigns)
 
@@ -189,7 +192,8 @@ async def result_facts(db: AsyncSession, project: Project, start: date, end: dat
     latest = end
 
     exclusions = await analytics_exclusions(db, project.id, exclude.hypotheses if exclude else (),
-                                            exclude.campaigns if exclude else ())
+                                            exclude.campaigns if exclude else (),
+                                            exclude.leads if exclude else ())
     lead_rows = await load_lead_rows(db, project.id, exclusions)
     connections, custom, sources, lead_source = await source_catalog(db, project, lead_rows)
     sales = [sale for sale in (await db.scalars(select(ClientSale).where(ClientSale.project_id == project.id))).all()

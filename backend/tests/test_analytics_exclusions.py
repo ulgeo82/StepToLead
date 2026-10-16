@@ -65,6 +65,11 @@ class AnalyticsExclusionTests(unittest.TestCase):
                     db, project, *period, "day", exclude=result_analytics.parse_report_exclude({"channels": [f"ad:{ad.id}"]}))
                 from app.services.reports import build_report
                 report = await build_report(db, project, *period, exclude)
+                self.costed = await build_report(db, project, *period, exclude, {
+                    "extra_costs": [{"name": "Гонорар", "amount": 300}], "metrics": ["drr", "leads", "revenue", "spend"]})
+                site_id = leads["Сайт"].id
+                self.no_deal = await build_report(db, project, *period,
+                                                  result_analytics.parse_report_exclude({"hypotheses": [test_h.id], "leads": [site_id]}))
                 self.plain, self.no_vk, self.report = plain, no_vk, report
                 return facts, details
         try:
@@ -89,8 +94,19 @@ class AnalyticsExclusionTests(unittest.TestCase):
         self.assertIsNone(self.no_vk["current"]["totals"]["spend"])
         self.assertEqual(self.report["totals"]["leads"], 2)
         self.assertEqual(self.report["excluded"]["crm_leads"], 1)
-        self.assertEqual(self.report["excluded"]["hypotheses"], 1)
-        self.assertEqual([h["name"] for h in self.report["hypotheses"]], ["Основная"])
+        # Исключённая гипотеза видна карточкой «не в итогах» и перечислена в блоке прозрачности.
+        cards = {h["name"]: h for h in self.report["hypotheses"]}
+        self.assertTrue(cards["Основная"]["in_totals"])
+        self.assertFalse(cards["Тест"]["in_totals"])
+        self.assertEqual(cards["Тест"]["leads"], 1)
+        self.assertEqual([h["name"] for h in self.report["excluded"]["hypotheses"]], ["Тест"])
+        # Доп. расходы входят в расходы, ДРР считается от выручки.
+        self.assertAlmostEqual(float(self.costed["totals"]["spend"]), 900.0)
+        self.assertAlmostEqual(float(self.costed["totals"]["drr"]), 30.0)
+        self.assertEqual(self.costed["hero"], ["drr", "leads", "revenue", "spend"])
+        # Сделку можно снять с расчёта: продажа «Сайт» уходит, лид — тоже.
+        self.assertEqual(self.no_deal["totals"]["sales"], 0)
+        self.assertEqual([d["name"] for d in self.no_deal["excluded"]["deals"]], ["Сайт"])
 
 
 if __name__ == "__main__":
