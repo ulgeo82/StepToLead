@@ -10,8 +10,8 @@ from app.models.marketing import (AdCampaignMetricDaily, AdConnection, AdHypothe
                                   AdHypothesisCampaign, AdMetricDaily, ClientLead,
                                   ClientLeadAttribution, ClientLeadEvent, ClientSale, Project,
                                   SourceMetricDaily)
-from app.services.result_analytics import (_derived, _ratio, _sum, analytics_exclusions, load_lead_rows,
-                                           quality_fields, source_catalog)
+from app.services.result_analytics import (ReportExclude, _derived, _ratio, _sum, analytics_exclusions,
+                                           load_lead_rows, quality_fields, source_catalog)
 
 
 def defaultdict_count(values) -> dict:
@@ -81,9 +81,12 @@ def _period_exposure(first, last, connections, source_rows, ad_rows, result_sour
             "sources": channel_rows}
 
 
-async def analytics_details(db: AsyncSession, project: Project, start: date, end: date, result: dict):
-    connections = (await db.scalars(select(AdConnection).where(AdConnection.project_id == project.id)
-                                    .order_by(AdConnection.name))).all()
+async def analytics_details(db: AsyncSession, project: Project, start: date, end: date, result: dict,
+                            exclude: ReportExclude | None = None):
+    channels = exclude.channels if exclude else frozenset()
+    connections = [row for row in (await db.scalars(select(AdConnection).where(AdConnection.project_id == project.id)
+                                                    .order_by(AdConnection.name))).all()
+                   if f"ad:{row.id}" not in channels]
     connection_map = {row.id: row for row in connections}
     connection_ids = list(connection_map)
     hypotheses = (await db.scalars(select(AdHypothesis).where(AdHypothesis.project_id == project.id)
@@ -95,7 +98,8 @@ async def analytics_details(db: AsyncSession, project: Project, start: date, end
                    for row in assignment_rows if row.hypothesis_id in hypothesis_map}
 
     previous_start = date.fromisoformat(str(result["period"]["previous_start"]))
-    exclusions = await analytics_exclusions(db, project.id)
+    exclusions = await analytics_exclusions(db, project.id, exclude.hypotheses if exclude else (),
+                                            exclude.campaigns if exclude else ())
     ad_rows = (await db.scalars(select(AdMetricDaily).where(
         AdMetricDaily.connection_id.in_(connection_ids), AdMetricDaily.date >= previous_start,
         AdMetricDaily.date <= end))).all() if connection_ids else []
@@ -129,6 +133,8 @@ async def analytics_details(db: AsyncSession, project: Project, start: date, end
         AdCampaignMetricDaily.date >= start, AdCampaignMetricDaily.date <= end))).all() if connection_ids else []
     lead_rows = await load_lead_rows(db, project.id, exclusions)
     _, _, catalog, lead_source = await source_catalog(db, project, lead_rows)
+    if channels:
+        lead_rows = [row for row in lead_rows if lead_source.get(row[0].id) not in channels]
     attribution = {}
     campaign_leads = defaultdict(list)
     # Лиды без рекламной кампании (сайт, Telegram, ручные): строка «канал + utm_campaign», чтобы таблица
@@ -153,7 +159,7 @@ async def analytics_details(db: AsyncSession, project: Project, start: date, end
         ClientLead.project_id == project.id, ClientLeadEvent.event_type == "LEAD_LOST"))).all()
     lost_counts = defaultdict(int)
     for event in lost_events:
-        if event.lead_id not in exclusions.lead_ids and start <= event.created_at.date() <= end:
+        if event.lead_id in lead_created and start <= event.created_at.date() <= end:
             label = (event.description or "Не определено").split(": ", 1)[0]
             lost_counts[label] += 1
     campaign_sales = defaultdict(list)
@@ -182,6 +188,8 @@ async def analytics_details(db: AsyncSession, project: Project, start: date, end
     campaigns = []
     for connection_id, external_id in sorted(keys):
         key = (connection_id, external_id)
+        if key in exclusions.campaigns or connection_id not in connection_map:
+            continue
         rows = by_campaign[key]
         leads = campaign_leads[key]
         sales_for_campaign = campaign_sales[key]
@@ -209,7 +217,6 @@ async def analytics_details(db: AsyncSession, project: Project, start: date, end
                           "connection_id": connection_id, "connection_name": connection.name,
                           "platform": connection.platform, "hypothesis_id": hypothesis_id,
                           "hypothesis_name": hypothesis_map[hypothesis_id].name if hypothesis_id else None,
-                          "excluded": key in exclusions.campaigns or hypothesis_id in exclusions.hypothesis_ids,
                           "status": None, "clicks": clicks, "impressions": impressions,
                           "cpc": _ratio(spend, clicks), **values})
     campaigns.sort(key=lambda row: (row["spend"] or 0, row["name"]), reverse=True)
@@ -217,6 +224,8 @@ async def analytics_details(db: AsyncSession, project: Project, start: date, end
     channel_rows = []
     for key in set(channel_leads) | set(channel_sales):
         source_key, utm = key
+        if source_key in channels:
+            continue
         leads = channel_leads[key]
         lead_count = sum(start <= lead.created_at.date() <= end for lead in leads)
         qualified_count = sum(bool(lead.qualified_at and start <= lead.qualified_at.date() <= end) for lead in leads)
@@ -250,7 +259,6 @@ async def analytics_details(db: AsyncSession, project: Project, start: date, end
                 key=lambda item: (-item[1], item[0]))],
             "connections": [{"id": row.id, "name": row.name, "platform": row.platform,
                              "status": row.status, "last_synced_at": row.last_synced_at} for row in connections],
-            "hypotheses": [{"id": row.id, "name": row.name, "status": row.status,
-                            "exclude_from_analytics": bool(row.exclude_from_analytics)}
+            "hypotheses": [{"id": row.id, "name": row.name, "status": row.status}
                             for row in hypotheses],
             "campaigns": campaigns}

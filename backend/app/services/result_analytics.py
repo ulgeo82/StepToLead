@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.access import GrowthCalculation
-from app.models.marketing import (AdCampaignMetricDaily, AdConnection, AdHypothesis, AdHypothesisCampaign,
+from app.models.marketing import (AdCampaignMetricDaily, AdConnection, AdHypothesisCampaign,
                                   AdMetricDaily, ClientLead, ClientLeadAttribution,
                                   ClientSale, LeadInboundSource, Project, ProjectEconomics,
                                   ProjectSource, SourceMetricDaily)
@@ -51,16 +51,33 @@ AttributionRow = namedtuple("AttributionRow", "connection_id source_id external_
 
 
 Exclusions = namedtuple("Exclusions", "lead_ids hypothesis_ids campaigns")
+# Исключения одного отчёта («матрёшка»): ключи каналов из «Результата» (ad:12, source:3…),
+# id гипотез и кампании «<кабинет>:<id кампании>».
+ReportExclude = namedtuple("ReportExclude", "channels hypotheses campaigns")
 
 
-async def analytics_exclusions(db: AsyncSession, project_id: int) -> Exclusions:
-    """Что не считается в аналитике: лиды с отметкой в CRM и всё по гипотезам с отметкой
-    (их лиды — по гипотезе в атрибуции или по кампании гипотезы; расходы — по кампаниям гипотезы)."""
-    hypothesis_ids = set((await db.scalars(select(AdHypothesis.id).where(
-        AdHypothesis.project_id == project_id, AdHypothesis.exclude_from_analytics.is_(True)))).all())
+def parse_report_exclude(raw) -> ReportExclude | None:
+    if not raw:
+        return None
+    channels = frozenset(str(value)[:120] for value in (raw.get("channels") or [])[:500])
+    hypotheses = frozenset(int(value) for value in (raw.get("hypotheses") or [])[:500] if str(value).isdigit())
     campaigns = set()
+    for value in (raw.get("campaigns") or [])[:2000]:
+        connection_id, _, campaign_id = str(value).partition(":")
+        if connection_id.isdigit() and campaign_id:
+            campaigns.add((int(connection_id), campaign_id[:180]))
+    if not (channels or hypotheses or campaigns):
+        return None
+    return ReportExclude(channels, hypotheses, frozenset(campaigns))
+
+
+async def analytics_exclusions(db: AsyncSession, project_id: int, hypothesis_ids=(), campaigns=()) -> Exclusions:
+    """Что не считается: всегда — лиды с отметкой «не считать в аналитику» в CRM; для отчёта — ещё
+    выбранные гипотезы и кампании (их лиды по атрибуции и расходы кампаний)."""
+    hypothesis_ids = {int(value) for value in hypothesis_ids}
+    campaigns = {(int(connection_id), str(campaign_id)) for connection_id, campaign_id in campaigns}
     if hypothesis_ids:
-        campaigns = {(row.connection_id, row.external_campaign_id) for row in (await db.execute(
+        campaigns |= {(row.connection_id, row.external_campaign_id) for row in (await db.execute(
             select(AdHypothesisCampaign.connection_id, AdHypothesisCampaign.external_campaign_id)
             .where(AdHypothesisCampaign.hypothesis_id.in_(hypothesis_ids)))).all()}
     rows = (await db.execute(select(
@@ -165,18 +182,26 @@ async def source_catalog(db: AsyncSession, project: Project, lead_rows):
 
 
 async def result_facts(db: AsyncSession, project: Project, start: date, end: date, granularity: str = "day",
-                       include_source_trend: bool = False):
+                       include_source_trend: bool = False, exclude: ReportExclude | None = None):
     prior_end = start - timedelta(days=1)
     prior_start = prior_end - (end - start)
     earliest = prior_start
     latest = end
 
-    exclusions = await analytics_exclusions(db, project.id)
+    exclusions = await analytics_exclusions(db, project.id, exclude.hypotheses if exclude else (),
+                                            exclude.campaigns if exclude else ())
     lead_rows = await load_lead_rows(db, project.id, exclusions)
     connections, custom, sources, lead_source = await source_catalog(db, project, lead_rows)
-    connection_key = {row.id: f"ad:{row.id}" for row in connections}
     sales = [sale for sale in (await db.scalars(select(ClientSale).where(ClientSale.project_id == project.id))).all()
              if sale.lead_id not in exclusions.lead_ids]
+    if exclude and exclude.channels:
+        channels = exclude.channels
+        lead_rows = [row for row in lead_rows if lead_source.get(row[0].id) not in channels]
+        sales = [sale for sale in sales if lead_source.get(sale.lead_id, "unknown") not in channels]
+        connections = [row for row in connections if f"ad:{row.id}" not in channels]
+        custom = [row for row in custom if f"source:{row.id}" not in channels]
+        sources = {key: value for key, value in sources.items() if key not in channels}
+    connection_key = {row.id: f"ad:{row.id}" for row in connections}
     excluded_spend = await excluded_campaign_spend(db, exclusions, earliest, latest)
 
     ad_rows = []

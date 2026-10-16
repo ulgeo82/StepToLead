@@ -1,0 +1,63 @@
+/* Отчёт клиенту — по макету «Отчёт StepToLead». Классы rp*, чтобы не пересекаться со стилями портала. */
+.rp{--rp-ink:#14213A;--rp-muted:#5B6478;--rp-line:#E3E8F2;--rp-soft:#F4F7FC;--rp-blue:#1E5FE0;--rp-navy:#0E1628;--rp-good:#12805C;--rp-bad:#B4410C;
+  color:var(--rp-ink);display:flex;flex-direction:column;gap:22px;font-family:inherit;max-width:1120px;margin:0 auto;width:100%}
+.rp h1,.rp h2,.rp h3,.rp p{margin:0}
+.rpHead{display:flex;flex-direction:column;gap:8px}
+.rpKicker{font-size:13px;color:var(--rp-muted)}
+.rpHead h1{font-size:clamp(30px,4vw,44px);font-weight:800;letter-spacing:-.03em;line-height:1.05}
+.rpSub{font-size:15px;color:var(--rp-muted)}
+.rpHero{background:var(--rp-navy);color:#fff;border-radius:22px;padding:34px 36px;display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:30px}
+.rpHeroText{display:flex;flex-direction:column;gap:14px}
+.rpPill{align-self:flex-start;font-size:12px;font-weight:700;letter-spacing:.08em;color:#A9C4FF;border:1px solid #2D4170;border-radius:999px;padding:6px 12px}
+.rpHero h2{font-size:clamp(24px,2.6vw,32px);line-height:1.15;font-weight:800;letter-spacing:-.02em}
+.rpHero p{font-size:16px;line-height:1.6;color:#C9D2E3}
+.rpHeroGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.rpHeroGrid>div{background:#16213A;border-radius:16px;padding:18px 20px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.rpHeroGrid span:first-child{font-size:13px;color:#A6B2CC}
+.rpHeroGrid strong{font-size:clamp(20px,2.2vw,28px);font-weight:800;overflow-wrap:anywhere}
+.rpHero .rpDelta{color:#A6B2CC}.rpHero .rpDelta.good{color:#7EE2B8}.rpHero .rpDelta.bad{color:#FFB38A}
+.rpDelta{font-size:12px;font-weight:700;color:var(--rp-muted)}.rpDelta.good{color:var(--rp-good)}.rpDelta.bad{color:var(--rp-bad)}
+.rpCard{background:#fff;border:1px solid var(--rp-line);border-radius:20px}
+.rpKpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:12px}
+.rpKpi{padding:16px 18px;display:flex;flex-direction:column;gap:6px;border-radius:16px}
+.rpKpi span:first-child{font-size:13px;color:var(--rp-muted)}.rpKpi strong{font-size:26px;font-weight:800}
+.rpBlock{padding:26px 28px;display:flex;flex-direction:column;gap:16px}
+.rpBlockHead{display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px;align-items:baseline}
+.rpBlockHead h2{font-size:22px;font-weight:800}.rpBlockHead>span{font-size:13px;color:var(--rp-muted)}
+.rpFunnel{display:flex;flex-direction:column;gap:10px}
+.rpFunnelRow{display:grid;grid-template-columns:160px minmax(0,1fr) 110px;gap:14px;align-items:center}
+.rpFunnelRow span{font-size:14px;font-weight:600}.rpFunnelRow strong{font-size:15px;font-weight:800;text-align:right}
+.rpBar{height:34px;border-radius:9px;background:#DCE7FF}.rpBar i{display:block;height:100%;border-radius:9px;background:var(--rp-blue)}.rpBar i.dark{background:var(--rp-navy)}
+.rpFunnelStep{font-size:12px;color:var(--rp-muted);padding:0 0 10px 174px}.rpFunnelStep.bad{font-weight:700;color:var(--rp-bad)}
+.rpLegend{display:flex;gap:18px;font-size:13px;color:var(--rp-muted)}.rpLegend span{display:inline-flex;align-items:center;gap:6px}
+.rpLegend i{display:inline-block}.rpLegend i.bar{width:14px;height:10px;border-radius:3px;background:#C9D8F7}.rpLegend i.line{width:14px;height:3px;border-radius:2px;background:var(--rp-blue)}
+.rpChart{width:100%;height:auto;font-family:inherit}
+.rpEmpty{color:var(--rp-muted);font-size:14px}
+.rpTableBox{overflow-x:auto}
+.rpTable{width:100%;min-width:640px;border-collapse:collapse;font-size:14px}
+.rpTable th{padding:10px 8px;font-weight:600;color:var(--rp-muted);text-align:right;border-bottom:1px solid var(--rp-line)}
+.rpTable td{padding:13px 8px;border-bottom:1px solid #EEF2F8;text-align:right}
+.rpTable th:first-child,.rpTable td:first-child,.rpTable th:nth-child(2),.rpTable td:nth-child(2){text-align:left}
+.rpTable tr:last-child td{border-bottom:0}.rpTable td.good{color:var(--rp-good);font-weight:800}.rpTable td.bad{color:var(--rp-bad);font-weight:800}
+.rpShare{display:flex;align-items:center;gap:8px}.rpShare>div{width:140px;height:8px;border-radius:4px;background:#E8EEFA}.rpShare i{display:block;height:8px;border-radius:4px;background:var(--rp-blue)}
+.rpHyps{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}
+.rpHyp{padding:22px 24px;display:flex;flex-direction:column;gap:10px}.rpHyp h3{font-size:18px;font-weight:800}.rpHyp p{font-size:14px;line-height:1.55;color:#3F4A5F}
+.rpTag{align-self:flex-start;font-size:12px;font-weight:800;border-radius:999px;padding:5px 11px;font-style:normal;white-space:nowrap}
+.rpTag.good{color:#0E6B4C;background:#E3F6EE}.rpTag.bad{color:#9A3412;background:#FDECE2}.rpTag.info{color:#1E4FB8;background:#E4ECFF}
+.rpStats{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
+.rpStats>div{background:var(--rp-soft);border-radius:14px;padding:16px 18px;display:flex;flex-direction:column;gap:4px}
+.rpStats span{font-size:13px;color:var(--rp-muted)}.rpStats strong{font-size:24px;font-weight:800}
+.rpPlan{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:10px}
+.rpPlan li{display:grid;grid-template-columns:44px minmax(0,1fr) auto;gap:14px;align-items:center;padding:14px 16px;border-radius:14px;background:var(--rp-soft)}
+.rpPlan b{width:36px;height:36px;border-radius:50%;background:var(--rp-blue);color:#fff;font-weight:800;display:flex;align-items:center;justify-content:center}
+.rpPlan span{font-size:15px;font-weight:700}
+.rpFoot{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px;font-size:13px;color:var(--rp-muted);padding:4px 4px 0}
+@media (max-width:640px){
+  .rpHero{padding:24px 20px}.rpBlock{padding:20px 18px}
+  .rpFunnelRow{grid-template-columns:100px minmax(0,1fr) 60px;gap:10px}.rpFunnelStep{padding-left:0}
+  .rpPlan li{grid-template-columns:40px minmax(0,1fr)}.rpPlan li em{grid-column:2}
+}
+@media print{
+  .rp{max-width:none;gap:14px}.rpHero,.rpCard,.rpPlan li,.rpStats>div{break-inside:avoid;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .rpHero{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+}

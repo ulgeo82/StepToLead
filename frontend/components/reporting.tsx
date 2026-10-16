@@ -16,7 +16,7 @@ export const dateInput = (date: Date) => `${date.getFullYear()}-${String(date.ge
 const shortDate = (s: string) => new Date(`${s}T12:00:00`).toLocaleDateString("ru-RU", { day: "numeric", month: "short" });
 
 export function ProjectSidebar({ project, projectId, active, role }: {
-  project?: ReportingProject; projectId: number | null; active: "result" | "analytics" | "leads" | "crm" | "sales" | "ads" | "team" | "settings" | "profile"; role?: string;
+  project?: ReportingProject; projectId: number | null; active: "result" | "analytics" | "reports" | "leads" | "crm" | "sales" | "ads" | "team" | "settings" | "profile"; role?: string;
 }) {
   const [permissions, setPermissions] = useState<string[] | null>(null);
   useEffect(() => { api<{ permissions: string[] }>("/portal/auth/me").then(user => setPermissions(user.permissions)).catch(() => setPermissions([])); }, []);
@@ -27,10 +27,11 @@ export function ProjectSidebar({ project, projectId, active, role }: {
     <nav aria-label="Навигация"><small>АНАЛИТИКА</small>
       {allowed("view_result") && <Link className={active === "result" ? "active" : ""} href={`/result${suffix}`}><b>01</b> Результат</Link>}
       {allowed("view_analytics") && <Link className={active === "analytics" ? "active" : ""} href={`/analytics${suffix}`}><b>02</b> Аналитика</Link>}
-      <small>ПРОДАЖИ</small>{allowed("view_crm") && <Link className={active === "crm" || active === "leads" ? "active" : ""} href={`/crm${suffix}`}><b>03</b> CRM</Link>}
+      {allowed("view_analytics") && <Link className={active === "reports" ? "active" : ""} href={`/reports${suffix}`}><b>03</b> Отчёты</Link>}
+      <small>ПРОДАЖИ</small>{allowed("view_crm") && <Link className={active === "crm" || active === "leads" ? "active" : ""} href={`/crm${suffix}`}><b>04</b> CRM</Link>}
       <small>МАРКЕТИНГ</small>
-      {allowed("view_ads") && <Link className={active === "ads" ? "active" : ""} href={`/ads${suffix}`}><b>04</b> Реклама</Link>}
-      <small>УПРАВЛЕНИЕ</small>{permissions?.includes("manage_team") && <Link className={active === "team" ? "active" : ""} href="/team" title="Команда клиентской организации"><b>05</b> Команда</Link>}{(permissions?.includes("manage_settings") || permissions?.includes("manage_sources")) && <Link className={active === "settings" ? "active" : ""} href={`/settings${suffix}`} title="Настройки клиентской организации"><b>06</b> Настройки</Link>}{role !== "admin" && <Link className={active === "profile" ? "active" : ""} href={`/profile${suffix}`} title="Личный Telegram и пуш-уведомления"><b>07</b> Мои уведомления</Link>}
+      {allowed("view_ads") && <Link className={active === "ads" ? "active" : ""} href={`/ads${suffix}`}><b>05</b> Реклама</Link>}
+      <small>УПРАВЛЕНИЕ</small>{permissions?.includes("manage_team") && <Link className={active === "team" ? "active" : ""} href="/team" title="Команда клиентской организации"><b>06</b> Команда</Link>}{(permissions?.includes("manage_settings") || permissions?.includes("manage_sources")) && <Link className={active === "settings" ? "active" : ""} href={`/settings${suffix}`} title="Настройки клиентской организации"><b>07</b> Настройки</Link>}{role !== "admin" && <Link className={active === "profile" ? "active" : ""} href={`/profile${suffix}`} title="Личный Telegram и пуш-уведомления"><b>08</b> Мои уведомления</Link>}
     </nav><div className="resultSidebarFoot"><span>●</span> Данные вашего проекта · {role === "admin" ? <Link href="/admin">В админку</Link>
       : <button type="button" onClick={async () => { await api("/portal/auth/logout", { method: "POST" }).catch(() => undefined); location.assign("/login"); }}>Выйти</button>}</div>
   </aside>;

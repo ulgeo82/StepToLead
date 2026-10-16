@@ -20,6 +20,9 @@ api_router.include_router(brief.router)
 from app.api.routes import demo_launch, brief_links
 api_router.include_router(demo_launch.router)
 api_router.include_router(brief_links.router)
+from app.api.routes import reports
+api_router.include_router(reports.router)
+api_router.include_router(reports.public_router)
 api_router.include_router(ai_admin.router)
 api_router.include_router(access.router)
 api_router.include_router(growth.public_router)

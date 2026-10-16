@@ -1,4 +1,4 @@
-"""«Не считать в аналитику»: отметка на лиде и на гипотезе убирает лиды, продажи и расходы из отчётов."""
+"""«Не считать в аналитику» у лида — всегда; гипотеза, кампания и канал — исключения одного отчёта."""
 import asyncio
 import os
 import tempfile
@@ -32,7 +32,7 @@ class AnalyticsExclusionTests(unittest.TestCase):
                 ad = AdConnection(workspace_id=2, project_id=27, platform="vk_ads", name="VK", external_account_id="1",
                                   access_token_encrypted="x", status="connected")
                 db.add(ad); await db.flush()
-                test_h = AdHypothesis(workspace_id=2, project_id=27, name="Тест", exclude_from_analytics=True)
+                test_h = AdHypothesis(workspace_id=2, project_id=27, name="Тест")
                 main_h = AdHypothesis(workspace_id=2, project_id=27, name="Основная")
                 db.add_all([test_h, main_h]); await db.flush()
                 db.add_all([AdHypothesisCampaign(hypothesis_id=test_h.id, connection_id=ad.id, external_campaign_id="c1"),
@@ -55,9 +55,17 @@ class AnalyticsExclusionTests(unittest.TestCase):
                             ClientSale(lead_id=leads["Сайт"].id, project_id=27, amount=3000, occurred_at=day)])
                 await db.commit()
                 project = await db.get(Project, 27)
-                facts = await result_analytics.result_facts(db, project, date(2026, 10, 1), date(2026, 10, 11), "day")
+                exclude = result_analytics.parse_report_exclude({"hypotheses": [test_h.id]})
+                period = (date(2026, 10, 1), date(2026, 10, 11))
+                plain = await result_analytics.result_facts(db, project, *period, "day")
+                facts = await result_analytics.result_facts(db, project, *period, "day", exclude=exclude)
                 from app.services.analytics_details import analytics_details
-                details = await analytics_details(db, project, date(2026, 10, 1), date(2026, 10, 11), facts)
+                details = await analytics_details(db, project, *period, facts, exclude)
+                no_vk = await result_analytics.result_facts(
+                    db, project, *period, "day", exclude=result_analytics.parse_report_exclude({"channels": [f"ad:{ad.id}"]}))
+                from app.services.reports import build_report
+                report = await build_report(db, project, *period, exclude)
+                self.plain, self.no_vk, self.report = plain, no_vk, report
                 return facts, details
         try:
             facts, details = asyncio.run(go())
@@ -71,11 +79,18 @@ class AnalyticsExclusionTests(unittest.TestCase):
         self.assertAlmostEqual(float(totals["revenue"]), 3000.0)
         self.assertEqual(details["current"]["clicks"], 6)
         campaigns = {row["external_campaign_id"]: row for row in details["campaigns"] if row["kind"] == "ad"}
-        self.assertTrue(campaigns["c1"]["excluded"])
-        self.assertFalse(campaigns["c2"]["excluded"])
+        self.assertNotIn("c1", campaigns)
         self.assertEqual(campaigns["c2"]["leads"], 1)
-        flags = {row["name"]: row["exclude_from_analytics"] for row in details["hypotheses"]}
-        self.assertEqual(flags, {"Тест": True, "Основная": False})
+        # Без исключений отчёта: лид с отметкой в CRM всё равно не считается, гипотеза — считается.
+        self.assertEqual(self.plain["current"]["totals"]["leads"], 3)
+        self.assertAlmostEqual(float(self.plain["current"]["totals"]["spend"]), 1000.0)
+        # Без канала VK остаётся только сайт.
+        self.assertEqual(self.no_vk["current"]["totals"]["leads"], 1)
+        self.assertIsNone(self.no_vk["current"]["totals"]["spend"])
+        self.assertEqual(self.report["totals"]["leads"], 2)
+        self.assertEqual(self.report["excluded"]["crm_leads"], 1)
+        self.assertEqual(self.report["excluded"]["hypotheses"], 1)
+        self.assertEqual([h["name"] for h in self.report["hypotheses"]], ["Основная"])
 
 
 if __name__ == "__main__":
