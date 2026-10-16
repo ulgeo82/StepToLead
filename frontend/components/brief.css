@@ -124,3 +124,7 @@
 .briefDemoGhost:hover{border-color:#63a5ff;color:#fff}.briefDemoError{display:block;margin-top:6px;color:#ff8a94}
 .demoQr{text-align:center}.demoQrCode{display:flex;justify-content:center;margin:12px 0}.demoQrCode svg{width:220px;height:220px}
 .demoQr a{font-size:11px;color:#1a6cff;word-break:break-all}
+/* Выбранный вариант всегда заметен, даже если общий стиль кнопок портала сильнее. */
+.briefShell .briefOptions button[aria-pressed=true],.briefShell .briefOptions button[aria-pressed=true]:hover{border-color:var(--b-accent)!important;background:var(--b-accent)!important;color:#fff!important}
+.briefShell .briefOptions button[aria-pressed=true]::before{content:"✓ ";font-weight:800}
+.briefShell textarea{max-width:100%;resize:vertical}

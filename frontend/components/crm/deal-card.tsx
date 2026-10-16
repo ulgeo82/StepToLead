@@ -142,7 +142,9 @@ export function DealCard({ dealId, projectId, pipelines, team, sources, fields, 
           {deal.contact.company && <p className="crmMuted">{deal.contact.company}</p>}
           {deal.contact.phones.map(p => <p key={p}><a href={`tel:${p}`}>{p}</a></p>)}
           {deal.contact.emails.map(e => <p key={e}><a href={`mailto:${e}`}>{e}</a></p>)}
-          {deal.contact.telegram && <p>Telegram: {deal.contact.telegram}</p>}</div>
+          {deal.contact.telegram && <p>Telegram: {deal.contact.telegram}</p>}
+          {(deal.contact.company || deal.contact.position) && <p>{[deal.contact.company, deal.contact.position].filter(Boolean).join(" · ")}</p>}
+          {deal.contact.notes && <p className="crmContactNotes">{deal.contact.notes}</p>}</div>
 
         <div className="crmBlock"><h3>Сделка</h3>
           {deal.lead_id && <div className="crmQuality"><span>Заявка</span>

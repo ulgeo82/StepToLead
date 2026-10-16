@@ -122,16 +122,26 @@ async def submit(token: str, payload: SaveIn, request: Request, db: AsyncSession
     missing = [t for k, t, r in CONTACT_FIELDS if r and not contacts[k]]
     if missing:
         raise HTTPException(422, "Заполните контакты: " + ", ".join(missing))
-    brief.answers = service.clean_answers(payload.answers)
+    brief.answers = service.clean_answers(payload.answers, required=True)
     brief.status = "review"
     now = datetime.now(timezone.utc)
     deal = await db.get(CrmDeal, row.value["deal_id"])
     if deal:
         contact = await db.get(CrmContact, deal.contact_id)
         if contact:
+            # Сделка с автоматическим названием получает название компании из брифа.
+            company = (contacts["company"] or brief.answers.get("company.name") or "").strip()
+            if company and deal.name.strip() in {"", contact.name, contact.company or "", "Новая сделка", "Новый лид", "Заявка"}:
+                deal.name = company[:220]
+            facts = [f"{label}: {brief.answers[key]}" for key, label in
+                     (("mkt.site", "Сайт"), ("company.inn", "ИНН"), ("company.geo", "География")) if brief.answers.get(key)]
+            if facts:
+                note = "Из брифа — " + "; ".join(facts)
+                if note not in (contact.notes or ""):
+                    contact.notes = ((contact.notes + "\n") if contact.notes else "") + note
             contact.name = contacts["full_name"][:180]
             contact.position = contacts["position"] or contact.position
-            contact.company = contacts["company"] or contact.company
+            contact.company = contacts["company"] or brief.answers.get("company.name") or contact.company
             if contacts["phone"] and contacts["phone"] not in (contact.phones or []):
                 contact.phones = [contacts["phone"], *(contact.phones or [])]
                 contact.phone_normalized = norm_phone(contacts["phone"]) or contact.phone_normalized

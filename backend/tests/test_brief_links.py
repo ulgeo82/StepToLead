@@ -1,4 +1,5 @@
 """Бриф по ссылке из сделки: без логина, сделка переезжает на выбранный этап, контакт обновляется."""
+from fastapi import HTTPException
 import unittest
 from unittest.mock import AsyncMock, patch
 
@@ -11,6 +12,23 @@ from app.db import Base
 from app.models.brief import ClientBrief
 from app.models.crm import CrmContact, CrmDeal, CrmStage, CrmTask
 from app.models.marketing import ClientWorkspace, PortalUser, Project
+
+
+def full_answers():
+    """Полный корректный короткий бриф: по одному валидному ответу на каждый обязательный вопрос."""
+    import json
+    from app.services import brief as service
+    sample = {"money": "150000", "percent": "20", "int": "30", "inn": "7707083893", "url": "sever.ru"}
+    answers = {}
+    for key, q in service.QUESTIONS.items():
+        if q["type"] == "funnels":
+            answers[key] = json.dumps({"directions": [{"id": "a", "name": "Кухни на заказ",
+                                                       "stages": ["Квалифицирован", "Договор"], "qualified_from": 0}]}, ensure_ascii=False)
+        elif q["type"] in {"one", "many"}:
+            answers[key] = q["options"][0]
+        else:
+            answers[key] = sample.get(q.get("format"), "Кухни на заказ")
+    return answers
 
 
 class BriefLinkTests(unittest.IsolatedAsyncioTestCase):
@@ -45,8 +63,13 @@ class BriefLinkTests(unittest.IsolatedAsyncioTestCase):
             token = link["url"].rsplit("/", 1)[1]
             data = await brief_links.read(token, db)
             self.assertTrue(data["sections"])
-            body = brief_links.SaveIn(answers={"company.what": "Кухни на заказ"},
-                                      contacts={"full_name": "Олег Петров", "phone": "+79990001122", "company": "Кухни Север", "email": "o@sever.ru"})
+            answers = full_answers()
+            contacts = {"full_name": "Олег Петров", "phone": "+79990001122", "company": "Кухни Север", "email": "o@sever.ru"}
+            bad = brief_links.SaveIn(answers={**answers, "company.inn": "1234567890"}, contacts=contacts)
+            with patch("app.api.routes.access.rate_limit", AsyncMock()):
+                with self.assertRaises(HTTPException):
+                    await brief_links.submit(token, bad, None, db)
+            body = brief_links.SaveIn(answers=answers, contacts=contacts)
             with patch("app.api.routes.access.rate_limit", AsyncMock()), patch("app.services.monitor.send", AsyncMock()), \
                     patch("app.services.notifications.flush_telegram"):
                 await brief_links.save(token, body, None, db)

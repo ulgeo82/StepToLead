@@ -314,9 +314,17 @@ class BriefTests(unittest.TestCase):
         self.assertEqual(r.json()["history"][-1]["before"]["leads"],100)
 
     def test_reference_keys_and_types(self):
-        self.assertEqual(len(brief.EXPRESS),12);self.assertEqual(len(brief.BRIEF),10)
-        for key in ("company.name","econ.margin","sales.conv","goals.budgetReady","ai.never","access.access_note"):
+        self.assertEqual(len(brief.EXPRESS),12);self.assertEqual(len(brief.BRIEF),6)
+        for key in ("company.name","company.inn","econ.margin","sales.conv","goals.budgetReady","ai.never"):
             self.assertIn(key,brief.QUESTIONS)
+        # Убранные из короткого брифа вопросы остаются известными: старые ответы читаются.
+        self.assertIn("access.access_note",brief.ALL_QUESTIONS)
+        self.assertNotIn("access.access_note",brief.QUESTIONS)
+        self.assertLessEqual(len(brief.QUESTIONS),30)
+        self.assertEqual(brief.format_error(brief.QUESTIONS["company.inn"],"7707083893"),None)
+        self.assertTrue(brief.format_error(brief.QUESTIONS["company.inn"],"1234567890"))
+        self.assertTrue(brief.format_error(brief.QUESTIONS["econ.margin"],"140"))
+        self.assertTrue(brief.format_error(brief.QUESTIONS["mkt.site"],"нет сайта"))
         self.assertEqual(brief.QUESTIONS["sales.conv"]["unit"],"из 100")
         self.assertEqual(brief.clean_answers({"sales.crm":["Таблица","Мессенджеры"]})["sales.crm"],"Таблица, Мессенджеры")
 

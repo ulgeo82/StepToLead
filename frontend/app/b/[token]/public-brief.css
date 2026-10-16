@@ -15,3 +15,16 @@
 .pbSection .briefActions .pbSubmit{background:#1a6cff;border-color:#1a6cff;color:#fff}
 .pbPrivacy{display:block;margin-top:10px;color:#8795a9;font-size:11px}
 @media(max-width:760px){.pbLayout{grid-template-columns:1fr}.pbLayout .briefRail{position:static;flex-direction:row;overflow-x:auto}.pbLayout .briefRail button{white-space:nowrap}.pbHeader{flex-direction:column;align-items:flex-start}}
+/* Поля растягиваются только вниз, не ломая колонку. */
+.pbSection textarea,.briefShell textarea,.pbSection input{max-width:100%}
+.pbSection textarea{resize:vertical;min-height:84px;line-height:1.5}
+/* Кнопки-варианты: выбранный вариант заметно подсвечен. */
+.pbSection .briefOptions{display:flex;flex-wrap:wrap;gap:6px}
+.pbSection .briefOptions button{min-height:36px;padding:0 13px;border:1px solid #d8e2f1;border-radius:18px;background:#fff;color:#14213a;font:inherit;font-size:13px;font-weight:600;cursor:pointer;transition:background .12s,border-color .12s}
+.pbSection .briefOptions button:hover{border-color:#1a6cff}
+.pbSection .briefOptions button[aria-pressed=true]{border-color:#1a6cff;background:#1a6cff;color:#fff}
+.pbSection .briefOptions button[aria-pressed=true]::before{content:"✓ ";font-weight:800}
+/* Ошибки проверки. */
+.pbError{display:block;margin-top:5px;font-style:normal;font-size:12px;font-weight:600;color:#b42318}
+.briefQuestion.invalid input,.briefQuestion.invalid textarea,.pbField.invalid input{border-color:#e5484d;background:#fff8f7}
+.briefQuestion.invalid .briefOptions button{border-color:#f0c4bf}

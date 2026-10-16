@@ -60,8 +60,57 @@ for question in EXPRESS:
     if question.get("extra"): EXPRESS_LABELS[question["extra"]["k"]]=question["extra"]["t"]
 LEGACY_QUESTIONS = {q["key"]: q for s in LEGACY_BRIEF for q in s["questions"]}
 QUESTIONS = {q["key"]: q for s in BRIEF for q in s["questions"]}
+# Вопросы, убранные из короткого брифа: старые ответы остаются читаемыми и уходят в ИИ-базу.
+RETIRED_QUESTIONS = {q["key"]: q for q in SCHEMA.get("retired", [])}
 # Older stored drafts remain readable; new forms use only the exact reference keys.
-ALL_QUESTIONS = {**LEGACY_QUESTIONS, **QUESTIONS}
+ALL_QUESTIONS = {**LEGACY_QUESTIONS, **RETIRED_QUESTIONS, **QUESTIONS}
+
+
+def _number(value: str):
+    text = re.sub(r"[\s ₽%руб.]", "", value.lower()).replace(",", ".")
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
+def inn_valid(value: str) -> bool:
+    """ИНН: 10 цифр (организация) или 12 (ИП/физлицо) с верными контрольными цифрами."""
+    if not re.fullmatch(r"\d{10}|\d{12}", value):
+        return False
+    digits = [int(c) for c in value]
+    def check(coefficients):
+        return sum(c * d for c, d in zip(coefficients, digits)) % 11 % 10
+    if len(digits) == 10:
+        return check([2, 4, 10, 3, 5, 9, 4, 6, 8]) == digits[9]
+    return check([7, 2, 4, 10, 3, 5, 9, 4, 6, 8]) == digits[10] and check([3, 7, 2, 4, 10, 3, 5, 9, 4, 6, 8]) == digits[11]
+
+
+def format_error(question: dict, value: str) -> str | None:
+    """Почему ответ некорректен (или None). Те же правила проверяет форма брифа на каждом шаге."""
+    value = (value or "").strip()
+    if not value:
+        return None
+    kind, low, high = question.get("format"), question.get("min"), question.get("max")
+    if kind == "url":
+        if not re.fullmatch(r"(https?://)?([\w-]+\.)+[a-zа-яё]{2,}(:\d+)?(/\S*)?", value, re.IGNORECASE):
+            return "укажите адрес сайта, например example.ru"
+    elif kind == "inn":
+        if not inn_valid(re.sub(r"\s", "", value)):
+            return "ИНН — 10 или 12 цифр, проверьте номер"
+    elif kind in {"money", "int", "percent"}:
+        number = _number(value)
+        if number is None:
+            return "укажите число"
+        if kind == "int" and number != int(number):
+            return "укажите целое число"
+        if low is not None and number < low:
+            return f"не меньше {low:g}"
+        if high is not None and number > high:
+            return f"не больше {high:g}"
+    elif kind == "text" and low and len(value) < low:
+        return f"ответ слишком короткий — хотя бы {low} символов"
+    return None
 
 
 def clean_answers(answers, required=False):
@@ -74,6 +123,9 @@ def clean_answers(answers, required=False):
         missing = [q["label"] for k, q in QUESTIONS.items() if q["required"] and not result.get(k)]
         if missing:
             raise HTTPException(422, "Заполните обязательные поля: " + "; ".join(missing))
+        wrong = [f"{q['label']} — {error}" for k, q in QUESTIONS.items() if (error := format_error(q, result.get(k, "")))]
+        if wrong:
+            raise HTTPException(422, "Проверьте ответы: " + "; ".join(wrong))
     return result
 
 

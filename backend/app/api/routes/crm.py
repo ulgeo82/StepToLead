@@ -224,7 +224,8 @@ def inbound_telegram(payload: dict):
 
 def contact_json(contact: CrmContact, payload: dict | None = None):
     return {"id": contact.id, "name": contact.name, "phones": contact.phones or [], "emails": contact.emails or [],
-            "telegram": contact.telegram or inbound_telegram(payload or {}), "company": contact.company, "custom_fields": contact.custom_fields or {},
+            "telegram": contact.telegram or inbound_telegram(payload or {}), "company": contact.company,
+            "position": contact.position, "notes": contact.notes, "custom_fields": contact.custom_fields or {},
             "created_at": contact.created_at}
 
 

@@ -365,7 +365,27 @@ async def transfer(brief_id: int, payload: TransferIn, request: Request, db: Asy
         raise HTTPException(409, "Согласуйте предпросмотр для выбранного проекта")
     await service.apply_to_ai(db, row, project, apply=True)
     row.project_id = project.id; row.workspace_id = project.workspace_id
+    await apply_to_crm(db, row, project, workspace)
     return await saved_output(db, row)
+
+
+async def apply_to_crm(db, row, project, workspace):
+    """Перенос брифа в проект — сразу в CRM: воронки по направлениям, сайт компании и стартовые цифры.
+    Заполняем только пустое, ручные настройки не перетираем."""
+    from app.services import brief_funnels
+    directions = brief_funnels.parse(row.answers.get(brief_funnels.KEY))
+    if directions:
+        await brief_funnels.plan(db, project, directions, apply=True)
+    site = (row.answers.get("mkt.site") or "").strip()
+    if site and not workspace.website:
+        workspace.website = (site if site.startswith("http") else f"https://{site}")[:500]
+    if site and not project.website:
+        project.website = (site if site.startswith("http") else f"https://{site}")[:500]
+    state = dict(project.portal_state or {})
+    if not (state.get("baseline") or {}).get("fixed"):
+        state["baseline"] = {**service.baseline_from_answers(row.answers),
+                             **{k: v for k, v in (state.get("baseline") or {}).items() if v is not None}}
+        project.portal_state = state
 
 
 
