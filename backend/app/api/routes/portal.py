@@ -30,6 +30,7 @@ portal_router = APIRouter(prefix="/portal", tags=["portal"], dependencies=[Depen
 inbound_router = APIRouter(prefix="/portal/inbound", tags=["portal-inbound"])
 
 ROLES = {
+    "agency": "Сотрудник StepToLead",
     "client_owner": "Собственник",
     "sales_head": "Руководитель продаж",
     "sales_manager": "Менеджер продаж",
@@ -208,7 +209,8 @@ class InboundLead(BaseModel):
 def user_payload(user: PortalUser, workspace_name: str | None = None):
     return {"id": user.id, "workspace_id": user.workspace_id, "workspace_name": workspace_name,
             "username": user.username, "display_name": user.display_name, "role": user.role,
-            "role_name": ROLES.get(user.role, user.role), "active": user.active,
+            "role_name": ROLES["agency"] if user.is_agency else ROLES.get(user.role, user.role), "active": user.active,
+            "is_agency": bool(user.is_agency),
             "must_change_password": user.must_change_password, "manage_sources": user.manage_sources,
             "manage_integrations": user.manage_integrations,
             "phone": user.phone, "permissions": sorted(effective_permissions(user)),
@@ -364,8 +366,10 @@ async def create_user(payload: UserCreate, request: Request, db: AsyncSession = 
     if await db.scalar(select(PortalUser.id).where(PortalUser.username == username)):
         raise HTTPException(409, "Пользователь с таким логином уже существует")
     temporary_password = secrets.token_urlsafe(12)
+    # «Сотрудник StepToLead» = роль владельца + агентские права; выдаёт только админ агентства.
     user = PortalUser(workspace_id=payload.workspace_id, username=username, display_name=payload.display_name,
-                      role=payload.role, manage_sources=payload.manage_sources,
+                      role="client_owner" if payload.role == "agency" else payload.role,
+                      is_agency=payload.role == "agency", manage_sources=payload.manage_sources,
                       manage_integrations=payload.manage_integrations,
                       password_hash=await run_in_threadpool(hash_password, temporary_password))
     db.add(user)
@@ -385,14 +389,15 @@ async def update_user(user_id: int, payload: UserUpdate, request: Request, db: A
     user = await db.get(PortalUser, user_id)
     if not user:
         raise HTTPException(404, "Пользователь не найден")
-    if user.role == "client_owner" and user.active and (payload.role is not None and payload.role != "client_owner" or payload.active is False):
+    if user.role == "client_owner" and not user.is_agency and user.active and (payload.role is not None and payload.role != "client_owner" or payload.active is False):
         others = await db.scalar(select(func.count()).select_from(PortalUser).where(
             PortalUser.workspace_id == user.workspace_id, PortalUser.role == "client_owner",
-            PortalUser.active.is_(True), PortalUser.id != user.id))
+            PortalUser.is_agency.is_(False), PortalUser.active.is_(True), PortalUser.id != user.id))
         if not others:
             raise HTTPException(409, "Нельзя заблокировать или разжаловать последнего владельца")
     if payload.role is not None:
-        user.role = payload.role
+        user.role = "client_owner" if payload.role == "agency" else payload.role
+        user.is_agency = payload.role == "agency"
         user.permissions = None
     if payload.manage_sources is not None:
         user.manage_sources = payload.manage_sources

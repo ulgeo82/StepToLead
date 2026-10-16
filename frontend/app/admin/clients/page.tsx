@@ -8,7 +8,7 @@ import { api, ClientWorkspace, PortalRole, PortalUser } from "@/lib/api";
 
 const roles: { value: PortalRole; label: string }[] = [
   { value: "client_owner", label: "Собственник" }, { value: "sales_head", label: "Руководитель продаж" },
-  { value: "sales_manager", label: "Менеджер продаж" }, { value: "client_marketer", label: "Маркетолог клиента" },
+  { value: "sales_manager", label: "Менеджер продаж" }, { value: "agency", label: "Сотрудник StepToLead" },
   { value: "viewer", label: "Наблюдатель" },
 ];
 

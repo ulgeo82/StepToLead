@@ -17,7 +17,7 @@ from app.db import Base, get_db
 from app.models.access import AdminSession, AdminUser, GrowthCalculation
 from app.models.marketing import (AdCampaignMetricDaily, AdConnection, AdMetricDaily,
                                   ClientLead, ClientLeadAttribution, ClientSale, ClientWorkspace,
-                                  Project, ProjectEconomics, ProjectSource, SourceMetricDaily)
+                                  PortalUser, Project, ProjectEconomics, ProjectSource, SourceMetricDaily)
 
 
 class ResultTests(unittest.TestCase):
@@ -68,7 +68,7 @@ class ResultTests(unittest.TestCase):
                 await db.commit()
         asyncio.run(seed_connections())
         owner = self.client.post("/api/portal/admin/users", headers=self.origin, json={
-            "workspace_id": 1, "username": "vk-owner", "display_name": "Owner", "role": "client_owner"}).json()
+            "workspace_id": 1, "username": "vk-owner", "display_name": "Owner", "role": "agency"}).json()
         self.client.cookies.clear()
         self.client.post("/api/portal/auth/login", headers=self.origin, json={
             "username": "vk-owner", "password": owner["temporary_password"]})
@@ -99,6 +99,14 @@ class ResultTests(unittest.TestCase):
         self.assertEqual(self.client.patch("/api/settings/funnel?project_id=1", headers=self.origin,
             json={"meeting_enabled": True}).status_code, 200)
         self.assertTrue(self.client.get("/api/result?project_id=1").json()["project"]["meeting_enabled"])
+        # Источники настраивает только StepToLead: собственнику клиента — отказ.
+        self.assertEqual(self.client.post("/api/settings/sources?project_id=1", headers=self.origin,
+            json={"name": "Партнёры", "kind": "MANUAL", "method": "MANUAL"}).status_code, 403)
+        async def make_agency():
+            async with self.sessions() as db:
+                (await db.get(PortalUser, owner["id"])).is_agency = True
+                await db.commit()
+        asyncio.run(make_agency())
         source = self.client.post("/api/settings/sources?project_id=1", headers=self.origin,
             json={"name": "Партнёры", "kind": "MANUAL", "method": "MANUAL"})
         self.assertEqual(source.status_code, 201, source.text)
@@ -157,17 +165,15 @@ class ResultTests(unittest.TestCase):
                 ])
                 await db.commit()
         asyncio.run(seed_accounts())
-        ads = self.client.get("/api/ads?project_id=1")
-        self.assertEqual(ads.status_code, 200, ads.text)
-        self.assertEqual([account["name"] for platform in ads.json()["platforms"]
-                          for account in platform["accounts"]], ["Own account"])
+        # «Реклама» (кабинеты) клиенту не показывается — только StepToLead.
+        self.assertEqual(self.client.get("/api/ads?project_id=1").status_code, 403)
         self.assertEqual(self.client.get("/api/settings?project_id=1").status_code, 200)
         self.assertEqual(self.client.get("/api/settings?project_id=2").status_code, 404)
         self.assertEqual(self.client.get("/api/result?project_id=1").json()["viewer"]["role"], "client_owner")
 
     def test_project_economics_is_saved_once_and_scoped_to_owner(self):
         owner = self.client.post("/api/portal/admin/users", headers=self.origin, json={
-            "workspace_id": 1, "username": "economics-owner", "display_name": "Owner", "role": "client_owner"}).json()
+            "workspace_id": 1, "username": "economics-owner", "display_name": "Owner", "role": "agency"}).json()
         self.client.cookies.clear()
         self.client.post("/api/portal/auth/login", headers=self.origin, json={
             "username": "economics-owner", "password": owner["temporary_password"]})
@@ -221,7 +227,7 @@ class ResultTests(unittest.TestCase):
         self.assertEqual(self.client.post("/api/portal/auth/login", headers=self.origin,
             json={"username": "viewer@test.example", "password": invite.json()["temporary_password"]}).status_code, 200)
         self.assertEqual(self.client.get("/api/team").status_code, 403)
-        self.assertEqual(self.client.get("/api/ads?project_id=1").status_code, 200)
+        self.assertEqual(self.client.get("/api/ads?project_id=1").status_code, 403)
         self.assertEqual(self.client.post("/api/ads/connections", headers=self.origin, json={
             "project_id": 1, "platform": "yandex", "name": "Test", "external_account_id": "test",
             "access_token": "abcdefghij"}).status_code, 403)
@@ -231,13 +237,17 @@ class ResultTests(unittest.TestCase):
                          json={"username": "owner-one@test.example", "password": first["temporary_password"]})
         updated = self.client.patch(f"/api/team/{invite.json()['id']}", headers=self.origin,
                                     json={"permissions": ["view_ads"]})
+        # Агентское право собственник выдать не может.
+        self.assertEqual(updated.status_code, 422, updated.text)
+        updated = self.client.patch(f"/api/team/{invite.json()['id']}", headers=self.origin,
+                                    json={"permissions": ["view_analytics"]})
         self.assertEqual(updated.status_code, 200, updated.text)
         self.client.cookies.clear()
         self.client.post("/api/portal/auth/login", headers=self.origin,
                          json={"username": "viewer@test.example", "password": invite.json()["temporary_password"]})
         self.assertEqual(self.client.get("/api/result?project_id=1").status_code, 403)
         self.assertEqual(self.client.get("/api/portal/crm/leads").status_code, 403)
-        self.assertEqual(self.client.get("/api/ads?project_id=1").status_code, 200)
+        self.assertEqual(self.client.get("/api/analytics?project_id=1").status_code, 200)
 
     def test_empty_project_has_null_metrics_and_owner_cannot_read_other_organization(self):
         result = self.client.get("/api/result?project_id=1&start=2026-09-01&end=2026-09-30")
@@ -502,8 +512,8 @@ class ResultTests(unittest.TestCase):
         self.client.cookies.clear()
         self.client.post("/api/portal/auth/login", headers=self.origin,
                          json={"username": "ads-marketer", "password": marketer["temporary_password"]})
-        created = self.client.post("/api/ads/connections", headers=self.origin, json=payload)
-        self.assertEqual(created.status_code, 201, created.text)
+        # Право проекта manage_integrations больше не открывает подключения клиенту: их настраивает StepToLead.
+        self.assertEqual(self.client.post("/api/ads/connections", headers=self.origin, json=payload).status_code, 403)
         self.assertEqual(self.client.get("/api/ads?project_id=2").status_code, 404)
 
     def test_manual_source_without_clicks_has_no_click_conversion(self):

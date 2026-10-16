@@ -9,13 +9,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
 from app.core.access import check_origin, hash_password, require_portal_user
-from app.core.permissions import CAPABILITIES, ROLE_DEFAULTS, SECTION_CAPABILITIES, effective_permissions, require_permission
+from app.core.permissions import (CLIENT_CAPABILITIES, ROLE_DEFAULTS, SECTION_CAPABILITIES, effective_permissions,
+                                  require_permission)
 from app.db import get_db
 from app.models.marketing import PortalProjectAccess, PortalSession, PortalUser, Project
 
 router = APIRouter(prefix="/team", tags=["client-team"])
-ROLES = {"client_owner": "Владелец", "client_marketer": "Маркетолог", "sales_head": "Руководитель продаж",
-         "sales_manager": "Менеджер продаж", "viewer": "Только просмотр"}
+# Роли, которые собственник выдаёт своим сотрудникам. Маркетинг и техническую настройку ведёт StepToLead.
+ROLES = {"client_owner": "Собственник", "sales_head": "Руководитель продаж (РОП)",
+         "sales_manager": "Менеджер продаж (МОП)", "viewer": "Наблюдатель"}
+ROLE_NAMES = {**ROLES, "client_marketer": "Наблюдатель", "agency": "Сотрудник StepToLead"}
 
 
 class Invite(BaseModel):
@@ -73,7 +76,9 @@ class MemberPatch(BaseModel):
 
 def member_payload(member):
     return {"id": member.id, "display_name": member.display_name, "email": member.username,
-            "phone": member.phone, "role": member.role, "role_name": ROLES.get(member.role, member.role),
+            "phone": member.phone, "role": member.role,
+            "role_name": ROLE_NAMES["agency"] if member.is_agency else ROLE_NAMES.get(member.role, member.role),
+            "is_agency": bool(member.is_agency),
             "permissions": sorted(effective_permissions(member)),
             "status": "blocked" if not member.active else "invited" if member.must_change_password else "active",
             "created_at": member.created_at, "last_activity_at": member.last_activity_at}
@@ -86,10 +91,10 @@ def validate_delegation(actor, role, permissions):
         permissions = set(ROLE_DEFAULTS[role])
     else:
         permissions = set(permissions)
-    if not permissions <= CAPABILITIES:
-        raise HTTPException(422, "Неизвестное разрешение")
+    if not permissions <= CLIENT_CAPABILITIES:
+        raise HTTPException(422, "Это право есть только у команды StepToLead")
     if role == "client_owner":
-        permissions = set(CAPABILITIES)
+        permissions = set(CLIENT_CAPABILITIES)
     for view, manage in SECTION_CAPABILITIES.values():
         if manage and manage in permissions:
             permissions.add(view)
@@ -115,9 +120,14 @@ async def ensure_owner_survives(db, member, next_role, next_active):
     if member.role == "client_owner" and member.active and (next_role != "client_owner" or not next_active):
         others = await db.scalar(select(func.count()).select_from(PortalUser).where(
             PortalUser.workspace_id == member.workspace_id, PortalUser.role == "client_owner",
-            PortalUser.active.is_(True), PortalUser.id != member.id))
+            PortalUser.is_agency.is_(False), PortalUser.active.is_(True), PortalUser.id != member.id))
         if not others:
             raise HTTPException(409, "Нельзя заблокировать или разжаловать последнего владельца")
+
+
+def protect_agency(member):
+    if member.is_agency:
+        raise HTTPException(403, "Доступ сотрудника StepToLead меняет только агентство")
 
 
 @router.get("")
@@ -127,7 +137,7 @@ async def list_team(db: AsyncSession = Depends(get_db), actor: PortalUser = Depe
                              .order_by(PortalUser.display_name, PortalUser.id))).all()
     return {"members": [member_payload(row) for row in rows], "viewer": member_payload(actor),
             "roles": ROLES, "sections": SECTION_CAPABILITIES,
-            "defaults": {role: sorted(capabilities) for role, capabilities in ROLE_DEFAULTS.items()}}
+            "defaults": {role: sorted(capabilities) for role, capabilities in ROLE_DEFAULTS.items() if role in ROLES}}
 
 
 @router.get("/{member_id}")
@@ -173,6 +183,7 @@ async def edit_member(member_id: int, payload: MemberPatch, request: Request,
     require_permission(actor, "manage_team")
     require_owner(actor)
     member = await member_or_404(db, actor, member_id)
+    protect_agency(member)
     if member.role == "client_owner" and actor.role != "client_owner":
         raise HTTPException(403, "Изменить владельца может только владелец")
     role = payload.role or member.role
@@ -210,6 +221,7 @@ async def remove_member(member_id: int, request: Request, db: AsyncSession = Dep
     require_permission(actor, "manage_team")
     require_owner(actor)
     member = await member_or_404(db, actor, member_id)
+    protect_agency(member)
     if member.role == "client_owner" and actor.role != "client_owner":
         raise HTTPException(403, "Изменить владельца может только владелец")
     await ensure_owner_survives(db, member, member.role, False)

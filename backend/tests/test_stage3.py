@@ -33,7 +33,7 @@ Base = test_stage2.Stage2Tests
 
 
 class Stage3Tests(unittest.TestCase):
-    setUp, tearDown, as_user, run_db, lead = Base.setUp, Base.tearDown, Base.as_user, Base.run_db, Base.lead
+    setUp, tearDown, as_user, run_db, lead, make_agency = Base.setUp, Base.tearDown, Base.as_user, Base.run_db, Base.lead, Base.make_agency
 
     # ------------------------------------------------------------------ calls
     def test_call_analysis_pipeline(self):
@@ -155,6 +155,7 @@ class Stage3Tests(unittest.TestCase):
 
     # ------------------------------------------------------------------ site widget
     def test_site_widget_callback_lead(self):
+        self.make_agency()
         async def add_site(db):
             db.add(WebsiteSite(id=5, workspace_id=1, project_id=1, name="romax63.ru", origin="https://romax63.ru", public_key="k" * 40))
             await db.commit()

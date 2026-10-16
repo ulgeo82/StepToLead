@@ -550,7 +550,8 @@ async def save_project_economics_model(project_id: int, payload: ProjectEconomic
                                        db: AsyncSession = Depends(get_db)):
     check_origin(request)
     project, kind, user = await scoped_project(db, request, project_id)
-    require_actor_permission(kind, user, "manage_settings")
+    # Экономику проекта (маржа, чек, допустимый CAC) задаёт StepToLead.
+    require_actor_permission(kind, user, "manage_reports")
     values = payload.model_dump(exclude={"allowable_cac"})
     inputs = EconomicsInput(**values)
     result = calculateBusinessEconomics(inputs)

@@ -956,7 +956,7 @@ class AnalyticsFlagIn(BaseModel):
 async def set_analytics_flag(deal_id: int, payload: AnalyticsFlagIn, request: Request, db: AsyncSession = Depends(get_db),
                              user: PortalUser = Depends(require_portal_user)):
     """«Не считать в аналитику»: лид, квалификация и продажи сделки пропадают из «Результата» и «Аналитики»."""
-    check_origin(request); require_permission(user, "edit_deal")
+    check_origin(request); require_permission(user, "exclude_analytics")
     deal = await deal_for(db, user, deal_id)
     lead = await db.get(ClientLead, deal.lead_id) if deal.lead_id else None
     if lead is None:

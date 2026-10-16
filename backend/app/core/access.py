@@ -87,7 +87,14 @@ async def portal_session_user(connection: HTTPConnection, db: AsyncSession) -> P
     if expiry <= datetime.now(timezone.utc):
         return None
     user = await db.get(PortalUser, session.user_id)
-    return user if user and user.active else None
+    if not user or not user.active:
+        return None
+    # Демо и пробный период живут по старым правилам (клиент сам подключает кабинеты): см. permissions.
+    from sqlalchemy import select as _select
+    from app.models.marketing import Project as _Project
+    user.demo_mode = bool(await db.scalar(_select(_Project.id).where(
+        _Project.workspace_id == user.workspace_id, _Project.status.in_(("demo", "trial"))).limit(1)))
+    return user
 
 
 async def require_portal_user(connection: HTTPConnection, db: AsyncSession = Depends(get_db)) -> PortalUser:

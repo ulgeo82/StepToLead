@@ -11,10 +11,10 @@ import { AdminPlanPanel } from "@/components/plan-cards";
 import { api, ClientWorkspace, LeadInboundSource, PortalRole, PortalUser } from "@/lib/api";
 
 const roles: { value: PortalRole; label: string; permissions: string[] }[] = [
-  { value: "client_owner", label: "Собственник", permissions: ["Вся аналитика компании", "Реклама и продажи", "Команда и бриф"] },
+  { value: "agency", label: "Сотрудник StepToLead", permissions: ["Всё, как у собственника", "Реклама, источники, подключения", "Конструктор отчётов"] },
+  { value: "client_owner", label: "Собственник", permissions: ["Результат, аналитика, отчёты", "CRM и продажи", "Выдаёт доступы своим"] },
   { value: "sales_head", label: "Руководитель продаж", permissions: ["Все лиды отдела", "Распределение менеджеров", "Воронка и отчёты"] },
   { value: "sales_manager", label: "Менеджер продаж", permissions: ["Назначенные лиды", "Статусы и комментарии", "Уведомления о лидах"] },
-  { value: "client_marketer", label: "Маркетолог клиента", permissions: ["Рекламная аналитика", "Кампании и источники", "Без управления командой"] },
   { value: "viewer", label: "Наблюдатель", permissions: ["Только просмотр сводки", "Без редактирования", "Без управления доступами"] },
 ];
 

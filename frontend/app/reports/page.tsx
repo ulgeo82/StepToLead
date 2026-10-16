@@ -13,7 +13,10 @@ type Source = { id: string; name: string; spend: number | null; leads: number | 
 type Campaign = { id: string; kind?: string; name: string; connection_id: number | null; hypothesis_id: number | null;
   hypothesis_name: string | null; spend: number | null; leads: number | null };
 type Catalog = { current: { sources: Source[] }; analysis: { campaigns: Campaign[] }; viewer: { role: string } };
-type Saved = { id: number; title: string; token: string; created_at: string; start: string | null; end: string | null; headline: string | null };
+type Saved = { id: number; title: string; token: string | null; created_at: string; start: string | null; end: string | null; headline: string | null;
+  published: boolean; revenue: number | null; leads: number | null; sales: number | null; spend: number | null; expires_at: string | null };
+type SavedList = { reports: Saved[]; can_manage: boolean; retention_days: number };
+type Opened = { id: number; token: string | null; title: string; published: boolean; report: ReportData; can_manage: boolean };
 type PlanItem = { text: string; owner: string };
 type FactItem = { text: string; owner: string | null; done: boolean; note: string };
 type Cost = { name: string; amount: string };
@@ -77,7 +80,10 @@ export default function ReportsPage() {
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [report, setReport] = useState<ReportData | null>(null);
   const [saved, setSaved] = useState<Saved[]>([]);
-  const [opened, setOpened] = useState<{ id: number; token: string; title: string; report: ReportData } | null>(null);
+  const [canManage, setCanManage] = useState<boolean | null>(null);
+  const [retention, setRetention] = useState(90);
+  const [publishNow, setPublishNow] = useState(true);
+  const [opened, setOpened] = useState<Opened | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -90,7 +96,9 @@ export default function ReportsPage() {
       setProjectId(rows.find(row => row.id === desired)?.id || rows[0]?.id || null);
     }).catch(exc => setError(exc.message));
   }, []);
-  const loadSaved = (id: number) => api<Saved[]>(`/reports?project_id=${id}`).then(setSaved).catch(() => setSaved([]));
+  const loadSaved = (id: number) => api<SavedList>(`/reports?project_id=${id}`)
+    .then(data => { setSaved(data.reports); setCanManage(data.can_manage); setRetention(data.retention_days); })
+    .catch(exc => { setSaved([]); setCanManage(false); setError(exc.message); });
   function applySettings(t: Partial<Settings> | null) {
     setSections(t?.sections?.length ? t.sections : SECTIONS.map(s => s[0]));
     setChannels(t?.exclude?.channels || []); setHypotheses(t?.exclude?.hypotheses || []); setCampaigns(t?.exclude?.campaigns || []); setDeals([]);
@@ -100,18 +108,18 @@ export default function ReportsPage() {
     setBudget(t?.budget_plan ? String(t.budget_plan) : "");
   }
   // Новый проект: шаблон (если сохраняли) и план из прошлого отчёта для «Что обещали в прошлый раз».
+  useEffect(() => { if (projectId) { setCanManage(null); loadSaved(projectId); } }, [projectId]);
   useEffect(() => {
-    if (!projectId) return;
-    loadSaved(projectId);
+    if (!projectId || !canManage) return;
     api<{ template: Partial<Settings> | null; last_plan: { text: string; owner: string | null }[]; last_title: string | null }>(`/reports/template?project_id=${projectId}`)
       .then(data => { applySettings(data.template); setFact(data.last_plan.map(p => ({ text: p.text, owner: p.owner, done: false, note: "" }))); setLastTitle(data.last_title); })
       .catch(() => applySettings(null));
-  }, [projectId]);
+  }, [projectId, canManage]);
   useEffect(() => {
-    if (!projectId || !start || !end || start > end) return;
+    if (!projectId || !canManage || !start || !end || start > end) return;
     const query = new URLSearchParams({ project_id: String(projectId), start, end });
     api<Catalog>(`/analytics?${query}`).then(setCatalog).catch(exc => setError(exc.message));
-  }, [projectId, start, end]);
+  }, [projectId, start, end, canManage]);
 
   const settings: Settings = useMemo(() => ({ sections, exclude: { channels, hypotheses, campaigns, leads: deals },
     hidden: { channels: hiddenChannels, hypotheses: hiddenHyps, campaigns: [] }, metrics, granularity: granularity || null,
@@ -127,14 +135,14 @@ export default function ReportsPage() {
       plan_fact: fact.filter(p => p.text.trim()).map(p => ({ text: p.text, owner: p.owner, done: p.done, note: p.note.trim() || null })) };
   }, [projectId, start, end, settings, summary, comments, forecast, plan, fact]);
   useEffect(() => {
-    if (!projectId || !start || !end || start > end) return;
+    if (!projectId || !canManage || !start || !end || start > end) return;
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(() => {
       api<ReportData>("/reports/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), timeoutMs: 60_000 })
         .then(value => { setReport(value); setError(""); }).catch(exc => setError(exc.message));
     }, 500);
     return () => { if (timer.current) clearTimeout(timer.current); };
-  }, [body, projectId, start, end]);
+  }, [body, projectId, start, end, canManage]);
 
   const tree = useMemo(() => {
     if (!catalog) return [];
@@ -160,10 +168,11 @@ export default function ReportsPage() {
     setBusy(true); setError(""); setNotice("");
     try {
       const created = await api<{ id: number; token: string; title: string }>("/reports", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), timeoutMs: 60_000 });
+      if (publishNow) await api(`/reports/${created.id}/publish`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ published: true }) });
       await loadSaved(projectId);
       const link = `${window.location.origin}/r/${created.token}`;
       await navigator.clipboard.writeText(link).catch(() => undefined);
-      setNotice(`Отчёт сохранён. Ссылка для клиента скопирована: ${link}`);
+      setNotice(`${publishNow ? "Отчёт опубликован в портале клиента." : "Отчёт сохранён черновиком — клиент его пока не видит."} Ссылка скопирована: ${link}`);
     } catch (exc) { setError((exc as Error).message); } finally { setBusy(false); }
   }
   async function saveTemplate() {
@@ -174,8 +183,15 @@ export default function ReportsPage() {
   }
   async function open(id: number) {
     setError("");
-    try { const data = await api<{ id: number; token: string; title: string; report: ReportData }>(`/reports/${id}`); setOpened(data); window.scrollTo({ top: 0 }); }
+    try { const data = await api<Opened>(`/reports/${id}`); setOpened(data); window.scrollTo({ top: 0 }); }
     catch (exc) { setError((exc as Error).message); }
+  }
+  async function togglePublish(item: Opened) {
+    try {
+      await api(`/reports/${item.id}/publish`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ published: !item.published }) });
+      setOpened({ ...item, published: !item.published }); if (projectId) loadSaved(projectId);
+      setNotice(item.published ? "Отчёт снят с публикации — клиент его больше не видит в портале." : "Отчёт опубликован в портале клиента.");
+    } catch (exc) { setError((exc as Error).message); }
   }
   async function remove(id: number) {
     if (!window.confirm("Удалить отчёт? Ссылка у клиента перестанет открываться.")) return;
@@ -188,6 +204,45 @@ export default function ReportsPage() {
   }
   const selectedProject = projects.find(p => p.id === projectId);
   const shown = opened?.report || report;
+  // Клиент: последний отчёт крупно, остальные — по месяцам периода.
+  const months = useMemo(() => {
+    const groups = new Map<string, Saved[]>();
+    for (const s of saved.slice(1)) {
+      const anchor = s.end || s.created_at.slice(0, 10);
+      const label = new Date(`${anchor.slice(0, 10)}T12:00:00`).toLocaleDateString("ru-RU", { month: "long", year: "numeric" }).replace(" г.", "");
+      groups.set(label, [...(groups.get(label) || []), s]);
+    }
+    return [...groups.entries()];
+  }, [saved]);
+  const fmtNum = (n: number | null) => n == null ? "—" : new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(n);
+  const latest = saved[0];
+  const clientView = opened ? <div className="reportsOpened">
+      <div className="reportsActions"><button type="button" onClick={() => setOpened(null)}>← Все отчёты</button>
+        <button type="button" onClick={() => copySheets(opened.report)}>Скопировать для Google Таблиц</button>
+        <button type="button" onClick={() => window.print()}>Скачать PDF</button></div>
+      <ReportView report={{ ...opened.report, title: opened.title }} />
+    </div>
+    : !latest ? <section className="reportsEmpty"><h2>Отчётов пока нет</h2><p>Команда StepToLead публикует отчёт по итогам периода — он появится здесь. Цифры в реальном времени — в «Результате» и «Аналитике».</p></section>
+    : <div className="reportsClient">
+      <button type="button" className="reportsLatest" onClick={() => open(latest.id)}>
+        <span className="reportsLatestTag">ПОСЛЕДНИЙ ОТЧЁТ · {fmtDate(latest.start)} — {fmtDate(latest.end)}</span>
+        <strong className="reportsLatestTitle">{latest.title}</strong>
+        {latest.headline && <span className="reportsLatestHead">{latest.headline}</span>}
+        <span className="reportsLatestNums">
+          <span><small>Выручка</small><b>{latest.revenue != null ? `${fmtNum(latest.revenue)} ₽` : "—"}</b></span>
+          <span><small>Лиды</small><b>{fmtNum(latest.leads)}</b></span>
+          <span><small>Продажи</small><b>{fmtNum(latest.sales)}</b></span>
+          <span><small>Расходы</small><b>{latest.spend != null ? `${fmtNum(latest.spend)} ₽` : "—"}</b></span>
+        </span>
+        <span className="reportsLatestOpen">Открыть отчёт →</span>
+      </button>
+      {months.map(([label, items]) => <section key={label} className="reportsMonth" aria-label={label}><h2>{label}</h2>
+        <div className="reportsGrid">{items.map(s => <button key={s.id} type="button" className="reportsCard" onClick={() => open(s.id)}>
+          <strong>{s.title}</strong>{s.headline && <span>{s.headline}</span>}
+          <small>{fmtDate(s.start)} — {fmtDate(s.end)}{s.expires_at ? ` · доступен до ${fmtDate(s.expires_at.slice(0, 10))}` : ""}</small>
+        </button>)}</div></section>)}
+      <p className="reportsMuted">Отчёты хранятся {retention} дней. Нужен более старый — напишите менеджеру StepToLead.</p>
+    </div>;
   const funnelLabels = report ? [...(report.clicks ? ["Клики"] : []), ...report.funnel.map(f => f.label)].slice(1) : [];
 
   const sectionExtra = (key: string) => {
@@ -201,21 +256,24 @@ export default function ReportsPage() {
   return <div className="resultShell reportsShell"><ProjectSidebar project={selectedProject} projectId={projectId} active="reports" role={catalog?.viewer.role} />
     <main className="resultMain">
       <div className="resultBreadcrumb">StepToLead <span>/</span> Отчёты</div>
-      <header className="resultHeader reportsHeader"><div><h1>Отчёты</h1><p>Цифры подтягиваются из рекламы, заявок и CRM. Галочка — учитывать в расчёте, глазик — только скрыть строку. Всё, что не вошло в расчёт, отчёт честно перечислит в конце.</p></div>
+      <header className="resultHeader reportsHeader"><div><h1>Отчёты</h1><p>{canManage ? "Цифры подтягиваются из рекламы, заявок и CRM. Галочка — учитывать в расчёте, глазик — только скрыть строку. Всё, что не вошло в расчёт, отчёт честно перечислит в конце."
+          : "Отчёты команды StepToLead по итогам периодов: что получилось, что дальше и всё в цифрах."}</p></div>
         {projects.length > 1 && <label className="resultSelect"><span>Проект</span><select value={projectId || ""} onChange={e => { setProjectId(Number(e.target.value)); setOpened(null); }}>{projects.map(p => <option key={p.id} value={p.id}>{p.organization_name} · {p.name}</option>)}</select></label>}
       </header>
       {error && <div className="resultError" role="alert">{error}</div>}
       {notice && <div className="reportsNotice" role="status">{notice}</div>}
 
+      {canManage === false ? clientView : canManage === null ? <p className="reportsMuted">Загружаем отчёты…</p> : <>
       {saved.length > 0 && <section className="reportsSaved" aria-label="Сохранённые отчёты">
         {saved.map(s => <div key={s.id} className={`reportsSavedItem ${opened?.id === s.id ? "active" : ""}`}>
-          <button type="button" onClick={() => open(s.id)}><strong>{s.title}</strong><span>{s.headline || ""}</span><small>{fmtDate(s.start)} — {fmtDate(s.end)}</small></button>
+          <button type="button" onClick={() => open(s.id)}><em className={s.published ? "on" : ""}>{s.published ? "опубликован" : "черновик"}</em><strong>{s.title}</strong><span>{s.headline || ""}</span><small>{fmtDate(s.start)} — {fmtDate(s.end)}</small></button>
         </div>)}
       </section>}
 
       {opened ? <div className="reportsOpened">
         <div className="reportsActions">
           <button type="button" onClick={() => setOpened(null)}>← К конструктору</button>
+          <button type="button" className={opened.published ? "" : "primary"} onClick={() => togglePublish(opened)}>{opened.published ? "Снять с публикации" : "Опубликовать клиенту"}</button>
           <button type="button" onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/r/${opened.token}`); setNotice("Ссылка для клиента скопирована."); }}>Скопировать ссылку</button>
           <Link href={`/r/${opened.token}`} target="_blank">Открыть как клиент ↗</Link>
           <button type="button" onClick={() => copySheets(opened.report)}>Скопировать для Google Таблиц</button>
@@ -306,7 +364,8 @@ export default function ReportsPage() {
           </section>
 
           <div className="reportsBuilderActions">
-            <button type="button" className="primary" disabled={busy || !report} onClick={save}>{busy ? "Сохраняем…" : "Сохранить и получить ссылку"}</button>
+            <label className="reportsPublishNow"><input type="checkbox" checked={publishNow} onChange={() => setPublishNow(!publishNow)} />Сразу опубликовать в портале клиента</label>
+            <button type="button" className="primary" disabled={busy || !report} onClick={save}>{busy ? "Сохраняем…" : publishNow ? "Сохранить и опубликовать" : "Сохранить черновик"}</button>
             <button type="button" disabled={!report} onClick={() => report && copySheets(report)}>Скопировать для Google Таблиц</button>
             <button type="button" disabled={!report} onClick={() => window.print()}>Скачать PDF</button>
             <button type="button" onClick={saveTemplate}>Сохранить настройки как шаблон проекта</button>
@@ -317,6 +376,7 @@ export default function ReportsPage() {
           {shown ? <ReportView report={shown} /> : <p className="reportsMuted">Собираем отчёт…</p>}
         </section>
       </div>}
+      </>}
     </main>
   </div>;
 }

@@ -4,7 +4,7 @@
 """
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, ForeignKey, String, func
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -20,5 +20,7 @@ class ClientReport(Base):
     title: Mapped[str] = mapped_column(String(200))
     config: Mapped[dict] = mapped_column(JSON, default=dict)
     snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
+    # Клиент видит в портале только опубликованные отчёты; черновики видит только StepToLead.
+    published: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     created_by_id: Mapped[int | None] = mapped_column(ForeignKey("portal_users.id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

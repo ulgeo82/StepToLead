@@ -1,15 +1,15 @@
 """Отчёты: конструктор (превью с исключениями), шаблон проекта, сохранённые отчёты со снимком и ссылка для клиента."""
 import secrets
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.routes.result import reporting_period, scoped_project
 from app.core.access import check_origin
-from app.core.permissions import require_actor_permission
+from app.core.permissions import effective_permissions, require_actor_permission
 from app.db import get_db
 from app.models.report import ClientReport
 from app.models.system import AppSetting
@@ -19,6 +19,22 @@ from app.services.result_analytics import parse_report_exclude
 router = APIRouter(prefix="/reports", tags=["reports"])
 public_router = APIRouter(tags=["reports-public"])
 TEMPLATE_KEY = "report_tpl:"
+RETENTION_DAYS = 90  # отчёты старше удаляются: снимки не копятся на сервере, ссылка у клиента перестаёт открываться
+
+
+def can_manage(kind, user) -> bool:
+    """Конструктор, сохранение, публикация — только StepToLead (админ или сотрудник агентства в проекте)."""
+    return kind == "admin" or "manage_reports" in effective_permissions(user)
+
+
+def require_manage(kind, user):
+    require_actor_permission(kind, user, "manage_reports")
+
+
+async def purge_old(db, project_id: int):
+    await db.execute(delete(ClientReport).where(
+        ClientReport.project_id == project_id,
+        ClientReport.created_at < datetime.now(timezone.utc) - timedelta(days=RETENTION_DAYS)))
 
 
 class Strict(BaseModel):
@@ -94,7 +110,7 @@ class TemplateIn(Settings):
 async def _build(db, request, payload: ReportIn):
     start, end = reporting_period(payload.start, payload.end)
     project, kind, user = await scoped_project(db, request, payload.project_id)
-    require_actor_permission(kind, user, "view_analytics")
+    require_manage(kind, user)
     config = payload.model_dump(mode="json")
     config["metrics"] = [metric for metric in config["metrics"] if metric in HERO_METRICS]
     config["comments"] = {key: value.strip()[:600] for key, value in config["comments"].items() if key in SECTIONS and value.strip()}
@@ -118,7 +134,7 @@ async def preview(payload: ReportIn, request: Request, db: AsyncSession = Depend
 async def get_template(request: Request, project_id: int, db: AsyncSession = Depends(get_db)):
     """Шаблон проекта и план из последнего отчёта — для блока «Что обещали в прошлый раз»."""
     project, kind, user = await scoped_project(db, request, project_id)
-    require_actor_permission(kind, user, "view_analytics")
+    require_manage(kind, user)
     row = await db.get(AppSetting, f"{TEMPLATE_KEY}{project.id}")
     last = await db.scalar(select(ClientReport).where(ClientReport.project_id == project.id)
                            .order_by(ClientReport.created_at.desc()).limit(1))
@@ -131,7 +147,7 @@ async def get_template(request: Request, project_id: int, db: AsyncSession = Dep
 async def save_template(payload: TemplateIn, request: Request, db: AsyncSession = Depends(get_db)):
     check_origin(request)
     project, kind, user = await scoped_project(db, request, payload.project_id)
-    require_actor_permission(kind, user, "view_analytics")
+    require_manage(kind, user)
     value = payload.model_dump(mode="json", exclude={"project_id"})
     row = await db.get(AppSetting, f"{TEMPLATE_KEY}{project.id}")
     if row:
@@ -146,17 +162,30 @@ async def save_template(payload: TemplateIn, request: Request, db: AsyncSession 
 async def list_reports(request: Request, project_id: int | None = None, db: AsyncSession = Depends(get_db)):
     project, kind, user = await scoped_project(db, request, project_id)
     require_actor_permission(kind, user, "view_analytics")
-    rows = (await db.scalars(select(ClientReport).where(ClientReport.project_id == project.id)
-                             .order_by(ClientReport.created_at.desc()).limit(100))).all()
-    return [{"id": row.id, "title": row.title, "token": row.token, "created_at": row.created_at,
-             "start": (row.config or {}).get("start"), "end": (row.config or {}).get("end"),
-             "headline": (row.snapshot or {}).get("headline")} for row in rows]
+    await purge_old(db, project.id)
+    await db.commit()
+    manage = can_manage(kind, user)
+    query = select(ClientReport).where(ClientReport.project_id == project.id)
+    if not manage:
+        query = query.where(ClientReport.published.is_(True))
+    rows = (await db.scalars(query.order_by(ClientReport.created_at.desc()).limit(100))).all()
+    def item(row):
+        snap = row.snapshot or {}
+        totals = snap.get("totals") or {}
+        return {"id": row.id, "title": row.title, "created_at": row.created_at, "published": row.published,
+                "token": row.token if manage else None,
+                "start": (row.config or {}).get("start"), "end": (row.config or {}).get("end"),
+                "headline": snap.get("headline"), "revenue": totals.get("revenue"), "leads": totals.get("leads"),
+                "sales": totals.get("sales"), "spend": totals.get("spend"),
+                "expires_at": row.created_at + timedelta(days=RETENTION_DAYS) if row.created_at else None}
+    return {"reports": [item(row) for row in rows], "can_manage": manage, "retention_days": RETENTION_DAYS}
 
 
 @router.post("", status_code=201)
 async def save_report(payload: ReportIn, request: Request, db: AsyncSession = Depends(get_db)):
     check_origin(request)
     project, kind, user, report = await _build(db, request, payload)
+    await purge_old(db, project.id)
     title = (payload.title or "").strip() or f"Отчёт {payload.start.strftime('%d.%m.%Y')} — {payload.end.strftime('%d.%m.%Y')}"
     report["title"] = title
     report.pop("sales_list", None)  # список сделок нужен только конструктору — клиенту по ссылке не отдаём
@@ -169,25 +198,45 @@ async def save_report(payload: ReportIn, request: Request, db: AsyncSession = De
     return {"id": row.id, "token": row.token, "title": row.title}
 
 
-async def _owned(db, request, report_id: int) -> ClientReport:
+async def _owned(db, request, report_id: int, manage: bool = False):
     row = await db.get(ClientReport, report_id)
     if not row:
         raise HTTPException(404, "Отчёт не найден")
     _, kind, user = await scoped_project(db, request, row.project_id)
     require_actor_permission(kind, user, "view_analytics")
-    return row
+    allowed = can_manage(kind, user)
+    if manage and not allowed:
+        require_manage(kind, user)
+    if not allowed and not row.published:
+        raise HTTPException(404, "Отчёт не найден")
+    return row, allowed
 
 
 @router.get("/{report_id}")
 async def get_report(report_id: int, request: Request, db: AsyncSession = Depends(get_db)):
-    row = await _owned(db, request, report_id)
-    return {"id": row.id, "token": row.token, "title": row.title, "config": row.config, "report": row.snapshot}
+    row, manage = await _owned(db, request, report_id)
+    return {"id": row.id, "token": row.token if manage else None, "title": row.title, "published": row.published,
+            "config": row.config if manage else None, "report": row.snapshot, "can_manage": manage}
+
+
+class PublishIn(Strict):
+    published: bool
+
+
+@router.post("/{report_id}/publish")
+async def publish_report(report_id: int, payload: PublishIn, request: Request, db: AsyncSession = Depends(get_db)):
+    """Опубликовать отчёт в портале клиента (или убрать обратно в черновики)."""
+    check_origin(request)
+    row, _ = await _owned(db, request, report_id, manage=True)
+    row.published = payload.published
+    await db.commit()
+    return {"id": row.id, "published": row.published}
 
 
 @router.delete("/{report_id}", status_code=204)
 async def delete_report(report_id: int, request: Request, db: AsyncSession = Depends(get_db)):
     check_origin(request)
-    row = await _owned(db, request, report_id)
+    row, _ = await _owned(db, request, report_id, manage=True)
     await db.delete(row)
     await db.commit()
 

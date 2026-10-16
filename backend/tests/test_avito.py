@@ -102,7 +102,7 @@ class AvitoLeadImportTests(unittest.TestCase):
             async with self.sessions() as db:
                 db.add(ClientWorkspace(id=1, name="One"))
                 db.add(Project(id=1, workspace_id=1, name="First", is_default=True))
-                db.add(PortalUser(id=1, workspace_id=1, username="owner", display_name="Owner",
+                db.add(PortalUser(id=1, workspace_id=1, username="owner", display_name="Owner", is_agency=True,
                                   password_hash=hash_password("test-password-123"), role="client_owner",
                                   must_change_password=False))
                 db.add(PortalSession(token_hash=token_digest("p" * 43), user_id=1,

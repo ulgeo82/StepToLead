@@ -70,7 +70,7 @@ export type AdConnection = {
   last_synced_at: string | null; created_at: string;
 };
 export type MarketingSummary = { spend: number; impressions: number; clicks: number; applications: number; cpc: number | null; conversion_rate: number | null; cost_per_application: number | null; connections: number; workspaces: number; first_date?: string | null; last_date?: string | null; days?: number };
-export type PortalRole = "client_owner" | "sales_head" | "sales_manager" | "client_marketer" | "viewer";
+export type PortalRole = "agency" | "client_owner" | "sales_head" | "sales_manager" | "client_marketer" | "viewer";
 export type PortalUser = {
   id: number; workspace_id: number; workspace_name?: string; username: string; display_name: string;
   role: PortalRole; role_name: string; active: boolean; must_change_password: boolean; created_at: string;

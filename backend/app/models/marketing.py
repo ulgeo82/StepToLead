@@ -133,6 +133,8 @@ class PortalUser(Base):
     password_hash: Mapped[str] = mapped_column(Text)
     display_name: Mapped[str] = mapped_column(String(160))
     role: Mapped[str] = mapped_column(String(32), index=True)
+    # Сотрудник StepToLead в проекте клиента: роль владельца + все агентские права. Выдаёт только админ агентства.
+    is_agency: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     manage_sources: Mapped[bool] = mapped_column(Boolean, default=False)
     manage_integrations: Mapped[bool] = mapped_column(Boolean, default=False)
     phone: Mapped[str | None] = mapped_column(String(64))

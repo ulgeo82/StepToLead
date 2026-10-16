@@ -72,6 +72,14 @@ class Stage2Tests(unittest.TestCase):
     def as_user(self, uid):
         self.client.cookies.clear(); self.client.cookies.set(PORTAL_COOKIE, str(uid) * 43)
 
+    def make_agency(self, uid=1):
+        """Подключения настраивает StepToLead: в тесте пользователь становится сотрудником агентства."""
+        from app.models.marketing import PortalUser
+        async def go(db):
+            (await db.get(PortalUser, uid)).is_agency = True
+            await db.commit()
+        self.run_db(go)
+
     def run_db(self, fn):
         async def run():
             async with self.sessions() as db:

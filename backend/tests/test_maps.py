@@ -16,7 +16,7 @@ Base = test_stage2.Stage2Tests
 
 
 class MapsTests(unittest.TestCase):
-    setUp, tearDown, as_user, run_db, lead = Base.setUp, Base.tearDown, Base.as_user, Base.run_db, Base.lead
+    setUp, tearDown, as_user, run_db, lead, make_agency = Base.setUp, Base.tearDown, Base.as_user, Base.run_db, Base.lead, Base.make_agency
 
     def test_parse_yandex_business_export(self):
         wb = Workbook(); ws = wb.active
@@ -34,6 +34,7 @@ class MapsTests(unittest.TestCase):
         self.assertAlmostEqual(sum(maps.spread(1000, 30, True)), 1000)
 
     def test_map_channel_spend_stats_and_leads(self):
+        self.make_agency()
         created = self.client.post("/api/ads/maps", headers=ORIGIN, json={"project_id": 1, "platform": "yandex_maps", "name": "Яндекс Карты · Ромакс",
                                                                          "card_url": "https://yandex.ru/maps/org/romax/123"})
         self.assertEqual(created.status_code, 201, created.text)

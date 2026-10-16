@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.access import check_origin, require_portal_user
-from app.core.permissions import effective_permissions, require_permission
+from app.core.permissions import can_setup_integrations, effective_permissions, require_permission
 from app.db import get_db
 from app.models.access import GrowthCalculation
 from app.models.marketing import (AdConnection, ClientWorkspace, PortalProjectAccess, PortalUser, Project,
@@ -18,6 +18,12 @@ from app.models.marketing import (AdConnection, ClientWorkspace, PortalProjectAc
 from app.services.notifications import EVENTS, project_members, rule_state, telegram_configured
 
 router = APIRouter(prefix="/settings", tags=["client-settings"])
+
+
+def require_sales_setup(actor):
+    """Причины отказа и рабочее время отдела продаж: собственник и РОП."""
+    if not effective_permissions(actor) & {"manage_settings", "manage_pipeline"}:
+        raise HTTPException(403, "Недостаточно прав: настройки отдела продаж")
 
 
 class WorkScheduleInput(BaseModel):
@@ -40,7 +46,7 @@ class WorkScheduleInput(BaseModel):
 @router.get("/work-schedule")
 async def get_work_schedule(project_id: int, db: AsyncSession = Depends(get_db),
                             actor: PortalUser = Depends(require_portal_user)):
-    require_permission(actor, "manage_settings")
+    require_sales_setup(actor)
     project = await scoped(db, actor, project_id)
     return (project.portal_state or {}).get("work_schedule")
 
@@ -50,7 +56,7 @@ async def put_work_schedule(project_id: int, request: Request, payload: WorkSche
                             db: AsyncSession = Depends(get_db),
                             actor: PortalUser = Depends(require_portal_user)):
     check_origin(request)
-    require_permission(actor, "manage_settings")
+    require_sales_setup(actor)
     project = await scoped(db, actor, project_id)
     project = await db.scalar(select(Project).where(Project.id == project.id).with_for_update()
                               .execution_options(populate_existing=True))
@@ -113,15 +119,10 @@ def source_payload(row):
 
 
 async def source_permission(db, project, actor):
-    if actor.role == "client_owner":
+    """Источники заявок настраивает только StepToLead."""
+    if can_setup_integrations(actor):
         return
-    access = await db.scalar(select(PortalProjectAccess).where(
-        PortalProjectAccess.user_id == actor.id, PortalProjectAccess.project_id == project.id))
-    allowed = "manage_sources" in effective_permissions(actor)
-    if actor.permissions is None and access and access.manage_sources:
-        allowed = True
-    if not access or not allowed:
-        raise HTTPException(403, "Для проекта не выдано право manage_sources")
+    raise HTTPException(403, "Источники настраивает команда StepToLead")
 
 
 def validate_zone(value):
@@ -212,7 +213,7 @@ class RulePatch(BaseModel):
 @router.get("")
 async def get_settings(project_id: int, db: AsyncSession = Depends(get_db),
                        actor: PortalUser = Depends(require_portal_user)):
-    if not effective_permissions(actor).intersection({"manage_settings", "manage_sources"}):
+    if not effective_permissions(actor).intersection({"manage_settings", "manage_sources", "manage_pipeline"}):
         raise HTTPException(403, "Недостаточно прав для просмотра настроек")
     project = await scoped(db, actor, project_id)
     company = await db.get(ClientWorkspace, actor.workspace_id)
@@ -326,7 +327,7 @@ async def get_reasons(project_id: int, db: AsyncSession = Depends(get_db),
 @router.post("/reasons", status_code=201)
 async def add_reason(project_id: int, payload: ReasonCreate, request: Request,
                      db: AsyncSession = Depends(get_db), actor: PortalUser = Depends(require_portal_user)):
-    check_origin(request); require_permission(actor, "manage_settings")
+    check_origin(request); require_sales_setup(actor)
     project = await scoped(db, actor, project_id)
     rows = await reasons(db, project.id)
     label = payload.label.strip()
@@ -340,7 +341,7 @@ async def add_reason(project_id: int, payload: ReasonCreate, request: Request,
 @router.patch("/reasons/{reason_id}")
 async def patch_reason(project_id: int, reason_id: int, payload: ReasonPatch, request: Request,
                        db: AsyncSession = Depends(get_db), actor: PortalUser = Depends(require_portal_user)):
-    check_origin(request); require_permission(actor, "manage_settings")
+    check_origin(request); require_sales_setup(actor)
     project = await scoped(db, actor, project_id)
     row = await db.get(ProjectLostReason, reason_id)
     if not row or row.project_id != project.id: raise HTTPException(404, "Причина не найдена")
@@ -363,7 +364,7 @@ async def patch_reason(project_id: int, reason_id: int, payload: ReasonPatch, re
 @router.put("/reasons/order")
 async def reorder_reasons(project_id: int, payload: ReasonOrder, request: Request,
                           db: AsyncSession = Depends(get_db), actor: PortalUser = Depends(require_portal_user)):
-    check_origin(request); require_permission(actor, "manage_settings")
+    check_origin(request); require_sales_setup(actor)
     project = await scoped(db, actor, project_id)
     rows = await reasons(db, project.id)
     if len(payload.ids) != len(rows) or set(payload.ids) != {row.id for row in rows}:

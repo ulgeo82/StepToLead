@@ -155,8 +155,8 @@ export function DealCard({ dealId, projectId, pipelines, team, sources, fields, 
             {pickReason && <div className="crmQualityReasons">{qualityReasons.map(reason => <button key={reason} disabled={busy}
               onClick={async () => { setPickReason(false); await run(() => request(`/crm/deals/${dealId}/quality`, "POST", { quality: "non_target", reason })); }}>{reason}</button>)}</div>}
           </div>}
-          {deal.lead_id && <label className="crmAnalyticsFlag" title="Лид, квалификация и продажа этой сделки не попадут в «Результат» и «Аналитику»">
-            <input type="checkbox" disabled={!can("edit_deal") || busy} checked={!!deal.exclude_from_analytics}
+          {deal.lead_id && can("exclude_analytics") && <label className="crmAnalyticsFlag" title="Лид, квалификация и продажа этой сделки не попадут в «Результат» и «Аналитику»">
+            <input type="checkbox" disabled={busy} checked={!!deal.exclude_from_analytics}
               onChange={e => { const exclude = e.target.checked; run(() => request(`/crm/deals/${dealId}/analytics`, "POST", { exclude })); }}/>
             Не считать в аналитику</label>}
           <div className="crmFieldGrid">

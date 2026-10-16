@@ -17,7 +17,7 @@ from starlette.concurrency import run_in_threadpool
 from app.api.routes import marketing
 from app.api.routes.result import reporting_period, scoped_project
 from app.core.access import check_origin
-from app.core.permissions import effective_permissions, require_actor_permission
+from app.core.permissions import can_setup_integrations, effective_permissions, is_agency, require_actor_permission
 from app.db import get_db
 from app.models.crm import CrmInbound
 from app.models.marketing import AdCampaignMetricDaily, AdConnection, AdMetricDaily, PortalProjectAccess
@@ -53,17 +53,10 @@ class ConnectAdAccount(BaseModel):
 
 
 async def require_manage_integrations(db: AsyncSession, project, kind, user):
-    if kind == "admin":
+    # Подключения (кабинеты, сайт, Tilda, карты) настраивает только StepToLead.
+    if kind == "admin" or can_setup_integrations(user):
         return
-    if user.role == "client_owner":
-        return
-    access = await db.scalar(select(PortalProjectAccess).where(
-        PortalProjectAccess.user_id == user.id, PortalProjectAccess.project_id == project.id))
-    allowed = "manage_integrations" in effective_permissions(user)
-    if user.permissions is None and access and access.manage_integrations:
-        allowed = True  # preserve existing project grants
-    if not allowed or not access:
-        raise HTTPException(403, "Для этого проекта не выдано право manage_integrations")
+    raise HTTPException(403, "Подключения настраивает команда StepToLead")
 
 
 async def scoped_connection(db: AsyncSession, request: Request, connection_id: int):
@@ -188,11 +181,7 @@ async def ads_overview(request: Request, project_id: int, start: date | None = N
                           "previous": snapshot(account_ids, previous_start, previous_end, facts["previous"]),
                           "accounts": account_rows})
     all_ids = [row.id for row in connections]
-    can_manage = kind == "admin" or ("manage_integrations" in effective_permissions(user))
-    if kind == "client" and user.role != "client_owner":
-        access = await db.scalar(select(PortalProjectAccess).where(
-            PortalProjectAccess.user_id == user.id, PortalProjectAccess.project_id == project.id))
-        can_manage = bool(access and (can_manage or (user.permissions is None and access.manage_integrations)))
+    can_manage = kind == "admin" or can_setup_integrations(user)
     return {"project": {"id": project.id, "name": project.name}, "period": facts["period"],
             "viewer": {"role": "admin" if kind == "admin" else user.role,
                        "can_manage_integrations": can_manage},
