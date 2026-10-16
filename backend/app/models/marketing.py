@@ -42,6 +42,9 @@ class Project(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+VAT_RATE = 0.22
+
+
 class AdConnection(Base):
     __tablename__ = "ad_connections"
 
@@ -58,6 +61,8 @@ class AdConnection(Base):
     vk_access_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(String(24), default="pending")
     currency: Mapped[str | None] = mapped_column(String(12))
+    # Расходы из API кабинета: "with" — уже с НДС (по умолчанию, цифры не меняются), "without" — добавляем VAT_RATE.
+    spend_vat: Mapped[str] = mapped_column(String(16), default="with", server_default="with")
     last_error: Mapped[str | None] = mapped_column(Text)
     last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

@@ -440,6 +440,7 @@ def serialize_connection(row: AdConnection, workspace_name: str | None = None):
     return {"id": row.id, "workspace_id": row.workspace_id, "workspace_name": workspace_name, "platform": row.platform,
             "platform_name": SUPPORTED.get(row.platform, row.platform), "name": row.name,
             "external_account_id": row.external_account_id, "status": row.status, "currency": row.currency,
+            "spend_vat": row.spend_vat,
             "last_error": row.last_error, "last_checked_at": row.last_checked_at, "last_synced_at": row.last_synced_at,
             "created_at": row.created_at}
 

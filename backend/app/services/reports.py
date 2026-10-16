@@ -114,7 +114,9 @@ async def sales_team(db: AsyncSession, project: Project, start: date, end: date,
     def minutes(row):
         if not row.first_response_at:
             return None
-        return max(0.0, (_aware(row.first_response_at) - _aware(row.created_at)).total_seconds() / 60)
+        from app.services.work_hours import business_minutes
+        schedule = (project.portal_state or {}).get("work_schedule")
+        return business_minutes(_aware(row.created_at), _aware(row.first_response_at), schedule)
 
     per = defaultdict(lambda: {"deals": 0, "won": 0, "times": []})
     for row in deals:

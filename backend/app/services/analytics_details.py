@@ -11,7 +11,7 @@ from app.models.marketing import (AdCampaignMetricDaily, AdConnection, AdHypothe
                                   ClientLeadAttribution, ClientLeadEvent, ClientSale, Project,
                                   SourceMetricDaily)
 from app.services.result_analytics import (ReportExclude, _derived, _ratio, _sum, analytics_exclusions,
-                                           load_lead_rows, quality_fields, source_catalog)
+                                           load_lead_rows, quality_fields, source_catalog, spend_with_vat)
 
 
 def defaultdict_count(values) -> dict:
@@ -201,7 +201,7 @@ async def analytics_details(db: AsyncSession, project: Project, start: date, end
         revenue = _sum(sale.amount for sale in period_sales)
         if sale_count == 0 and lead_count:
             revenue = 0
-        spend = _sum(row.spend for row in rows)
+        spend = _sum(spend_with_vat(row.spend, connection_map[connection_id].spend_vat) for row in rows)
         clicks = sum(int(row.clicks or 0) for row in rows) if rows else None
         impressions = sum(int(row.impressions or 0) for row in rows) if rows else None
         values = {"spend": spend, "leads": lead_count if lead_count else None,

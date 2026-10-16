@@ -6,15 +6,22 @@ aggregated source has no individual records for the selected period.
 """
 from collections import defaultdict, namedtuple
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.models.access import GrowthCalculation
 from app.models.marketing import (AdCampaignMetricDaily, AdConnection, AdHypothesisCampaign,
                                   AdMetricDaily, ClientLead, ClientLeadAttribution,
                                   ClientSale, LeadInboundSource, Project, ProjectEconomics,
-                                  ProjectSource, SourceMetricDaily)
+                                  ProjectSource, SourceMetricDaily, VAT_RATE)
+
+
+def spend_with_vat(spend, spend_vat):
+    if spend is None:
+        return None
+    multiplier = Decimal(1) + Decimal(str(VAT_RATE)) if spend_vat == "without" else Decimal(1)
+    return float(Decimal(str(spend)) * multiplier)
 
 
 def _dt_date(value: datetime) -> date:
@@ -100,13 +107,14 @@ async def excluded_campaign_spend(db: AsyncSession, exclusions: Exclusions, firs
         return {}
     connection_ids = {connection_id for connection_id, _ in exclusions.campaigns}
     rows = (await db.execute(select(AdCampaignMetricDaily.connection_id, AdCampaignMetricDaily.external_campaign_id,
-                                    AdCampaignMetricDaily.date, AdCampaignMetricDaily.spend).where(
+                                    AdCampaignMetricDaily.date, AdCampaignMetricDaily.spend,
+                                    AdConnection.spend_vat).join(AdConnection).where(
         AdCampaignMetricDaily.connection_id.in_(connection_ids),
         AdCampaignMetricDaily.date >= first, AdCampaignMetricDaily.date <= last))).all()
     spend = defaultdict(float)
-    for connection_id, campaign_id, day, value in rows:
+    for connection_id, campaign_id, day, value, vat in rows:
         if (connection_id, campaign_id) in exclusions.campaigns and value is not None:
-            spend[(connection_id, day)] += float(value)
+            spend[(connection_id, day)] += spend_with_vat(value, vat)
     return spend
 
 
@@ -206,6 +214,7 @@ async def result_facts(db: AsyncSession, project: Project, start: date, end: dat
         custom = [row for row in custom if f"source:{row.id}" not in channels]
         sources = {key: value for key, value in sources.items() if key not in channels}
     connection_key = {row.id: f"ad:{row.id}" for row in connections}
+    connection_vat = {row.id: row.spend_vat for row in connections}
     excluded_spend = await excluded_campaign_spend(db, exclusions, earliest, latest)
 
     ad_rows = []
@@ -235,7 +244,8 @@ async def result_facts(db: AsyncSession, project: Project, start: date, end: dat
             if first <= row.date <= last:
                 key = connection_key[row.connection_id]
                 cell = day_rows[row.date][key]
-                spend = max(0.0, float(row.spend) - excluded_spend.get((row.connection_id, row.date), 0.0))
+                spend = max(0.0, spend_with_vat(row.spend, connection_vat[row.connection_id])
+                            - excluded_spend.get((row.connection_id, row.date), 0.0))
                 cell["spend"] = (cell["spend"] or 0) + spend
                 presence[key]["spend"].add(row.date)
         for row in source_rows:

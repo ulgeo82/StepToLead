@@ -4,8 +4,8 @@ import binascii
 import re
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, ConfigDict, Field
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,6 +18,46 @@ from app.models.marketing import (AdConnection, ClientWorkspace, PortalProjectAc
 from app.services.notifications import EVENTS, project_members, rule_state, telegram_configured
 
 router = APIRouter(prefix="/settings", tags=["client-settings"])
+
+
+class WorkScheduleInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    timezone: str = Field(max_length=80)
+    days: list[StrictInt] = Field(max_length=7)
+    start: str
+    end: str
+
+    @model_validator(mode="after")
+    def valid_schedule(self):
+        from app.services.work_hours import validate_schedule
+        try:
+            validate_schedule(self.model_dump())
+        except (ValueError, KeyError, TypeError) as error:
+            raise ValueError("Проверьте часовой пояс, дни и часы рабочего графика") from error
+        return self
+
+
+@router.get("/work-schedule")
+async def get_work_schedule(project_id: int, db: AsyncSession = Depends(get_db),
+                            actor: PortalUser = Depends(require_portal_user)):
+    require_permission(actor, "manage_settings")
+    project = await scoped(db, actor, project_id)
+    return (project.portal_state or {}).get("work_schedule")
+
+
+@router.put("/work-schedule")
+async def put_work_schedule(project_id: int, request: Request, payload: WorkScheduleInput | None = Body(default=None),
+                            db: AsyncSession = Depends(get_db),
+                            actor: PortalUser = Depends(require_portal_user)):
+    check_origin(request)
+    require_permission(actor, "manage_settings")
+    project = await scoped(db, actor, project_id)
+    project = await db.scalar(select(Project).where(Project.id == project.id).with_for_update()
+                              .execution_options(populate_existing=True))
+    schedule = payload.model_dump() if payload else None
+    project.portal_state = {**(project.portal_state or {}), "work_schedule": schedule}
+    await db.commit()
+    return schedule
 DEFAULT_REASONS = ["Не отвечает", "Не подходит", "Не подходит по бюджету", "Передумал",
                    "Выбрал конкурента", "Нецелевой", "Другое"]
 # Event catalogue lives with the delivery logic.

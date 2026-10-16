@@ -143,7 +143,7 @@ export default function SettingsPage() {
       <nav className="settingsTabs" aria-label="Разделы настроек">{tabs.map(item => <button key={item.key} className={tab === item.key ? "active" : ""} onClick={() => switchTab(item.key)}><span>{item.icon}</span>{item.label}</button>)}</nav>
       {data && company && project && <div className="settingsContent">
         {tab === "company" && <><form className="resultPanel settingsCard" onSubmit={event => { event.preventDefault(); save("/company", company, "Данные компании сохранены."); }}><div className="settingsCardHead"><div><h2>Основная информация</h2><p>Данные только вашей организации.</p></div>{canSettings && <button className="settingsPrimary" disabled={!dirtyCompany || !!saving}>{saving === "/company" ? "Сохраняем…" : "Сохранить изменения"}</button>}</div><div className="settingsCompanyGrid"><div className="settingsLogoBlock"><div className="settingsLogo">{company.logo_data ? <img src={company.logo_data} alt="Логотип компании"/> : company.name.slice(0,2).toUpperCase()}</div><div><label className="settingsOutline">Изменить логотип<input type="file" accept="image/png,image/jpeg" onChange={logoChange} disabled={!canSettings}/></label><small>PNG/JPEG до 1 МБ</small>{logoError && <small className="settingsInlineError">{logoError}</small>}</div></div><div className="settingsFields"><label>Название компании *<input required value={company.name} disabled={!canSettings} onChange={e => setCompany({ ...company, name: e.target.value })}/></label><label>Юридическое название<input value={empty(company.legal_name)} disabled={!canSettings} onChange={e => setCompany({ ...company, legal_name: e.target.value })}/></label><label>Контактный email<input type="email" value={empty(company.contact_email)} disabled={!canSettings} onChange={e => setCompany({ ...company, contact_email: e.target.value })}/></label><label>Контактный телефон<input value={empty(company.contact_phone)} disabled={!canSettings} onChange={e => setCompany({ ...company, contact_phone: e.target.value })}/></label><label>Часовой пояс<input value={company.timezone} disabled={!canSettings} onChange={e => setCompany({ ...company, timezone: e.target.value })} placeholder="Europe/Moscow"/></label><label>Валюта<input value={company.currency} maxLength={3} disabled={!canSettings} onChange={e => setCompany({ ...company, currency: e.target.value.toUpperCase() })}/></label><label className="wide">Сайт<input type="url" value={empty(company.website)} disabled={!canSettings} onChange={e => setCompany({ ...company, website: e.target.value })}/></label></div></div></form><div className="settingsTwoColumns"><ProjectCard project={project} setProject={setProject} dirty={dirtyProject} saving={saving} canSettings={canSettings} onSave={() => save("/project", project, "Проект сохранён.")}/><EconomicsCard data={data.economics} projectId={projectId}/></div><ClientPlanCard/>{projectId && <RequisitesCard projectId={projectId}/>}</>}
-        {tab === "project" && <div className="settingsTwoColumns"><ProjectCard project={project} setProject={setProject} dirty={dirtyProject} saving={saving} canSettings={canSettings} onSave={() => save("/project", project, "Проект сохранён.")}/><EconomicsCard data={data.economics} projectId={projectId}/></div>}
+        {tab === "project" && <><div className="settingsTwoColumns"><ProjectCard project={project} setProject={setProject} dirty={dirtyProject} saving={saving} canSettings={canSettings} onSave={() => save("/project", project, "Проект сохранён.")}/><EconomicsCard data={data.economics} projectId={projectId}/></div>{projectId && canSettings && <WorkScheduleCard key={projectId} projectId={projectId}/>}</>}
         {tab === "funnel" && <><div className="settingsTwoColumns"><section className="resultPanel settingsCard"><h2>Воронка продаж</h2><p>Основные этапы влияют на аналитику и не удаляются.</p><div className="settingsStage"><strong>01</strong><span>Лид</span><small>Системный</small></div><div className="settingsStage"><strong>02</strong><span>Квалифицирован</span><small>Системный</small></div><label className="settingsStage"><strong>03</strong><span>Встреча</span><input type="checkbox" checked={project.meeting_enabled} disabled={!canSettings || !!saving} onChange={event => save("/funnel", { meeting_enabled: event.target.checked }, "Настройка встречи сохранена.")}/><small>Опционально</small></label><div className="settingsStage"><strong>04</strong><span>Продажа</span><small>Системный</small></div><p className="settingsHint">Встреча учитывается только когда менеджер отмечает её в карточке лида. Без событий в аналитике будет «—».</p></section><section className="resultPanel settingsCard"><div className="settingsCardHead"><div><h2>Причины потери</h2><p>Архивирование не удаляет историю лидов.</p></div>{canSettings && <button className="settingsOutline" onClick={() => setReasonModal(true)}>＋ Причина</button>}</div><div className="settingsReasonList">{data.reasons.map((reason,index) => <div key={reason.id} className={reason.status === "archived" ? "archived" : ""}><span>{reason.label}</span><small>{reason.status === "archived" ? "Архив" : reason.is_system ? "Системная" : "Пользовательская"}</small>{canSettings && <span className="settingsRowActions"><button onClick={() => moveReason(reason,-1)} disabled={index === 0 || !!saving} title="Выше">↑</button><button onClick={() => moveReason(reason,1)} disabled={index === data.reasons.length-1 || !!saving} title="Ниже">↓</button>{!reason.is_system && <button onClick={() => reasonAction(reason,"rename")} title="Переименовать">✎</button>}<button onClick={() => reasonAction(reason,reason.status === "archived" ? "restore" : "archive")} title={reason.status === "archived" ? "Восстановить" : "Архивировать"}>{reason.status === "archived" ? "↺" : "⊘"}</button></span>}</div>)}</div></section></div>{projectId && <CareCard projectId={projectId}/>}</>}
         {tab === "sources" && <section className="resultPanel settingsCard"><div className="settingsCardHead"><div><h2>Источники</h2><p>Универсальные источники проекта. Рекламные кабинеты подключаются в разделе «Реклама».</p></div>{canSources && <button className="settingsPrimary" onClick={() => setSourceModal(true)}>＋ Источник</button>}</div><div className="settingsTableScroll"><table><thead><tr><th>Название</th><th>Категория</th><th>Тип</th><th>Способ данных</th><th>Статус</th>{(data.pipelines?.length || 0) > 1 && <th title="Заявки из источника сразу попадают в эту воронку">Воронка</th>}<th>Действия</th></tr></thead><tbody>{sourceList.map(source => <tr key={source.id}><td><strong>{source.name}</strong></td><td>{source.category || "—"}</td><td>{sourceKind[source.kind] || source.kind}</td><td>{source.method}</td><td><span className={`settingsBadge ${source.status}`}>{source.status === "active" ? "Активен" : source.status === "archived" ? "Архив" : "Ошибка"}</span></td>{(data.pipelines?.length || 0) > 1 && <td><select aria-label="Воронка для заявок" disabled={!canSources || saving === source.id} value={source.pipeline_id || ""} onChange={async e => { setSaving(source.id); setError(""); setNotice("");
           try { await api(`/settings/sources/${source.id.split(":")[1]}/pipeline?project_id=${projectId}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pipeline_id: e.target.value ? Number(e.target.value) : null }) });
@@ -156,6 +156,69 @@ export default function SettingsPage() {
       {reasonModal && <div className="resultModalBackdrop" onMouseDown={event => { if (event.target === event.currentTarget) setReasonModal(false); }}><form className="resultModal" onSubmit={submitReason}><header><h2>Добавить причину потери</h2><button type="button" onClick={() => setReasonModal(false)}>×</button></header><label>Название<input name="label" minLength={2} maxLength={160} required/></label><button className="resultPrimary" disabled={!!saving}>Сохранить</button></form></div>}
       {sourceModal && <div className="resultModalBackdrop" onMouseDown={event => { if (event.target === event.currentTarget) setSourceModal(false); }}><form className="resultModal" onSubmit={submitSource}><header><h2>Добавить источник</h2><button type="button" onClick={() => setSourceModal(false)}>×</button></header><p>Только описание источника. Для API/BOT понадобится отдельный коннектор; настройки не создают работающую интеграцию.</p><label>Название<input name="name" minLength={2} maxLength={180} required/></label><label>Категория<input name="category" maxLength={80} placeholder="Например, органика или партнёры"/></label><label>Тип<select name="kind" defaultValue="MANUAL"><option value="MANUAL">Ручной</option><option value="CUSTOM">Кастомный</option><option value="INTERNAL">Внутренний</option></select></label><label>Способ данных<select name="method" defaultValue="MANUAL"><option value="MANUAL">Ручной ввод</option><option value="FILE">Файл</option><option value="WEBHOOK">Webhook (потребуется коннектор)</option><option value="API">API (потребуется коннектор)</option><option value="BOT">Bot (потребуется коннектор)</option><option value="INTERNAL">Внутренний</option></select></label><button className="resultPrimary" disabled={!!saving}>Добавить</button></form></div>}
     </main></div>;
+}
+
+type WorkSchedule = { timezone: string; days: number[]; start: string; end: string };
+
+function WorkScheduleCard({ projectId }: { projectId: number }) {
+  const [schedule, setSchedule] = useState<WorkSchedule>({
+    timezone: "Europe/Moscow", days: [1, 2, 3, 4, 5], start: "09:00", end: "19:00",
+  });
+  const [enabled, setEnabled] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  useEffect(() => {
+    const controller = new AbortController();
+    api<WorkSchedule | null>(`/settings/work-schedule?project_id=${projectId}`, { signal: controller.signal })
+      .then(value => {
+        if (!controller.signal.aborted) { setEnabled(value !== null); if (value) setSchedule(value); }
+      })
+      .catch(reason => { if (!controller.signal.aborted) setError(reason.message); })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
+  }, [projectId]);
+  async function save(event: FormEvent) {
+    event.preventDefault(); setBusy(true); setError(""); setNotice("");
+    try {
+      await api(`/settings/work-schedule?project_id=${projectId}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(enabled ? schedule : null),
+      });
+      setNotice("Рабочий график сохранён.");
+    } catch (reason) { setError((reason as Error).message); }
+    finally { setBusy(false); }
+  }
+  return <form className="resultPanel settingsCard" onSubmit={save}>
+    <div className="settingsCardHead"><h2>Рабочее время отдела продаж</h2>
+      <button className="settingsPrimary" disabled={loading || busy}>{busy ? "Сохраняем…" : "Сохранить"}</button>
+    </div>
+    {loading && <p role="status">Загружаем график…</p>}
+    {error && <p className="settingsInlineError" role="alert">{error}</p>}
+    {notice && <p role="status">{notice}</p>}
+    <fieldset disabled={loading || busy}>
+      <label><input type="checkbox" checked={enabled} onChange={e => setEnabled(e.target.checked)}/>
+        Учитывать рабочий график</label>
+      <div className="settingsFields">
+        <fieldset disabled={!enabled}><legend>Рабочие дни</legend>
+          {["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"].map((label, index) => <label key={label}>
+            <input type="checkbox" checked={schedule.days.includes(index + 1)} onChange={e => setSchedule({
+              ...schedule, days: e.target.checked ? [...schedule.days, index + 1].sort() :
+                schedule.days.filter(d => d !== index + 1),
+            })}/>{label}</label>)}
+        </fieldset>
+        <label>С<input type="time" required disabled={!enabled} value={schedule.start}
+          onChange={e => setSchedule({ ...schedule, start: e.target.value })}/></label>
+        <label>По<input type="time" required disabled={!enabled} value={schedule.end}
+          onChange={e => setSchedule({ ...schedule, end: e.target.value })}/></label>
+        <label>Часовой пояс<input required disabled={!enabled} value={schedule.timezone}
+          placeholder="Europe/Moscow" onChange={e => setSchedule({ ...schedule, timezone: e.target.value })}/></label>
+      </div>
+    </fieldset>
+    <p className="settingsHint">Скорость ответа в отчётах считается только в рабочее время.
+      Без графика учитывается всё прошедшее время.</p>
+  </form>;
 }
 
 function ProjectCard({ project, setProject, dirty, saving, canSettings, onSave }: { project: Project; setProject: (value: Project) => void;

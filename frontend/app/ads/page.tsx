@@ -16,7 +16,7 @@ type Point = { label: string; spend: number | null; clicks: number | null; leads
 type Metrics = { spend: number | null; clicks: number | null; cpc: number | null; leads: number | null;
   cpl: number | null; sales: number | null; revenue: number | null; romi: number | null; trend: Point[] };
 type Account = { id: number; name: string; external_account_id: string; status: string; last_error: string | null;
-  last_synced_at: string | null; current: Metrics; previous: Metrics };
+  last_synced_at: string | null; current: Metrics; previous: Metrics; spend_vat: "with" | "without" };
 type Platform = { id: string; name: string; account_count: number; connected_count: number; status: string;
   last_synced_at: string | null; current: Metrics; previous: Metrics; accounts: Account[] };
 type Ads = { current: Metrics; previous: Metrics; platforms: Platform[];
@@ -145,6 +145,16 @@ export default function AdsPage() {
     if (!window.confirm(`Удалить кабинет «${item.name}» навсегда? Показатели и кампании удалятся, восстановить будет нельзя.`)) return;
     if (await callAction(`/ads/connections/${item.id}/permanent`, "DELETE", undefined, item.id)) setNotice("Кабинет удалён.");
   }
+  function vatSelect(item: Account) {
+    return <div><label>Расходы из кабинета: <select value={item.spend_vat}
+      disabled={!canManage || busy !== null}
+      onChange={async event => {
+        if (await callAction(`/ads/connections/${item.id}/vat`, "PUT", { spend_vat: event.target.value }, item.id)) {
+          setNotice("Настройка НДС сохранена.");
+        }
+      }}><option value="without">без НДС</option><option value="with">с НДС</option></select></label>
+      <p className="avitoHint">В отчётах расходы показываются с НДС 22%</p></div>;
+  }
   async function disconnect(item: Account) {
     if (!window.confirm(`Отключить «${item.name}»? Исторические показатели сохранятся.`)) return;
     if (await callAction(`/ads/connections/${item.id}`, "DELETE", undefined, item.id)) setNotice("Кабинет отключён. История сохранена.");
@@ -163,8 +173,9 @@ export default function AdsPage() {
         <section className="adsSources"><div className="adsSourcesHead"><div><h2>Рекламные платформы и кабинеты</h2><p>Только реальные подключения проекта. Общие маркетинговые источники сюда не включаются.</p></div>{canManage && activeAccounts.length > 0 && <button disabled={busy !== null} onClick={syncAll}>{busy === "all" ? "Синхронизируем…" : "↻ Синхронизировать все"}</button>}</div>
           {selectedPlatform && <nav className="adsCrumbs"><button onClick={() => { setSelectedPlatform(null); setSelectedAccount(null); }}>Все платформы</button><span>›</span><button onClick={() => setSelectedAccount(null)}>{platform?.name || selectedPlatform}</button>{account && <><span>›</span><strong>{account.name}</strong></>}</nav>}
           {!selectedPlatform && (data.platforms.length ? <div className="adsPlatformList">{data.platforms.map(item => <button className="adsPlatformRow" key={item.id} onClick={() => { setSelectedPlatform(item.id); setSelectedAccount(null); }}><div className="adsPlatformIdentity"><span className={`adsLogo ${item.id}`}>{logoText(item.id, item.name)}</span><div><strong>{item.name}</strong><small>{item.account_count} кабинетов · синхронизация {asDate(item.last_synced_at)}</small><i className={`adsStatus ${item.status}`}>{statusText[item.status] || item.status}</i></div></div>{summary(item.current, item.id)}<Sparkline points={item.current.trend}/><span className="adsArrow">→</span></button>)}</div> : <div className="resultPanel adsEmpty"><h3>Реклама ещё не подключена</h3><p>Подключите поддерживаемый рекламный кабинет для выбранного проекта. Демонстрационных платформ и цифр здесь нет.</p></div>)}
-          {platform && !account && <div className="adsPlatformList">{platform.accounts.map(item => <div className="adsAccountRow" key={item.id}><button className="adsAccountOpen" onClick={() => setSelectedAccount(item.id)}><div className="adsPlatformIdentity"><span className={`adsLogo ${platform.id}`}>{logoText(platform.id, platform.name)}</span><div><strong>{item.name}</strong><small>ID {item.external_account_id} · синхронизация {asDate(item.last_synced_at)}</small><i className={`adsStatus ${item.status}`}>{statusText[item.status] || item.status}</i></div></div>{summary(item.current, platform.id)}<Sparkline points={item.current.trend}/><span className="adsArrow">→</span></button>{item.last_error && <p className="adsAccountError">{item.last_error}</p>}{actionButtons(item)}</div>)}</div>}
+          {platform && !account && <div className="adsPlatformList">{platform.accounts.map(item => <div className="adsAccountRow" key={item.id}><button className="adsAccountOpen" onClick={() => setSelectedAccount(item.id)}><div className="adsPlatformIdentity"><span className={`adsLogo ${platform.id}`}>{logoText(platform.id, platform.name)}</span><div><strong>{item.name}</strong><small>ID {item.external_account_id} · синхронизация {asDate(item.last_synced_at)}</small><i className={`adsStatus ${item.status}`}>{statusText[item.status] || item.status}</i></div></div>{summary(item.current, platform.id)}<Sparkline points={item.current.trend}/><span className="adsArrow">→</span></button>{vatSelect(item)}{item.last_error && <p className="adsAccountError">{item.last_error}</p>}{actionButtons(item)}</div>)}</div>}
           {platform && account && <><article className="resultPanel adsAccountDetail"><div className="adsAccountDetailHead"><span className={`adsLogo ${platform.id}`}>{logoText(platform.id, platform.name)}</span><div><h3>{account.name}</h3><p>{platform.name} · ID {account.external_account_id} · последняя синхронизация {asDate(account.last_synced_at)}</p><i className={`adsStatus ${account.status}`}>{statusText[account.status] || account.status}</i></div></div>{summary(account.current, platform.id)}{account.last_error && <p className="adsAccountError">{account.last_error}</p>}<div className="adsDetailActions">{!isMap(platform.id) && <Link href={`/campaigns?project_id=${projectId}&platform=${encodeURIComponent(platform.id)}&account=${account.id}`}>Открыть аналитику кампаний →</Link>}{actionButtons(account)}</div></article>
+            {vatSelect(account)}
             {isMap(platform.id) && <MapsPanel connectionId={account.id} start={start} end={end} canManage={canManage} revision={revision} onChanged={() => setRevision(value => value + 1)}/>}
             {platform.id.startsWith("avito") && <AvitoPanel connectionId={account.id} start={start} end={end} canManage={canManage} projectId={projectId} revision={revision}/>}
             {platform.id === "vk_ads" && <section className="resultPanel adsRemoteCampaigns"><div className="adsRemoteHead"><div><h3>Кампании в VK Рекламе</h3><p>Отображаются даже без расходов и показов. Нажмите на кампанию, чтобы увидеть её настройки.</p></div><span>{remoteLoading ? "Загружаем…" : `${remoteCampaigns.length} кампаний`}</span></div>

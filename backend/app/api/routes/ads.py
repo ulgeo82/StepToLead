@@ -6,6 +6,7 @@ remain in /result and /analytics and are deliberately excluded here.
 import time as _time
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta, timezone
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
@@ -24,6 +25,20 @@ from app.services import avito, avito_leads
 from app.services.result_analytics import _bucket, _sum, result_facts
 
 router = APIRouter(prefix="/ads", tags=["ads"])
+
+
+class SpendVatInput(BaseModel):
+    spend_vat: Literal["with", "without"]
+
+
+@router.put("/connections/{connection_id}/vat")
+async def update_spend_vat(connection_id: int, payload: SpendVatInput, request: Request,
+                           db: AsyncSession = Depends(get_db)):
+    check_origin(request)
+    connection = await scoped_connection(db, request, connection_id)
+    connection.spend_vat = payload.spend_vat
+    await db.commit()
+    return marketing.serialize_connection(connection)
 
 
 class ConnectAdAccount(BaseModel):
@@ -155,6 +170,7 @@ async def ads_overview(request: Request, project_id: int, start: date | None = N
         account_rows = []
         for account in accounts:
             account_rows.append({"id": account.id, "name": account.name,
+                                 "spend_vat": account.spend_vat,
                                  "external_account_id": account.external_account_id,
                                  "status": account.status, "last_error": account.last_error,
                                  "last_synced_at": account.last_synced_at,
