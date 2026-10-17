@@ -10,12 +10,16 @@ from app.models.crm import CrmContact, CrmDeal
 def upgrade_existing_schema(connection):
     from app.models.ai import AiUsage
     AiUsage.__table__.create(connection, checkfirst=True)
+    from app.models.ai import AiTokenAccount, AiTokenPurchase
+    AiTokenAccount.__table__.create(connection, checkfirst=True)
+    AiTokenPurchase.__table__.create(connection, checkfirst=True)
     from app.models.brief import ClientBrief, ExpressAssessment
     ClientBrief.__table__.create(connection, checkfirst=True)
     ExpressAssessment.__table__.create(connection, checkfirst=True)
     inspector = inspect(connection)
     columns = {
         "messages": {"meta": "JSON"},
+        "ai_usage": {"bucket": "VARCHAR(12) NOT NULL DEFAULT 'client'"},
         "proxies": {"pool": "VARCHAR(16) NOT NULL DEFAULT 'agency'",
                     "max_accounts": "INTEGER NOT NULL DEFAULT 3",
                     "dedicated_workspace_id": "INTEGER REFERENCES client_workspaces(id)"},

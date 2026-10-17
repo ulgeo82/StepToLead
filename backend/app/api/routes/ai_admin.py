@@ -102,7 +102,7 @@ async def test(feature: str, payload: TestIn, request: Request, db: AsyncSession
         if feature == "calls":
             return await call_ai.analyze_text(system, messages, workspace_id=payload.workspace_id)
         return await ai.complete(system, messages, feature=feature, workspace_id=payload.workspace_id,
-                                 max_tokens={"chat": 400, "summary": 500, "campaigns": 300}[feature])
+                                 max_tokens={"chat": 400, "summary": 500, "campaigns": 300}[feature], bucket="agency")
     try:
         return await measured(run, db)
     except ai.AIError as exc:

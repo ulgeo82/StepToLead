@@ -8,6 +8,7 @@ import {ClientBriefEntry} from "@/components/client-brief-entry";
 import {DedicatedTelegramProxy} from "@/components/dedicated-telegram-proxy";
 import { ClientTelegramBot } from "@/components/client-telegram-bot";
 import { AdminPlanPanel } from "@/components/plan-cards";
+import { AdminTokensClient } from "@/components/ai-tokens";
 import { api, ClientWorkspace, LeadInboundSource, PortalRole, PortalUser } from "@/lib/api";
 
 const roles: { value: PortalRole; label: string; permissions: string[] }[] = [
@@ -121,6 +122,7 @@ export default function ClientDetailsPage() {
     </section>
     <section className="panel leadIntakePanel"><div className="panelHead"><div><p className="eyebrow">Интеграции CRM</p><h2>Автоматический приём лидов</h2></div><button className="button primary" onClick={() => setModal("source")}>＋ Создать webhook</button></div><p className="portalMuted">Подключите форму сайта, квиз или рекламный сервис. Новые обращения попадут в CRM, дубли будут остановлены, а менеджеры назначены по очереди.</p><div className="sourceList">{sources.map(source => <article key={source.id}><span className={`sourceState ${source.active ? "active" : ""}`}></span><div><strong>{source.name}</strong><small>Ключ: {source.token_prefix}•••• · {source.auto_assign ? "автораспределение включено" : "без назначения"}</small></div><b>{source.active ? "Принимает лиды" : "Отключён"}</b>{source.active && <button disabled={busy === `source-${source.id}`} onClick={() => revokeSource(source)}>Отключить</button>}</article>)}{!sources.length && <div className="sourceEmpty">Webhook ещё не создан. Создайте его, чтобы подключить первый источник лидов.</div>}</div></section>
     <AdminPlanPanel workspaceId={workspaceId}/>
+    <AdminTokensClient workspaceId={workspaceId}/>
     <LaunchEditor workspaceId={workspaceId}/>
     <ClientBriefEntry workspaceId={workspaceId}/>
     <ClientTelegramBot workspaceId={workspaceId}/>

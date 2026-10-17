@@ -102,7 +102,7 @@ def output_budget(model, feature, requested):
 
 async def complete(system: str, messages: list[dict], *, max_tokens=500, temperature=0.3,
                    feature="chat", workspace_id=None, api_key=None, base_url=None, model=None,
-                   provider_override=None, endpoint=None, normalize_turns=True, validator=None) -> str:
+                   provider_override=None, endpoint=None, normalize_turns=True, validator=None, bucket="client") -> str:
     from app.services import ai_usage
     name = provider_override or provider()
     key, chosen = api_key or settings.llm_api_key, model or model_for(feature)
@@ -116,7 +116,7 @@ async def complete(system: str, messages: list[dict], *, max_tokens=500, tempera
     system, turns = trim_input(system, turns)
     input_tokens = ai_usage.estimate(system + "".join(m["content"] for m in turns))
     for attempt in range(2):
-        usage_id = await ai_usage.reserve(feature, name, chosen, workspace_id, input_tokens + max_tokens)
+        usage_id = await ai_usage.reserve(feature, name, chosen, workspace_id, input_tokens + max_tokens, bucket=bucket)
         started = time.monotonic()
         error = None; data = {}; result = ""; tin = input_tokens; tout = 0; retry = False
         try:

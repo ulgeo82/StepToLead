@@ -261,7 +261,7 @@ async def audit_ai(project_id: int, request: Request, db: AsyncSession = Depends
                                                    for f in data.get("findings", [])[:8]]}
     try:
         text_ = await ai.complete(AUDIT_PROMPT, [{"role": "user", "content": json.dumps(compact, ensure_ascii=False)}],
-                                  max_tokens=500, temperature=0.2, feature="summary", workspace_id=project.workspace_id)
+                                  max_tokens=500, temperature=0.2, feature="summary", workspace_id=project.workspace_id, bucket="agency")
     except ai.AIError as exc:
         raise HTTPException(409, str(exc)) from None
     result = {"text": text_.strip()[:2000], "date": today}

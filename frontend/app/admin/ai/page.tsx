@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { AdminTokensConfig } from "@/components/ai-tokens";
 
 type FunctionState = {feature: string; provider: string; model: string; key_set: boolean; configured: boolean};
 type Overview = {functions: FunctionState[]; stt: FunctionState; limits: {global: number; workspace: number}; workspaces: {id: number; name: string}[]};
@@ -10,7 +11,7 @@ const names: Record<string, string> = {chat: "Подсказка ответа", 
 type Field = {source: "portal" | "env" | null; value?: string; effective?: string | number; set?: boolean; hint?: string};
 type Fields = Record<string, Field>;
 const PROVIDERS = [["", "Не подключать"], ["anthropic", "Claude (Anthropic)"], ["openai", "OpenAI (ChatGPT)"], ["yandex", "YandexGPT"], ["openai_compatible", "Другой (OpenAI-совместимый API)"]];
-const SECRETS = new Set(["llm_api_key", "stt_api_key", "XMLSTOCK_KEY", "DADATA_TOKEN"]);
+const SECRETS = new Set(["llm_api_key", "stt_api_key", "XMLSTOCK_KEY", "DADATA_TOKEN", "YOOKASSA_SECRET_KEY"]);
 
 function ConnectionSettings({onSaved}: {onSaved: () => void}) {
   const [fields, setFields] = useState<Fields | null>(null);
@@ -62,6 +63,9 @@ function ConnectionSettings({onSaved}: {onSaved: () => void}) {
     <h3>Лидогенерация</h3>
     {input("XMLSTOCK_USER", "XMLStock: пользователь")}{input("XMLSTOCK_KEY", "XMLStock: ключ")}{input("XMLSTOCK_LIVE_URL", "XMLStock: адрес Live", "https://xmlstock.com/yandexlive/xml/")}
     {input("DADATA_TOKEN", "DaData: токен")}
+    <h3>Оплата токенов клиентами (ЮKassa)</h3>
+    {input("YOOKASSA_SHOP_ID", "ЮKassa: shopId")}{input("YOOKASSA_SECRET_KEY", "ЮKassa: секретный ключ")}
+    <small>Адрес для уведомлений в кабинете ЮKassa: https://portal.steptolead.ru/api/public/yookassa (событие payment.succeeded).</small>
     {error && <p role="alert" className="crmFormError">{error}</p>}{message && <p className="aiSaved">{message}</p>}
     <button className="button primary" disabled={busy} onClick={save}>{busy ? "Сохраняем…" : "Сохранить"}</button>
   </section>;
@@ -101,6 +105,7 @@ export default function AIPage() {
   return <div className="page aiPage"><header className="topbar"><div className="crumbs"><span>StepToLead</span><b>/</b><strong>ИИ: подключение и расход</strong></div></header>
     <section className="pageHeader"><div><p className="eyebrow">Сервис</p><h1>ИИ: подключение и расход</h1><p className="subtitle">Ключи и модели задаются здесь, без правки сервера. Проверки платные. Используйте вымышленные данные. Периоды расхода — по UTC.</p></div></section>
     {error && <p role="alert" className="crmFormError">{error}</p>}
+    <AdminTokensConfig />
     <ConnectionSettings onSaved={reload} />
     <section className="panel"><h2>Проверка</h2>
       <label>Компания для текстовых проверок <select value={workspace} onChange={e => setWorkspace(e.target.value)}><option value="">Без компании</option>{data?.workspaces.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}</select></label>

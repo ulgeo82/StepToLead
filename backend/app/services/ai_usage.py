@@ -1,4 +1,5 @@
 """Durable, independent usage transactions. Reservations serialize admission on PostgreSQL."""
+import logging
 import math
 from contextvars import ContextVar
 from datetime import datetime, timedelta, timezone
@@ -15,7 +16,7 @@ def estimate(value: str) -> int:
     return math.ceil(len(value) / 3)
 
 
-async def reserve(feature, provider, model, workspace_id=None, tokens=0, audio_seconds=0, check_limits=True):
+async def reserve(feature, provider, model, workspace_id=None, tokens=0, audio_seconds=0, check_limits=True, bucket="client"):
     from app.services.ai import AIError
     async with (session_factory.get() or SessionLocal)() as db:
         if db.bind.dialect.name == "postgresql":
@@ -31,7 +32,16 @@ async def reserve(feature, provider, model, workspace_id=None, tokens=0, audio_s
                           error="Дневной лимит ИИ исчерпан", ok=False)
             db.add(row); await db.commit()
             raise AIError("Дневной лимит ИИ исчерпан")
-        row = AiUsage(feature=feature, provider=provider, model=model, workspace_id=workspace_id,
+        if check_limits:
+            from app.services import ai_tokens
+            try:
+                await ai_tokens.admit(db, workspace_id, bucket, tokens)
+            except AIError as exc:
+                db.add(AiUsage(feature=feature, provider=provider, model=model, workspace_id=workspace_id,
+                               bucket=bucket, error=str(exc)[:240], ok=False))
+                await db.commit()
+                raise
+        row = AiUsage(feature=feature, provider=provider, model=model, workspace_id=workspace_id, bucket=bucket,
                       tokens_in=tokens, tokens_out=0, audio_seconds=audio_seconds, error="Запрос выполняется")
         db.add(row); await db.commit()
         if captured.get() is not None:
@@ -47,6 +57,14 @@ async def finish(usage_id, *, tokens_in=0, tokens_out=0, duration_ms=0, error=No
         if audio_seconds is not None:
             row.audio_seconds = audio_seconds
         await db.commit()
+        if row.workspace_id is not None and row.bucket != "agency":
+            from app.services import ai_tokens
+            try:  # учёт пакета не должен ломать сам ИИ-запрос
+                await ai_tokens.settle(db, row.workspace_id)
+                await db.commit()
+            except Exception:
+                await db.rollback()
+                logging.getLogger("uvicorn.error.ai_usage").exception("ai tokens settle failed")
 
 
 async def report(db, days=1):

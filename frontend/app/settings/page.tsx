@@ -8,6 +8,7 @@ import { PushCard } from "@/components/pwa";
 import { TelegramCard } from "@/components/telegram-card";
 import { RequisitesCard } from "@/components/crm/documents";
 import { ClientPlanCard } from "@/components/plan-cards";
+import { TokensCard } from "@/components/ai-tokens";
 import LinkBrief from "@/components/brief-settings-link";
 import { api } from "@/lib/api";
 import { money, ProjectSidebar } from "@/components/reporting";
@@ -35,11 +36,12 @@ type Settings = { company: Company; project: Project; economics: { name: string;
   average_check: number | null; margin: number | null; allowable_cac: number | null } | null;
   reasons: Reason[]; sources: Source[]; notifications: Rule[]; permissions: string[];
   members: Member[]; telegram_bot_configured: boolean; pipelines?: { id: number; name: string; is_default: boolean }[] };
-type Tab = "company" | "project" | "funnel" | "sources" | "integrations" | "notifications";
+type Tab = "company" | "project" | "funnel" | "sources" | "integrations" | "notifications" | "tokens";
 const tabs: { key: Tab; label: string; icon: string }[] = [
   { key: "company", label: "Компания", icon: "▣" }, { key: "project", label: "Проект", icon: "◇" },
   { key: "funnel", label: "Воронка", icon: "▽" }, { key: "sources", label: "Источники", icon: "♧" },
   { key: "integrations", label: "Подключения", icon: "⇄" }, { key: "notifications", label: "Уведомления", icon: "♧" },
+  { key: "tokens", label: "ИИ-токены", icon: "✦" },
 ];
 const sourceKind: Record<string, string> = { INTEGRATION: "Интеграция", INTERNAL: "Внутренний", CUSTOM: "Кастомный", MANUAL: "Ручной" };
 const dateTime = (value: string) => new Date(value).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -64,12 +66,12 @@ export default function SettingsPage() {
     setProjectId(rows.find(item => item.id === desired)?.id || rows[0]?.id || null);
     const anchor = window.location.hash.slice(1);
     const fromHash: Record<string, Tab> = { telegram: "notifications", notifications: "notifications", economics: "project",
-      sources: "sources", integrations: "integrations", funnel: "funnel", requisites: "company" };
+      sources: "sources", integrations: "integrations", funnel: "funnel", requisites: "company", tokens: "tokens" };
     if (fromHash[anchor]) setTab(fromHash[anchor]);
   }).catch(e => setError(e.message)); }, []);
   useEffect(() => {
     const fromHash: Record<string, Tab> = { telegram: "notifications", notifications: "notifications", economics: "project",
-      sources: "sources", integrations: "integrations", funnel: "funnel", requisites: "company" };
+      sources: "sources", integrations: "integrations", funnel: "funnel", requisites: "company", tokens: "tokens" };
     const onHash = () => { const tab = fromHash[window.location.hash.slice(1)]; if (tab) setTab(tab); };
     window.addEventListener("hashchange", onHash); return () => window.removeEventListener("hashchange", onHash);
   }, []);
@@ -88,7 +90,7 @@ export default function SettingsPage() {
   const canIntegrations = data?.permissions.includes("manage_integrations") || false;
   const canSales = data?.permissions.includes("manage_pipeline") || false;
   // Источники и подключения настраивает StepToLead; РОП видит воронку, причины и рабочее время.
-  const visibleTabs = tabs.filter(item => item.key === "sources" ? canSources : item.key === "integrations" ? canIntegrations
+  const visibleTabs = tabs.filter(item => item.key === "tokens" ? true : item.key === "sources" ? canSources : item.key === "integrations" ? canIntegrations
     : item.key === "company" || item.key === "notifications" ? canSettings : canSettings || canSales);
   useEffect(() => { if (data && visibleTabs.length && !visibleTabs.some(item => item.key === tab)) setTab(visibleTabs[0].key); }, [data, tab, visibleTabs]);
   useEffect(() => { const warn = (event: BeforeUnloadEvent) => { if (dirty) { event.preventDefault(); event.returnValue = ""; } };
@@ -157,6 +159,7 @@ export default function SettingsPage() {
           catch (err) { setError(err instanceof Error ? err.message : "Не удалось сохранить"); } finally { setSaving(""); } }}>
           <option value="">{`Основная${data.pipelines?.find(p => p.is_default) ? ` (${data.pipelines.find(p => p.is_default)!.name})` : ""}`}</option>{data.pipelines!.filter(p => !p.is_default).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></td>}<td>{source.connection_id ? <Link href={`/ads?project_id=${projectId}`}>Управлять в рекламе →</Link> : canSources ? <button className="settingsTextButton" onClick={() => save(`/sources/${source.id.split(":")[1]}`, { status: source.status === "archived" ? "active" : "archived" }, source.status === "archived" ? "Источник восстановлен." : "Источник архивирован; история сохранена.")}>{source.status === "archived" ? "Восстановить" : "Архивировать"}</button> : "—"}</td></tr>)}</tbody></table>{!sourceList.length && <p className="resultTableEmpty">Источники проекта ещё не добавлены.</p>}</div></section>}
         {tab === "integrations" && projectId && <><IntegrationsCard projectId={projectId}/><ConversionsCard projectId={projectId}/><AiSettingsCard projectId={projectId}/><LinkBrief projectId={projectId}/></>}
+        {tab === "tokens" && <TokensCard/>}
         {tab === "notifications" && <><PushCard/><TelegramCard configured={data.telegram_bot_configured} onChanged={() => setRevision(value => value + 1)}/><section className="resultPanel settingsCard"><h2>Уведомления</h2><p>Событие → кому → канал доставки. Для новых лидов и продаж можно выбрать участников проекта; доставка — в кабинет StepToLead и в Telegram.</p><div className="settingsRules">{data.notifications.map(rule => <RuleRow key={rule.key} rule={rule} members={data.members} botConfigured={data.telegram_bot_configured} canSettings={canSettings} saving={saving} onSave={value => save(`/notifications/${rule.key}`, value, "Правило сохранено.")}/>)}</div><div className="settingsChannels"><span><i className="on"/> Внутри StepToLead</span><span><i className={data.telegram_bot_configured ? "on" : ""}/> Telegram — {data.telegram_bot_configured ? "бот подключён" : "бот не настроен на сервере"}</span><span><i/> Email — не подключён</span></div></section></>}
       </div>}
       {reasonModal && <div className="resultModalBackdrop" onMouseDown={event => { if (event.target === event.currentTarget) setReasonModal(false); }}><form className="resultModal" onSubmit={submitReason}><header><h2>Добавить причину потери</h2><button type="button" onClick={() => setReasonModal(false)}>×</button></header><label>Название<input name="label" minLength={2} maxLength={160} required/></label><button className="resultPrimary" disabled={!!saving}>Сохранить</button></form></div>}

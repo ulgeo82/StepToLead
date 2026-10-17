@@ -1,5 +1,5 @@
 from app.models.campaign import Campaign
-from app.models.ai import AiUsage
+from app.models.ai import AiUsage, AiTokenAccount, AiTokenPurchase
 from app.models.access import AdminUser, AdminSession, GrowthCalculation
 from app.models.lead import Lead, LeadStatus
 from app.models.proxy import Proxy

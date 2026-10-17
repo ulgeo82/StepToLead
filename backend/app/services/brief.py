@@ -216,7 +216,7 @@ async def apply_to_ai(db, brief, project, *, apply=False):
         content = json.dumps(answers, ensure_ascii=False)
         full_input(prompt, content)
         raw = await ai.complete(prompt, [{"role": "user", "content": content}], feature="summary",
-            workspace_id=project.workspace_id, max_tokens=4096, validator=validate_knowledge)
+            workspace_id=project.workspace_id, max_tokens=4096, validator=validate_knowledge, bucket="reserve")
         data = validate_knowledge(raw)
     else:
         data = fallback_knowledge(answers)
@@ -263,7 +263,7 @@ async def import_answers(text, workspace_id):
                 {k:{"вопрос":q["label"],"подсказка":q["hint"]} for k,q in QUESTIONS.items() if q.get("type") != "funnels"}, ensure_ascii=False)
         full_input(prompt, text)
         raw = await ai.complete(prompt,
-            [{"role": "user", "content": text}], feature="summary", workspace_id=workspace_id, max_tokens=4096)
+            [{"role": "user", "content": text}], feature="summary", workspace_id=workspace_id, max_tokens=4096, bucket="reserve")
         return clean_answers(parse_json(raw))
     # Read our Markdown export or labelled answers. Unknown prose stays visible
     # for manual classification; never guess facts into another question.

@@ -32,6 +32,8 @@ FIELDS = {
     "XMLSTOCK_KEY": ("env", True, str),
     "XMLSTOCK_LIVE_URL": ("env", False, str),
     "DADATA_TOKEN": ("env", True, str),
+    "YOOKASSA_SHOP_ID": ("env", False, str),
+    "YOOKASSA_SECRET_KEY": ("env", True, str),
 }
 _original: dict[str, object] = {}
 

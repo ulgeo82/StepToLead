@@ -1,0 +1,45 @@
+/* ИИ-токены: бар остатка у клиента и панели агентства */
+.tokCard{display:flex;flex-direction:column;gap:12px}
+.tokCard p{margin:0}
+.tokChip{flex:none;padding:7px 12px;border-radius:999px;background:#e8f7ed;color:#187745;font-size:12px;font-weight:700;white-space:nowrap}
+.tokChip.warn,.tokChip.low{background:#fff3e2;color:#9a5a0c}.tokChip.empty{background:#fdeceb;color:#b42318}
+.tokBig{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.tokBig strong{font-size:30px;font-weight:800;letter-spacing:-.8px;color:#101b31}.tokBig span{font-size:13px;color:#687b98}
+.tokMeter{height:10px;border-radius:999px;background:#e7edf5;overflow:hidden}
+.tokMeter i{display:block;height:100%;border-radius:999px;background:#006bfd;transition:width .4s ease}
+.tokMeter.low i{background:#f59e0b}.tokMeter.empty i{background:#d92d20}
+.tokCard p.tokForecast,.tokForecast{font-size:13px;color:#40536f;line-height:1.45;margin:0}
+.tokCard p.tokForecast.warn,.tokForecast.warn{color:#9a5a0c;font-weight:600}
+.tokCard p.tokAlert,.tokAlert{margin:0;padding:10px 12px;border-radius:9px;background:#fff5e8;color:#9a5a0c;font-size:13px;font-weight:600}
+.tokCard p.tokAlert.empty{background:#fdeceb;color:#b42318}
+.tokFacts{margin:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px}
+.tokFacts div{padding:10px 12px;border-radius:10px;background:#f4f7fc}
+.tokFacts dt{font-size:11px;color:#687b98}.tokFacts dd{margin:3px 0 0;font-size:15px;font-weight:700;color:#101b31}
+.tokSub{margin:6px 0 0;font-size:14px}
+.tokPacks{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px}
+.tokPacks button{display:flex;flex-direction:column;align-items:flex-start;gap:3px;padding:14px;border:1.5px solid #dfe7f2;border-radius:12px;background:#fff;color:#101b31;font:inherit;text-align:left;cursor:pointer;min-height:44px}
+.tokPacks button:hover:not(:disabled){border-color:#006bfd;background:#f2f7ff}.tokPacks button:disabled{opacity:.6;cursor:wait}
+.tokPacks b{font-size:15px}.tokPacks span{font-size:14px;font-weight:700;color:#006bfd}.tokPacks small{font-size:11px;color:#6f829d}
+.tokNote{font-size:12px;color:#6f829d}
+.tokCard p.tokOk,.tokOk{margin:0;padding:10px 12px;border-radius:9px;background:#e8f7ed;color:#187745;font-size:13px}
+.tokCard p.tokError,.tokError{margin:0;color:#b42318;font-size:13px}
+.tokHistory{list-style:none;margin:4px 0 0;padding:0;display:flex;flex-direction:column}
+.tokHistory li{display:grid;grid-template-columns:90px 1fr auto auto;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid #eaf0f7;font-size:12px;color:#40536f}
+.tokHistory li:last-child{border-bottom:0}.tokHistory b{color:#101b31}
+.tokHistory em{font-style:normal;font-size:11px;padding:3px 8px;border-radius:999px;background:#eef1f6}
+.tokHistory em.paid{background:#e8f7ed;color:#187745}.tokHistory em.pending{background:#fff3e2;color:#9a5a0c}
+.tokAdmin h3{margin:18px 0 8px;font-size:15px}
+.tokTable{overflow-x:auto}.tokTable table{width:100%;border-collapse:collapse;font-size:13px}
+.tokTable th{text-align:left;padding:8px;color:#687b98;font-weight:600;border-bottom:1px solid #e6ecf6}
+.tokTable td{padding:6px 8px;border-bottom:1px solid #f0f3f8}
+.tokAdmin input{width:100%;max-width:160px;min-height:36px;padding:6px 9px;border:1px solid #d8e2f0;border-radius:8px;font:inherit;font-size:13px}
+.tokPackEdit{display:flex;flex-direction:column;gap:8px}
+.tokPackEdit>div{display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px}
+.tokPackEdit label,.tokWarn{display:flex;flex-direction:column;gap:4px;font-size:12px;color:#657792}
+.tokWarn{margin:12px 0}
+.tokPending{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.tokPending li{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:10px 12px;border:1px solid #e6ecf6;border-radius:10px;font-size:13px}
+.tokPending small{color:#6f829d}
+.tokAdmin .tokMeter{margin:10px 0 6px}
+.tokAdmin .tokFacts{margin:12px 0}
+@media (max-width:640px){.tokHistory li{grid-template-columns:1fr auto}.tokBig strong{font-size:26px}}
