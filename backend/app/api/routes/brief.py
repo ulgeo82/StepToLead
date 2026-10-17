@@ -242,7 +242,9 @@ async def apply(project_id: int, brief_id: int, db: AsyncSession = Depends(get_d
     row, project = await owned(db, user, project_id, brief_id)
     if row.status != "applied": raise HTTPException(409, "Сначала подтвердите бриф")
     await service.apply_to_ai(db, row, project, apply=True)
-    return await saved_output(db, row)
+    workspace = await db.get(ClientWorkspace, project.workspace_id)
+    crm = await apply_to_crm(db, row, project, workspace)
+    return {**(await saved_output(db, row)), "crm": crm}
 
 
 @router.get("/brief/projects/{project_id}/{brief_id}/funnels")
@@ -365,8 +367,8 @@ async def transfer(brief_id: int, payload: TransferIn, request: Request, db: Asy
         raise HTTPException(409, "Согласуйте предпросмотр для выбранного проекта")
     await service.apply_to_ai(db, row, project, apply=True)
     row.project_id = project.id; row.workspace_id = project.workspace_id
-    await apply_to_crm(db, row, project, workspace)
-    return await saved_output(db, row)
+    crm = await apply_to_crm(db, row, project, workspace)
+    return {**(await saved_output(db, row)), "crm": crm}
 
 
 async def apply_to_crm(db, row, project, workspace):
@@ -374,8 +376,12 @@ async def apply_to_crm(db, row, project, workspace):
     Заполняем только пустое, ручные настройки не перетираем."""
     from app.services import brief_funnels
     directions = brief_funnels.parse(row.answers.get(brief_funnels.KEY))
+    notes = []
     if directions:
         await brief_funnels.plan(db, project, directions, apply=True)
+        notes.append(f"воронки CRM: {', '.join(d.get('name') or 'Основная' for d in directions)}")
+    else:
+        notes.append("направления в разделе «Продажи» не заполнены — воронки CRM не созданы")
     site = (row.answers.get("mkt.site") or "").strip()
     if site and not workspace.website:
         workspace.website = (site if site.startswith("http") else f"https://{site}")[:500]
@@ -386,6 +392,10 @@ async def apply_to_crm(db, row, project, workspace):
         state["baseline"] = {**service.baseline_from_answers(row.answers),
                              **{k: v for k, v in (state.get("baseline") or {}).items() if v is not None}}
         project.portal_state = state
+        notes.append("стартовые цифры для «Результата»")
+    if site:
+        notes.append("сайт компании")
+    return {"pipelines": len(directions), "note": "; ".join(notes)}
 
 
 

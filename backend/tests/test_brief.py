@@ -174,6 +174,29 @@ class BriefTests(unittest.TestCase):
         self.client.put(f"/api/brief/projects/1/{row['id']}",headers=test_stage2.ORIGIN,json={"answers":changed})
         self.assertEqual(self.client.post(f"/api/brief/projects/1/{row['id']}/apply",headers=test_stage2.ORIGIN).status_code,409)
 
+    def test_apply_creates_crm_pipelines_and_company_site(self):
+        from sqlalchemy import select
+        from app.models.crm import CrmPipeline
+        from app.models.marketing import ClientWorkspace
+        self.as_user(1)
+        answers={**self.answers,"mkt.site":"lana-online.ru","sales.funnels":json.dumps({"directions":[{"id":"r","name":"Ремонт под ключ",
+                 "stages":["Квалифицирован","Замер","Договор"],"qualified_from":0}]},ensure_ascii=False)}
+        row=self.client.post("/api/brief/projects/1",headers=test_stage2.ORIGIN,json={"answers":answers}).json()
+        data={"knowledge":"Только факты компании","tone":"На вы","goal":"Уточнить","checklist":[]}
+        with patch.object(ai,"configured",return_value=True),patch.object(ai,"complete",AsyncMock(return_value=json.dumps(data))):
+            self.assertEqual(self.client.post(f"/api/brief/projects/1/{row['id']}/preview",headers=test_stage2.ORIGIN).status_code,200)
+        self.assertEqual(self.client.post(f"/api/brief/projects/1/{row['id']}/confirm",headers=test_stage2.ORIGIN).status_code,200)
+        applied=self.client.post(f"/api/brief/projects/1/{row['id']}/apply",headers=test_stage2.ORIGIN)
+        self.assertEqual(applied.status_code,200,applied.text)
+        self.assertEqual(applied.json()["crm"]["pipelines"],1)
+        self.assertIn("Ремонт под ключ",applied.json()["crm"]["note"])
+        async def check(db):
+            names=(await db.scalars(select(CrmPipeline.name).where(CrmPipeline.project_id==1))).all()
+            return names,(await db.get(ClientWorkspace,1)).website
+        names,website=self.run_db(check)
+        self.assertIn("Ремонт под ключ",names)
+        self.assertEqual(website,"https://lana-online.ru")
+
     def test_portal_scope_and_upload_md_docx(self):
         self.as_user(1)
         md=brief.markdown({"company.activity":"Стоматология","ai.tone":"На вы"})
