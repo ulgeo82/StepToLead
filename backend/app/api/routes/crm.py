@@ -238,6 +238,8 @@ def deal_json(deal: CrmDeal, contact: CrmContact, stage: CrmStage, task: CrmTask
             "source_id": deal.source_id, "source_name": source_name, "responsible_name": owner_name,
             "origin": deal.origin, "custom_fields": deal.custom_fields or {},
             "attribution_snapshot": deal.attribution_snapshot or {}, "lost_reason_id": deal.lost_reason_id,
+            "site_form": (deal.attribution_snapshot or {}).get("stl_form"),
+            "site_source": (deal.attribution_snapshot or {}).get("stl_source"),
             "archived_at": deal.archived_at, "created_at": deal.created_at, "updated_at": deal.updated_at,
             "tags": deal.tags or [], "stage_entered_at": deal.stage_entered_at,
             "days_in_stage": days_since(deal.stage_entered_at or deal.created_at),

@@ -207,8 +207,9 @@ async def _receive_tilda(public_id: str, request: Request, db: AsyncSession):
     form_id = _value(fields, "formid", "blockid")
     if form_id and form_id.isdigit():
         form_id = f"form{form_id}"
-    if form_id != row.allowed_form_id:
-        raise HTTPException(422, "Форма не разрешена для подключения")
+    # Один вебхук на весь сайт: принимаем любую форму этого сайта (подлинность — по секрету подключения).
+    if not form_id or not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", form_id):
+        raise HTTPException(422, "Не указан идентификатор формы")
     tranid = _value(fields, "tranid", "transactionid", "externalid")
     if not tranid or len(tranid) > 180:
         raise HTTPException(422, "Отсутствует tranid")
@@ -237,8 +238,12 @@ async def _receive_tilda(public_id: str, request: Request, db: AsyncSession):
     session_key = _value(fields, "websitesessionkey", "sessionkey")
     if session_key and not re.fullmatch(r"[A-Za-z0-9_-]{16,64}", session_key):
         session_key = None
+    # Метки скрипта сайта: какая форма и на какую услугу/кнопку откликнулся человек.
+    stl_form = (_value(fields, "stlform") or "")[:120] or None
+    stl_source = (_value(fields, "stlsource") or "")[:120] or None
+    form_name = stl_form or (row.form_name if form_id == row.allowed_form_id else f"Форма {form_id}")
     normalized = {"source": "tilda", "external_source": "tilda", "external_id": tranid,
-        "form_id": form_id, "form_name": row.form_name, "name": name, "contact_method": method,
+        "form_id": form_id, "form_name": form_name, "stl_form": stl_form, "stl_source": stl_source, "name": name, "contact_method": method,
         "contact": contact, "website": (_value(fields, *WEBSITE_FIELDS) or _value_like(fields, ("сайт", "website")) or "")[:500] or None,
         "comment": _value(fields, "comments", "comment", "message", "комментарий"),
         "website_session_key": session_key,
@@ -256,8 +261,10 @@ async def _receive_tilda(public_id: str, request: Request, db: AsyncSession):
         raise HTTPException(422, "Некорректные поля заявки") from exc
     connection_id, organization_id, project_id = row.id, row.organization_id, row.project_id
     try:
+        # Метки — только подписи для оператора, на атрибуцию рекламы и проверку подключений не влияют.
         result = await create_inbound(db, source, payload, site_id=row.website_id,
-                                      commit=False, allow_raw_contact=True)
+                                      commit=False, allow_raw_contact=True,
+                                      attribution_extra={"stl_form": stl_form, "stl_source": stl_source})
         inbound_id = result.get("inbound_id")
         if inbound_id is None:
             raise HTTPException(409, "Входящая заявка уже обработана")

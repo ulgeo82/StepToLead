@@ -177,6 +177,9 @@ export function DealCard({ dealId, projectId, pipelines, team, sources, fields, 
           {can("archive_deal") && (deal.archived_at || closed) && <button className="crmLinkButton" disabled={busy} onClick={() => run(() => request(`/crm/deals/${dealId}/${deal.archived_at ? "restore" : "archive"}`, "POST", {}), deal.archived_at ? "Сделка возвращена из архива" : "Сделка перенесена в архив")}>{deal.archived_at ? "Вернуть из архива" : "Перенести в архив"}</button>}</div>
 
         <div className="crmBlock"><h3>Откуда клиент</h3><p><b>{deal.source_name || "Источник не определён"}</b></p>
+          {Boolean(form.external_source === "tilda" || snap.stl_form || snap.stl_source || form.stl_form || form.stl_source) && <>
+            <p className="crmKV"><span>Форма</span>{String(snap.stl_form || form.stl_form || form.form_name || "не указано")}</p>
+            <p className="crmKV"><span>Откликнулся на</span>{String(snap.stl_source || form.stl_source || "не указано")}</p></>}
           {[["platform", "Платформа"], ["ad_account", "Кабинет"], ["utm_source", "utm_source"], ["utm_medium", "utm_medium"], ["utm_campaign", "Кампания"], ["utm_content", "Объявление"], ["utm_term", "Ключ"], ["landing_url", "Страница"], ["referer", "Откуда перешёл"]].map(([key, label]) => {
             const raw = snap[key] || form[key] || (key === "landing_url" ? form.page_url : null);
             const value = key === "platform" && raw ? platformNames[String(raw)] || raw : raw;

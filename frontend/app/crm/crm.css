@@ -13,3 +13,7 @@
 .crmColumn header[draggable=true]{cursor:grab}
 .crmInboundModal{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:60;width:min(640px,calc(100vw - 32px));max-height:85vh;overflow:auto;background:#fff;border-radius:14px;padding:20px;box-shadow:0 20px 60px rgba(16,32,64,.25)}
 .crmInboundModal .crmClose{position:absolute;top:10px;right:12px}
+
+.crmSiteLabel{display:block;color:#1e5fe0!important;font-weight:600}
+.crmSiteLabel b{font-weight:700}
+td .crmSiteLabel{display:inline}

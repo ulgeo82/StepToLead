@@ -10,6 +10,7 @@ export type Activity = { id: string | number; event_type: string; actor_name: st
 export type Deal = { id: number; name: string; amount: number | null; contact: Contact; lead_id: number | null;
   stage_id: number; stage_name: string; pipeline_id: number; analytics_type: string; source_id: number | null;
   responsible_user_id: number | null; origin: string; source_name?: string | null; responsible_name?: string | null;
+  site_form?: string | null; site_source?: string | null;
   custom_fields: Record<string, unknown>; attribution_snapshot: Record<string, unknown>; task_state: string;
   next_task: Task | null; created_at: string; archived_at?: string | null; tags: string[];
   days_in_stage: number | null; idle_days: number | null; first_response_at?: string | null;

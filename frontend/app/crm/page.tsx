@@ -263,6 +263,7 @@ export default function CrmPage() {
             <small>{[item.phone, item.email, typeof p.contact === "string" && !String(p.contact).startsWith("http") ? p.contact : null].filter(Boolean).join(" · ") || "Контакт не указан"}{p.contact_method ? ` · ${String(p.contact_method)}` : ""}</small>
             <small>{String(p.external_source || p.source || "Интеграция")}{p.item_title ? ` · ${String(p.item_title)}` : ""}{p.utm_source ? ` · ${String(p.utm_source)}${p.utm_campaign ? ` / ${String(p.utm_campaign)}` : ""}` : ""} · {when(item.received_at)}
               {status === "NEW" && <b className={minutesAgo > 15 ? "crmBad" : "crmGood"}> · ждёт {minutesAgo < 60 ? `${minutesAgo} мин` : `${Math.round(minutesAgo / 60)} ч`}</b>}</small>
+            {p.external_source === "tilda" && <small className="crmSiteLabel">Форма: <b>{String(p.stl_form || p.form_name || "не указано")}</b> · Откликнулся на: <b>{String(p.stl_source || "не указано")}</b></small>}
             {Boolean(p.notes || p.comment) && <p className="crmPre">{String(p.notes || p.comment)}</p>}
             {Boolean(p.brief_answers) && typeof p.brief_answers === "object" && <details><summary>📎 Оценка / бриф — все ответы</summary>{Object.entries(p.brief_answers as Record<string,unknown>).map(([key,value])=><p key={key}><strong>{(p.brief_labels as Record<string,string>|undefined)?.[key]||key}</strong><br/>{String(value)}</p>)}{p.express_calculation&&typeof p.express_calculation==="object"?<p>Предел цены заявки: {String((p.express_calculation as Record<string,unknown>).limit_cpl??"не рассчитан")} · Сейчас: {String((p.express_calculation as Record<string,unknown>).current_cpl??"не указано")}</p>:null}</details>}
             {p.brief_demo_access&&typeof p.brief_demo_access==="object"?<div><strong>Доступ к демо</strong><p>Логин: {String((p.brief_demo_access as Record<string,string>).username)}</p><a href={String((p.brief_demo_access as Record<string,string>).login_url)}>Войти в демо</a> · <a href={String((p.brief_demo_access as Record<string,string>).reset_url)}>Сбросить пароль</a><small>Сброс через подключённый Telegram. Если бот ещё не подключён, доступ перевыпускает администратор в карточке клиента.</small></div>:null}
@@ -286,12 +287,14 @@ export default function CrmPage() {
       <span className="crmCardTop"><span className="crmCardName">{item.name || "Без имени"}</span><b className={minutesAgo > 15 ? "crmBad" : "crmGood"}>{minutesAgo < 60 ? `${minutesAgo} мин` : minutesAgo < 1440 ? `${Math.round(minutesAgo / 60)} ч` : `${Math.round(minutesAgo / 1440)} дн`}</b></span>
       <small>{[item.phone, item.email].filter(Boolean).join(" · ") || String(p.contact || "Контакт не указан")}</small>
       {Boolean(p.notes || p.comment) && <small className="crmInboundPreview">{String(p.notes || p.comment).slice(0, 90)}</small>}
+      {Boolean(p.stl_source) && <small className="crmSiteLabel">↳ {String(p.stl_source)}</small>}
       <small>{String(p.contact_method || p.external_source || p.source || "Интеграция")}{item.potential_duplicates.length ? " · есть похожий клиент" : ""}</small></button>; };
   const card = (deal: Deal) => <button draggable={!archived && can("move_deal")} onDragStart={e => e.dataTransfer.setData("text/plain", String(deal.id))}
     className={`crmCard ${(deal.idle_days ?? 0) >= 3 && deal.analytics_type !== "WON" && deal.analytics_type !== "LOST" ? "idle" : ""}`} key={deal.id} onClick={() => setDealId(deal.id)}>
     <span className="crmCardTop"><span className="crmCardName">{deal.contact.name}</span><strong>{money(deal.amount)}</strong></span>
     <small>{deal.name}</small>
     {deal.tags?.length > 0 && <span className="crmCardTags">{deal.tags.slice(0, 3).map(t => <i key={t}>#{t}</i>)}</span>}
+    {deal.site_source && <small className="crmSiteLabel" title={deal.site_form || undefined}>↳ {deal.site_source}</small>}
     <small>{deal.source_name || "Источник не определён"} · {deal.responsible_name || "Не назначен"}</small>
     <span className="crmCardFoot"><span className={`crmTaskBadge ${deal.task_state.toLowerCase()}`}>{stateLabels[deal.task_state]}{deal.next_task ? ` · ${when(deal.next_task.due_at)}` : ""}</span>
       <span className="crmCardAge" title="Дней на этапе">{days(deal.days_in_stage)}</span></span></button>;
@@ -351,7 +354,7 @@ export default function CrmPage() {
             {allDeals.map(deal => <tr key={deal.id} className={selectedIds.includes(deal.id) ? "selected" : ""} onClick={() => setDealId(deal.id)}>
               <td onClick={e => e.stopPropagation()}><input type="checkbox" checked={selectedIds.includes(deal.id)} onChange={e => setSelectedIds(ids => e.target.checked ? [...ids, deal.id] : ids.filter(id => id !== deal.id))}/></td>
               <td><b>{deal.name}</b>{deal.tags?.length > 0 && <small className="crmInlineTags">{deal.tags.map(t => `#${t}`).join(" ")}</small>}</td><td>{deal.contact.name}</td><td>{deal.stage_name}</td><td>{money(deal.amount)}</td>
-              <td>{deal.responsible_name || "—"}</td><td>{deal.source_name || "—"}</td><td className={(deal.idle_days ?? 0) >= 3 ? "crmBad" : ""}>{days(deal.days_in_stage)}</td>
+              <td>{deal.responsible_name || "—"}</td><td>{deal.source_name || "—"}{deal.site_source && <small className="crmSiteLabel"> ↳ {deal.site_source}</small>}</td><td className={(deal.idle_days ?? 0) >= 3 ? "crmBad" : ""}>{days(deal.days_in_stage)}</td>
               <td><span className={`crmTaskBadge ${deal.task_state.toLowerCase()}`}>{stateLabels[deal.task_state]}</span>{deal.next_task && <small> {when(deal.next_task.due_at)}</small>}</td></tr>)}</tbody></table>
             {!allDeals.length && <p className="crmEmpty">Сделок по фильтру нет</p>}</div>}
         <div className="crmPager"><button disabled={page <= 1} onClick={() => setPage(page - 1)}>← Назад</button><span>Страница {page}</span><button disabled={!board?.columns.some(c => c.has_more)} onClick={() => setPage(page + 1)}>Далее →</button></div></>}

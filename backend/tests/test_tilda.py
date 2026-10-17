@@ -119,9 +119,16 @@ class TildaTests(unittest.TestCase):
         row = self.inbound(response.json()["inbound_id"])
         self.assertIsNone(row.website_session_id)
         self.assertEqual(row.attribution, {})
+        other = self.client.post(self.webhook, headers=self.headers,  # любая форма сайта через общий вебхук
+            data=self.form(tranid="other", formid="form-other", stl_form="Форма попапа Яндекс Реклама", stl_source="Яндекс Реклама"))
+        self.assertEqual(other.status_code, 200, other.text)
+        marked = self.inbound(other.json()["inbound_id"])
+        self.assertEqual((marked.raw_payload["stl_form"], marked.raw_payload["stl_source"]), ("Форма попапа Яндекс Реклама", "Яндекс Реклама"))
+        self.assertEqual(marked.raw_payload["form_name"], "Форма попапа Яндекс Реклама")
+        self.assertEqual(marked.attribution["stl_source"], "Яндекс Реклама")
         self.assertEqual(self.client.post(self.webhook, headers=self.headers,
-            data=self.form(tranid="other", formid="form-other")).status_code, 422)
-        self.assertEqual(self.count(), 1)
+            data=self.form(tranid="noform", formid="")).status_code, 422)
+        self.assertEqual(self.count(), 2)
         disabled = self.client.patch(f"/api/integrations/tilda/connections/{self.connection['id']}",
             headers={"Origin": "http://localhost:3000"}, json={"is_active": False})
         self.assertEqual(disabled.status_code, 200, disabled.text)
