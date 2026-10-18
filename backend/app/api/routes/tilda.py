@@ -145,8 +145,14 @@ KNOWN_FIELDS = {"tranid", "transactionid", "externalid", "formid", "blockid", "t
                 "comments", "comment", "message", "комментарий", "websitesessionkey", "sessionkey",
                 "utmsource", "utmmedium", "utmcampaign", "utmcontent", "utmterm", "pageurl", "page", "formurl", "url",
                 "referer", "referrer", "stlform", "stlsource", "cookies", "cookie", "formname", "formservices",
-                "tildaspecformname"}
+                "tildaspecformname", "stlsession", "stlsid", "stlvisitor"}
 SKIP_PREFIXES = ("tildaspec", "tildautm", "utm", "cookie", "gclid", "yclid", "fbclid", "ymclid", "roistat", "csrf")
+
+
+# Частые английские имена переменных Тильды -> подпись в CRM. Остальные показываются как названы в форме.
+FIELD_LABELS = {"services": "Интересующие услуги", "service": "Интересующая услуга", "channels": "Рекламные каналы",
+                "channelscount": "Сколько рекламных каналов", "budget": "Бюджет", "task": "Задача", "niche": "Ниша",
+                "city": "Город", "company": "Компания", "revenue": "Выручка", "goal": "Цель", "date": "Дата", "time": "Время"}
 
 
 def _form_answers(form) -> list[dict]:
@@ -164,6 +170,7 @@ def _form_answers(form) -> list[dict]:
     for key, values in answers.items():
         if values:
             label = re.sub(r"\s+", " ", key.replace("_", " ")).strip(" :")[:120]
+            label = FIELD_LABELS.get(re.sub(r"[^a-z0-9а-я]", "", key.casefold()), label)
             out.append({"label": label, "value": "; ".join(values)[:1000]})
     return out[:40]
 
@@ -282,7 +289,7 @@ async def _receive_tilda(public_id: str, request: Request, db: AsyncSession):
     name = _value(fields, "name", "fullname", "имя") or contact
     if len(name) < 2:
         name = contact
-    session_key = _value(fields, "websitesessionkey", "sessionkey")
+    session_key = _value(fields, "websitesessionkey", "sessionkey", "stlsession")  # stl_session — от трекера портала на сайте
     if session_key and not re.fullmatch(r"[A-Za-z0-9_-]{16,64}", session_key):
         session_key = None
     # Метки скрипта сайта: какая форма и на какую услугу/кнопку откликнулся человек.

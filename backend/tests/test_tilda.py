@@ -126,9 +126,11 @@ class TildaTests(unittest.TestCase):
             "tranid": "ans-1", "formid": "form-project", "Name": "Тест", "Contact": "+79990000003",
             "Какие_услуги_интересуют?": "Яндекс Реклама; VK Реклама",
             "Сколько_рекламных_каналов_используете?": "2", "Как_удобнее_связаться?": "Telegram",
-            "tildaspec-referer": "x", "COOKIES": "secret", "utm_source": "vk", "Пустое": ""})
+            "tildaspec-referer": "x", "COOKIES": "secret", "stl_session": "99d903b2-4e7e-4842-b126-f89a952335cf", "utm_source": "vk", "Пустое": ""})
         self.assertEqual(response.status_code, 200, response.text)
-        answers = self.inbound(response.json()["inbound_id"]).raw_payload["form_answers"]
+        row = self.inbound(response.json()["inbound_id"])
+        self.assertEqual(row.raw_payload["website_session_key"], "99d903b2-4e7e-4842-b126-f89a952335cf")
+        answers = row.raw_payload["form_answers"]
         self.assertEqual(answers, [{"label": "Какие услуги интересуют?", "value": "Яндекс Реклама; VK Реклама"},
                                    {"label": "Сколько рекламных каналов используете?", "value": "2"}])
 
