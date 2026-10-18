@@ -82,6 +82,23 @@ class TildaTests(unittest.TestCase):
         return {"tranid": "tilda-123", "formid": "form3645799701", "Name": "Иван Петров",
                 "ContactMethod": "Телефон", "Contact": "+79990000000", "Comments": "Перезвоните", **extra}
 
+    def test_native_tilda_webhook_without_header(self):
+        """Штатный вебхук Тильды без заголовка: принимаем по адресу; неверный заголовок — 401; дубль не создаётся."""
+        data = self.form(tranid="native-1", formid="form-popup", stl_form="Форма попапа Яндекс Реклама", stl_source="Яндекс Реклама")
+        self.assertEqual(self.client.post(self.webhook, data={"test": "test"}).text, "ok")
+        self.assertEqual(self.count(), 0)
+        self.assertEqual(self.client.post(self.webhook, headers={"X-StepToLead-Tilda-Secret": "wrong"}, data=data).status_code, 401)
+        self.assertEqual(self.count(), 0)
+        first = self.client.post(self.webhook, data=data)
+        self.assertEqual(first.status_code, 200, first.text)
+        row = self.inbound(first.json()["inbound_id"])
+        self.assertEqual((row.raw_payload["stl_form"], row.raw_payload["stl_source"]), ("Форма попапа Яндекс Реклама", "Яндекс Реклама"))
+        self.assertEqual(row.attribution["stl_form"], "Форма попапа Яндекс Реклама")
+        again = self.client.post(self.webhook, data=data)
+        self.assertEqual(again.status_code, 200, again.text)
+        self.assertTrue(again.json()["duplicate"]); self.assertEqual(again.json()["inbound_id"], row.id)
+        self.assertEqual(self.count(), 1)
+
     def test_probe_secret_and_no_contact(self):
         response = self.client.post(self.webhook, headers=self.headers, data={"test": "test"})
         self.assertEqual(response.status_code, 200, response.text)

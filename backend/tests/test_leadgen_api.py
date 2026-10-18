@@ -295,3 +295,21 @@ class JobQueueTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ExportSanitizeTests(unittest.TestCase):
+    def test_control_chars_and_formulas_do_not_break_export(self):
+        import io
+        from types import SimpleNamespace
+        from openpyxl import load_workbook
+        from app.domains.leadgen import export
+        company = SimpleNamespace(id=1, display_name="Ремонт\x0b «Дом»", domain="dom.ru", city="Самара", niche="=HYPERLINK(1)",
+                                  score=5, score_reasons=[], fit_label=None, fit_reason=None, stage="new", inn=None,
+                                  legal_name=None, director_name=None, director_post=None, legal_status=None,
+                                  revenue_rub=None, first_seen_at=None)
+        ad = SimpleNamespace(title="Скидка\x01 -20%", text="Текст\x1f", keywords=["ремонт"], placement="premium")
+        data = export._render([company], {1: []}, {1: [ad]}, "https://portal.test")
+        row = [c.value for c in load_workbook(io.BytesIO(data)).active[2]]
+        self.assertEqual(row[0], "Ремонт  «Дом»")
+        self.assertEqual(row[3], " =HYPERLINK(1)")
+        self.assertEqual(row[19], "Скидка  -20%")

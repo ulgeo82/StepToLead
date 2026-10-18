@@ -191,8 +191,10 @@ async def _receive_tilda(public_id: str, request: Request, db: AsyncSession):
     request.state.tilda_id = row.id
     request.state.tilda_organization = row.organization_id
     request.state.tilda_project = row.project_id
+    # Штатный вебхук Tilda не умеет передавать заголовки: адрес подключения (случайный идентификатор) — основной ключ.
+    # Если заголовок передан (например, релеем), он должен быть верным.
     supplied = request.headers.get(SECRET_HEADER, "")
-    if not supplied or len(supplied) > 512 or not hmac.compare_digest(token_digest(supplied), row.secret_hash):
+    if supplied and (len(supplied) > 512 or not hmac.compare_digest(token_digest(supplied), row.secret_hash)):
         raise HTTPException(401, "Неверный секрет")
     media_type = request.headers.get("content-type", "").split(";", 1)[0].lower()
     if media_type not in {"application/x-www-form-urlencoded", "multipart/form-data"}:

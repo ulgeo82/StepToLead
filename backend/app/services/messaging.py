@@ -625,6 +625,7 @@ async def send(db: AsyncSession, conversation: Conversation, text: str, user: Po
 async def poll_channel(db: AsyncSession, channel: MessagingChannel) -> int:
     """Fetch and store new messages of one channel. Commits. Returns the number of new messages."""
     count = 0
+    channel_id = channel.id  # после rollback объект просрочен: channel.id читать нельзя (MissingGreenlet)
     try:
         for item in await adapter(channel, db).poll():
             if await ingest(db, channel, item):
@@ -632,7 +633,7 @@ async def poll_channel(db: AsyncSession, channel: MessagingChannel) -> int:
         channel.status, channel.last_error = "connected", None
     except (ChannelError, avito.AvitoError) as exc:
         await db.rollback()
-        channel = await db.get(MessagingChannel, channel.id, populate_existing=True)
+        channel = await db.get(MessagingChannel, channel_id, populate_existing=True)
         channel.status, channel.last_error = "error", str(exc)[:500]
     channel.last_polled_at = now()
     await db.commit()

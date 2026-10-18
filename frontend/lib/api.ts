@@ -99,12 +99,15 @@ export async function api<T>(path: string, options?: ApiOptions): Promise<T> {
   const timeoutMs = options?.timeoutMs ?? 30_000;
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   const { timeoutMs: _timeoutMs, absoluteUrl, ...requestOptions } = options || {};
+  // Свой сигнал вызывающего (отмена при вводе) не отключает таймаут: слушаем оба.
+  const outer = requestOptions.signal;
+  if (outer) { if (outer.aborted) controller.abort(); else outer.addEventListener("abort", () => controller.abort(), { once: true }); }
 
   try {
     const response = await fetch(absoluteUrl || `${API_URL}/api${path}`, {
       cache: "no-store",
       ...requestOptions,
-      signal: requestOptions.signal || controller.signal,
+      signal: controller.signal,
     });
     if (!response.ok) {
       if (response.status === 401 && typeof window !== "undefined" && window.location.pathname.startsWith("/admin")) {
@@ -124,8 +127,10 @@ export async function api<T>(path: string, options?: ApiOptions): Promise<T> {
     return response.json();
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
+      if (outer?.aborted) throw error;  // отменил сам экран — это не ошибка сервера
       throw new Error("Сервер слишком долго не отвечает. Попробуйте ещё раз.");
     }
+    if (error instanceof TypeError) throw new Error("Нет связи с порталом. Проверьте интернет или VPN и попробуйте ещё раз.");
     throw error;
   } finally {
     clearTimeout(timeout);

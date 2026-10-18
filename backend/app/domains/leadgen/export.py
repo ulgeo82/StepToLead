@@ -27,6 +27,16 @@ COLUMNS = [
 ]
 
 
+def _cell(value):
+    """Текст с сайтов и из объявлений бывает с управляющими символами — openpyxl на них падает (500).
+    Строку, начинающуюся с «=», Excel считает формулой: экранируем, чтобы чужой текст не исполнялся."""
+    if not isinstance(value, str):
+        return value
+    from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
+    value = ILLEGAL_CHARACTERS_RE.sub(" ", value)[:32000]
+    return " " + value if value[:1] in ("=", "+", "-", "@") and not value[1:2].isdigit() else value
+
+
 def _join(values) -> str:
     return ", ".join(dict.fromkeys(v for v in values if v))
 
@@ -73,7 +83,7 @@ def _render(companies, contacts, ads, base_url: str) -> bytes:
         ad_list = ads[c.id]
         top = ad_list[0] if ad_list else None
         keywords = {k for a in ad_list for k in (a.keywords or [])}
-        ws.append([
+        ws.append([_cell(v) for v in [
             c.display_name or display_domain(c.domain),
             display_domain(c.domain),
             c.city,
@@ -100,7 +110,7 @@ def _render(companies, contacts, ads, base_url: str) -> bytes:
             "да" if any(a.placement == "premium" for a in ad_list) else None,
             c.first_seen_at.date() if c.first_seen_at else None,
             f"{portal}/admin/leadgen/companies?company={c.id}" if portal else None,
-        ])
+        ]])
         r = ws.max_row
         if c.domain:
             site = ws.cell(row=r, column=2)
