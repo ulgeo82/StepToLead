@@ -37,6 +37,17 @@ def _cell(value):
     return " " + value if value[:1] in ("=", "+", "-", "@") and not value[1:2].isdigit() else value
 
 
+def _reasons(reasons) -> str:
+    """Причины скоринга: у части причин вес не задан (None) — показываем без веса, а не падаем."""
+    parts = []
+    for r in reasons or []:
+        if not isinstance(r, dict) or not r.get("label"):
+            continue
+        weight = r.get("weight")
+        parts.append(f"{r['label']} ({'+' if weight > 0 else ''}{weight})" if isinstance(weight, (int, float)) else str(r["label"]))
+    return "; ".join(parts)
+
+
 def _join(values) -> str:
     return ", ".join(dict.fromkeys(v for v in values if v))
 
@@ -89,8 +100,7 @@ def _render(companies, contacts, ads, base_url: str) -> bytes:
             c.city,
             c.niche,
             c.score,
-            "; ".join(f"{r.get('label')} ({'+' if r.get('weight', 0) > 0 else ''}{r.get('weight')})"
-                      for r in (c.score_reasons or [])),
+            _reasons(c.score_reasons),
             FIT_NAMES.get(c.fit_label or "", ""),
             c.fit_reason,
             STAGE_NAMES.get(c.stage, c.stage),

@@ -304,7 +304,7 @@ class ExportSanitizeTests(unittest.TestCase):
         from openpyxl import load_workbook
         from app.domains.leadgen import export
         company = SimpleNamespace(id=1, display_name="Ремонт\x0b «Дом»", domain="dom.ru", city="Самара", niche="=HYPERLINK(1)",
-                                  score=5, score_reasons=[], fit_label=None, fit_reason=None, stage="new", inn=None,
+                                  score=5, score_reasons=[{"label": "Сайт", "weight": None}, {"label": "Директ", "weight": 2}, "мусор"], fit_label=None, fit_reason=None, stage="new", inn=None,
                                   legal_name=None, director_name=None, director_post=None, legal_status=None,
                                   revenue_rub=None, first_seen_at=None)
         ad = SimpleNamespace(title="Скидка\x01 -20%", text="Текст\x1f", keywords=["ремонт"], placement="premium")
@@ -313,3 +313,4 @@ class ExportSanitizeTests(unittest.TestCase):
         self.assertEqual(row[0], "Ремонт  «Дом»")
         self.assertEqual(row[3], " =HYPERLINK(1)")
         self.assertEqual(row[19], "Скидка  -20%")
+        self.assertEqual(row[5], "Сайт; Директ (+2)")
