@@ -124,7 +124,7 @@ def _fields(form) -> dict[str, str]:
         if isinstance(value, UploadFile):
             raise HTTPException(422, "Файлы не поддерживаются")
         normalized = re.sub(r"[^a-z0-9а-я]", "", key.casefold())
-        if normalized and normalized not in result:
+        if normalized and not result.get(normalized):
             result[normalized] = str(value).strip()
     return result
 
@@ -137,6 +137,21 @@ def _value_like(fields: dict[str, str], parts: tuple[str, ...], skip: tuple[str,
     """Fallback for Tilda variable names generated from field titles, e.g. "Как_удобнее_связаться?"."""
     return next((value for key, value in fields.items()
                  if value and any(part in key for part in parts) and not any(bad in key for bad in skip)), None)
+
+
+METHOD_LABELS = {"telegram", "tg", "телеграм", "whatsapp", "ватсап", "вотсап", "max", "макс", "viber", "вайбер",
+                 "email", "e-mail", "почта", "телефон", "звонок", "phone", "call", "sms", "смс"}
+
+
+def _contact_like(value: str | None) -> str | None:
+    """contact_method в демо-форме иногда несёт сам контакт (ник, номер, почту), а иногда только способ
+    («Телефон», «Telegram»). Контактом считаем только первое — иначе заявка без контакта прошла бы с «Телефон»."""
+    value = (value or "").strip()
+    if not value or value.casefold() in METHOD_LABELS:
+        return None
+    if re.search(r"\d{5,}|@", value) or re.fullmatch(r"[A-Za-z][A-Za-z0-9_.]{3,63}", value):
+        return value
+    return None
 
 
 CONTACT_METHOD_FIELDS = ("contactmethod", "способсвязи", "какнастроитьконтакт", "какудобнеесвязаться",
@@ -215,7 +230,8 @@ async def _receive_tilda(public_id: str, request: Request, db: AsyncSession):
     tranid = _value(fields, "tranid", "transactionid", "externalid")
     if not tranid or len(tranid) > 180:
         raise HTTPException(422, "Отсутствует tranid")
-    contact = _value(fields, "contact", "phone", "tel", "telephone", "email", "почта", "телефон")
+    contact = _value(fields, "contact", "phone", "tel", "telephone", "email", "почта", "телефон") or _contact_like(
+        fields.get("contactmethod"))
     if not contact:
         raise HTTPException(422, "Отсутствует контакт")
     site = await db.get(WebsiteSite, row.website_id)

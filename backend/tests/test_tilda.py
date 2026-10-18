@@ -99,6 +99,27 @@ class TildaTests(unittest.TestCase):
         self.assertTrue(again.json()["duplicate"]); self.assertEqual(again.json()["inbound_id"], row.id)
         self.assertEqual(self.count(), 1)
 
+    def test_duplicate_contact_method_first_non_empty_wins(self):
+        """Демо-форма шлёт два поля contact_method: первое пустое, второе с контактом."""
+        body = "tranid=cm-1&formid=form-demo&Name=%D0%A2%D0%B5%D1%81%D1%82&contact_method=&contact_method=test1_tg"
+        response = self.client.post(self.webhook, content=body, headers={"Content-Type": "application/x-www-form-urlencoded"})
+        self.assertEqual(response.status_code, 200, response.text)
+        row = self.inbound(response.json()["inbound_id"])
+        self.assertEqual(row.raw_payload["contact"], "test1_tg")
+
+    def test_contact_without_header_accepted(self):
+        response = self.client.post(self.webhook, data={"tranid": "plain-1", "formid": "form-x", "Name": "Тест",
+                                                        "contact": "+79990000001"})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(self.inbound(response.json()["inbound_id"]).raw_payload["contact"], "+79990000001")
+
+    def test_phone_wins_over_contact_method_label(self):
+        """Регрессия: «Способ связи: Телефон» не должен подменять сам номер."""
+        response = self.client.post(self.webhook, data={"tranid": "lbl-1", "formid": "form-x", "Name": "Тест",
+                                                        "ContactMethod": "Телефон", "Phone": "+79990000002"})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(self.inbound(response.json()["inbound_id"]).raw_payload["contact"], "+79990000002")
+
     def test_probe_secret_and_no_contact(self):
         response = self.client.post(self.webhook, headers=self.headers, data={"test": "test"})
         self.assertEqual(response.status_code, 200, response.text)

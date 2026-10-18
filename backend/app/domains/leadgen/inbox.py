@@ -112,7 +112,7 @@ async def classify(db: AsyncSession, touch: LgTouch, *, complete=None) -> dict:
               f"Тема: {touch.subject or '—'}\n\nОтвет:\n{(touch.body or '')[:3000]}")
     call = complete or ai.complete
     try:
-        text = await call(SYSTEM, [{"role": "user", "content": prompt}], max_tokens=150, temperature=0.1,
+        text = await call(SYSTEM, [{"role": "user", "content": prompt}], max_tokens=150, temperature=0.1, bucket="agency",
                           feature=FEATURE, workspace_id=company.workspace_id if company else None,
                           validator=_validator)
         result = parse_answer(text)

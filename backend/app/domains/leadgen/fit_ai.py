@@ -94,7 +94,7 @@ async def assess(db: AsyncSession, company: LgCompany, *, now: datetime | None =
     prompt = await build_prompt(db, company, icp)
     call = complete or ai.complete
     try:
-        text = await call(SYSTEM, [{"role": "user", "content": prompt}], max_tokens=200, temperature=0.1,
+        text = await call(SYSTEM, [{"role": "user", "content": prompt}], max_tokens=200, temperature=0.1, bucket="agency",
                           feature=FEATURE, workspace_id=company.workspace_id, validator=_validator)
         result = parse_answer(text)
     except (ai.AIError, FitParseError) as exc:
