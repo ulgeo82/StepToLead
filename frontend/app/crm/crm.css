@@ -17,3 +17,6 @@
 .crmSiteLabel{display:block;color:#1e5fe0!important;font-weight:600}
 .crmSiteLabel b{font-weight:700}
 td .crmSiteLabel{display:inline}
+.crmFormAnswer{display:block;color:#40536f}
+.crmFormAnswer span{color:#7a8ca5}
+.crmFormAnswer span:after{content:":"}

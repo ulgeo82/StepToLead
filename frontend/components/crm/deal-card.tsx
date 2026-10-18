@@ -22,10 +22,20 @@ export function clientFields(data: Record<string, unknown>) {
     ["Профиль покупателя", ["buyer_profile_url"]], ["Запись звонка", ["call_record_url"]],
   ];
   const seen = new Set<string>();
-  return fields.flatMap(([label, keys]) => {
+  const known = fields.flatMap(([label, keys]) => {
     const value = keys.map(key => String(data[key] ?? "").trim()).find(Boolean);
     if (!value || seen.has(value)) return [];
     seen.add(value); return [{ label, value }];
+  });
+  return [...known, ...formAnswers(data)];
+}
+
+/** Остальные поля формы сайта как есть — «Какие услуги интересуют?», «Сколько каналов используете?» и т.п. */
+export function formAnswers(data: Record<string, unknown>) {
+  const list = Array.isArray(data.form_answers) ? data.form_answers as { label?: unknown; value?: unknown }[] : [];
+  return list.flatMap(item => {
+    const label = String(item?.label ?? "").trim(), value = String(item?.value ?? "").trim();
+    return label && value ? [{ label, value }] : [];
   });
 }
 

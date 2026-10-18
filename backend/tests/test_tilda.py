@@ -120,6 +120,18 @@ class TildaTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(self.inbound(response.json()["inbound_id"]).raw_payload["contact"], "+79990000002")
 
+    def test_all_form_answers_kept(self):
+        """Любые поля формы сохраняются как ответы: услуги (чекбоксы), число каналов и т.д."""
+        response = self.client.post(self.webhook, data={
+            "tranid": "ans-1", "formid": "form-project", "Name": "Тест", "Contact": "+79990000003",
+            "Какие_услуги_интересуют?": "Яндекс Реклама; VK Реклама",
+            "Сколько_рекламных_каналов_используете?": "2", "Как_удобнее_связаться?": "Telegram",
+            "tildaspec-referer": "x", "COOKIES": "secret", "utm_source": "vk", "Пустое": ""})
+        self.assertEqual(response.status_code, 200, response.text)
+        answers = self.inbound(response.json()["inbound_id"]).raw_payload["form_answers"]
+        self.assertEqual(answers, [{"label": "Какие услуги интересуют?", "value": "Яндекс Реклама; VK Реклама"},
+                                   {"label": "Сколько рекламных каналов используете?", "value": "2"}])
+
     def test_probe_secret_and_no_contact(self):
         response = self.client.post(self.webhook, headers=self.headers, data={"test": "test"})
         self.assertEqual(response.status_code, 200, response.text)

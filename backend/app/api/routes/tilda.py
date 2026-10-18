@@ -139,6 +139,35 @@ def _value_like(fields: dict[str, str], parts: tuple[str, ...], skip: tuple[str,
                  if value and any(part in key for part in parts) and not any(bad in key for bad in skip)), None)
 
 
+# Поля, которые уже разобраны в карточку или служебные (Тильда, метки, cookie) — в «ответы формы» не идут.
+KNOWN_FIELDS = {"tranid", "transactionid", "externalid", "formid", "blockid", "test", "name", "fullname", "имя",
+                "contact", "contactmethod", "phone", "tel", "telephone", "email", "почта", "телефон",
+                "comments", "comment", "message", "комментарий", "websitesessionkey", "sessionkey",
+                "utmsource", "utmmedium", "utmcampaign", "utmcontent", "utmterm", "pageurl", "page", "formurl", "url",
+                "referer", "referrer", "stlform", "stlsource", "cookies", "cookie", "formname", "formservices",
+                "tildaspecformname"}
+SKIP_PREFIXES = ("tildaspec", "tildautm", "utm", "cookie", "gclid", "yclid", "fbclid", "ymclid", "roistat", "csrf")
+
+
+def _form_answers(form) -> list[dict]:
+    """Все остальные поля формы как есть: «Какие услуги интересуют?», «Сколько каналов используете?» и т.д.
+    Универсально для любого сайта: новые поля попадают в карточку сами, без правок портала."""
+    answers: dict[str, list[str]] = {}
+    for key, value in form.multi_items():
+        norm = re.sub(r"[^a-z0-9а-я]", "", key.casefold())
+        if not norm or norm in KNOWN_FIELDS or norm in WEBSITE_FIELDS or norm in CONTACT_METHOD_FIELDS or norm.startswith(SKIP_PREFIXES):
+            continue
+        text = str(value).strip()
+        if text and text not in answers.setdefault(key, []):
+            answers[key].append(text)
+    out = []
+    for key, values in answers.items():
+        if values:
+            label = re.sub(r"\s+", " ", key.replace("_", " ")).strip(" :")[:120]
+            out.append({"label": label, "value": "; ".join(values)[:1000]})
+    return out[:40]
+
+
 METHOD_LABELS = {"telegram", "tg", "телеграм", "whatsapp", "ватсап", "вотсап", "max", "макс", "viber", "вайбер",
                  "email", "e-mail", "почта", "телефон", "звонок", "phone", "call", "sms", "смс"}
 
@@ -268,7 +297,7 @@ async def _receive_tilda(public_id: str, request: Request, db: AsyncSession):
         "utm_source": _value(fields, "utmsource"), "utm_medium": _value(fields, "utmmedium"),
         "utm_campaign": _value(fields, "utmcampaign"), "utm_content": _value(fields, "utmcontent"),
         "utm_term": _value(fields, "utmterm"), "page_url": _value(fields, "pageurl", "page", "formurl", "url"),
-        "referer": _value(fields, "referer", "referrer")}
+        "referer": _value(fields, "referer", "referrer"), "form_answers": _form_answers(form)}
     try:
         payload = InboundLead.model_validate({**normalized, "full_name": name[:180], "phone": phone,
             "email": email, "notes": normalized["comment"], "landing_url": normalized["page_url"],

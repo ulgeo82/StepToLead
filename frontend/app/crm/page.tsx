@@ -7,7 +7,7 @@ import { money, ProjectSidebar } from "@/components/reporting";
 import { Automations } from "@/components/crm/automations";
 import { AmoImport } from "@/components/crm/amo-import";
 import { ContactCard } from "@/components/crm/contact-card";
-import { DealCard } from "@/components/crm/deal-card";
+import { DealCard, formAnswers } from "@/components/crm/deal-card";
 import { Inbox } from "@/components/crm/inbox";
 import { SalesReport } from "@/components/crm/report";
 import { CallsTab, IncomingCall, useTelephony } from "@/components/crm/telephony";
@@ -265,6 +265,7 @@ export default function CrmPage() {
               {status === "NEW" && <b className={minutesAgo > 15 ? "crmBad" : "crmGood"}> · ждёт {minutesAgo < 60 ? `${minutesAgo} мин` : `${Math.round(minutesAgo / 60)} ч`}</b>}</small>
             {p.external_source === "tilda" && <small className="crmSiteLabel">Форма: <b>{String(p.stl_form || p.form_name || "не указано")}</b> · Откликнулся на: <b>{String(p.stl_source || "не указано")}</b></small>}
             {Boolean(p.notes || p.comment) && <p className="crmPre">{String(p.notes || p.comment)}</p>}
+            {formAnswers(p).map(a => <small key={a.label} className="crmFormAnswer"><span>{a.label}</span> {a.value}</small>)}
             {Boolean(p.brief_answers) && typeof p.brief_answers === "object" && <details><summary>📎 Оценка / бриф — все ответы</summary>{Object.entries(p.brief_answers as Record<string,unknown>).map(([key,value])=><p key={key}><strong>{(p.brief_labels as Record<string,string>|undefined)?.[key]||key}</strong><br/>{String(value)}</p>)}{p.express_calculation&&typeof p.express_calculation==="object"?<p>Предел цены заявки: {String((p.express_calculation as Record<string,unknown>).limit_cpl??"не рассчитан")} · Сейчас: {String((p.express_calculation as Record<string,unknown>).current_cpl??"не указано")}</p>:null}</details>}
             {p.brief_demo_access&&typeof p.brief_demo_access==="object"?<div><strong>Доступ к демо</strong><p>Логин: {String((p.brief_demo_access as Record<string,string>).username)}</p><a href={String((p.brief_demo_access as Record<string,string>).login_url)}>Войти в демо</a> · <a href={String((p.brief_demo_access as Record<string,string>).reset_url)}>Сбросить пароль</a><small>Сброс через подключённый Telegram. Если бот ещё не подключён, доступ перевыпускает администратор в карточке клиента.</small></div>:null}
             {item.potential_duplicates.length > 0 && <em>Возможный дубль: {item.potential_duplicates.map(c => c.name).join(", ")}</em>}</div>
