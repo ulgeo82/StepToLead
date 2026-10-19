@@ -115,10 +115,18 @@ async def execute_run(db: AsyncSession, run: LgSourceRun, provider: SerpProvider
     requests = len(jobs)
     gate = asyncio.Semaphore(max(1, int(getattr(provider, "threads", SEARCH_THREADS) or 1)))
 
+    from app.domains.leadgen.providers import ProviderUnavailable
+    outage: list[str] = []
+
     async def fetch(kw, device):
         async with gate:
+            if outage:  # сервис лёг — оставшиеся ключи не отправляем, деньги и время не тратим
+                return None, "пропущен: сервис выдачи недоступен"
             try:
                 return await _page(provider, kw, params.get("region_code"), device), None
+            except ProviderUnavailable as exc:
+                outage.append(str(exc))
+                return None, f"{type(exc).__name__}: {exc}"[:300]
             except Exception as exc:  # noqa: BLE001 — запуск продолжается, причина в отчёте
                 return None, f"{type(exc).__name__}: {exc}"[:300]
 
@@ -206,7 +214,10 @@ async def execute_run(db: AsyncSession, run: LgSourceRun, provider: SerpProvider
         "provider": provider.name,
     }
     run.status = "failed" if failed and not ads and not organic else "done"
-    run.error = "all keywords failed" if run.status == "failed" else None
+    run.error = (("Сервис выдачи Яндекса через XMLStock сейчас недоступен (сбой на их стороне). "
+                  "Запрос остановлен, остальные ключи не отправлялись — повторите запуск позже.")
+                 if outage and run.status == "failed" else
+                 "Ни один ключ не дал результата — причины по ключам ниже" if run.status == "failed" else None)
     run.finished_at = now
     await db.flush()
     return run

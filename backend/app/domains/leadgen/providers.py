@@ -42,12 +42,17 @@ class ProviderError(RuntimeError):
     """Ошибка от XMLStock (нет денег, неверный ключ, лимит) — текст показываем как есть."""
 
 
+class ProviderUnavailable(ProviderError):
+    """Сервис выдачи отключён целиком (сбой у Яндекса/XMLStock): остальные запросы запуска бессмысленны."""
+
+
 class NoAdBlocks(ProviderError):
     """Живая выдача пришла без блоков рекламы: бывает при сбоях — стоит повторить запрос."""
 
 
 # Коды XMLStock, при которых помогает пауза и повтор (перегрузка / временная ошибка).
 RETRY_CODES = {"20", "110"}
+OUTAGE_CODES = {"101"}  # «Сервис сбора данных Яндекс Live временно отключен» — ждать, а не долбить
 FATAL_MARKERS = ("средств", "ключ", "key", "user", "заблокирован", "доступ")
 
 
@@ -81,7 +86,8 @@ def parse_xmlstock_page(raw: str, keyword: str) -> SerpPage:
     error = root.find(".//error")
     if error is not None:
         code = error.get("code") or ""
-        raise ProviderError(f"XMLStock: {(error.text or '').strip() or 'ошибка'}{f' (код {code})' if code else ''}")
+        cls = ProviderUnavailable if str(code) in OUTAGE_CODES else ProviderError
+        raise cls(f"XMLStock: {(error.text or '').strip() or 'ошибка'}{f' (код {code})' if code else ''}")
     response = root.find("response")
     if response is None:
         raise ProviderError("XMLStock: в ответе нет блока response")
@@ -165,6 +171,8 @@ class XmlStockLiveProvider:
                 if page.has_ad_blocks or attempt >= 1:
                     return page
                 last = None
+            except ProviderUnavailable:
+                raise  # сбой сервиса целиком — повторы по ключу не помогут
             except ProviderError as exc:
                 text = str(exc).lower()
                 if any(m in text for m in FATAL_MARKERS) and not any(f"код {c}" in text for c in RETRY_CODES):

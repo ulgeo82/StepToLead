@@ -314,3 +314,26 @@ class ExportSanitizeTests(unittest.TestCase):
         self.assertEqual(row[3], " =HYPERLINK(1)")
         self.assertEqual(row[19], "Скидка  -20%")
         self.assertEqual(row[5], "Сайт; Директ (+2)")
+
+
+class OutageTests(unittest.TestCase):
+    setUp, tearDown, post = LeadgenApiTests.setUp, LeadgenApiTests.tearDown, LeadgenApiTests.post
+
+    def test_outage_stops_run_and_explains(self):
+        from app.domains.leadgen.providers import ProviderUnavailable, SerpPage
+        calls = []
+
+        class Down:
+            name = "xmlstock_live"
+            cost_per_request_rub = 0.01
+            threads = 1
+
+            async def search_page(self, keyword, region_code, device="desktop"):
+                calls.append(keyword)
+                raise ProviderUnavailable("XMLStock: Сервис сбора данных Яндекс Live временно отключен. (код 101)")
+        routes.provider_factory = lambda: Down()
+        r = self.post("/api/admin/leadgen/runs", {"keywords": KEYS, "region_code": 51})
+        run = self.client.get(f"/api/admin/leadgen/runs/{r.json()['id']}").json()
+        self.assertEqual(run["status"], "failed")
+        self.assertIn("недоступен", run["error"])
+        self.assertEqual(len(calls), 1)  # после сбоя остальные ключи не отправлялись
