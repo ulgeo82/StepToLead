@@ -63,18 +63,22 @@ export default function ExportDialog({
     };
   }, [close]);
 
+  // Массивы из пропсов каждый рендер новые — зависим от строкового ключа, иначе пересчёт идёт по кругу.
+  const selectedKey = selectedIds.join(",");
+  const chosenKey = chosen.join(",");
   const query = useMemo(() => {
     const q = new URLSearchParams(source === "filter" ? filterQuery || "" : "");
     q.delete("limit");
     q.delete("offset");
-    if (source === "selected") selectedIds.forEach((id) => q.append("ids", String(id)));
-    if (source === "lists") chosen.forEach((id) => q.append("list_id", String(id)));
+    if (source === "selected") selectedKey.split(",").filter(Boolean).forEach((id) => q.append("ids", id));
+    if (source === "lists") chosenKey.split(",").filter(Boolean).forEach((id) => q.append("list_id", id));
     if (onlyNew) q.set("not_exported", "true");
     if (withContacts) q.set("has_contacts", "true");
     if (onlyFit) q.set("fit", "fit");
     q.set("preset", preset);
     return q;
-  }, [source, filterQuery, selectedIds, chosen, onlyNew, withContacts, onlyFit, preset]);
+  }, [source, filterQuery, selectedKey, chosenKey, onlyNew, withContacts, onlyFit, preset]);
+  const queryKey = query.toString();
   const ready = source !== "lists" || chosen.length > 0;
 
   useEffect(() => {
@@ -84,7 +88,7 @@ export default function ExportDialog({
     const controller = new AbortController();
     setCounting(true);
     const timer = setTimeout(() => {
-      const q = new URLSearchParams(query);
+      const q = new URLSearchParams(queryKey);
       q.set("count_only", "true");
       api<{ count: number; total: number; max: number }>(`${base}/companies/export?${q}`, { signal: controller.signal })
         .then((value) => !controller.signal.aborted && setCount(value))
@@ -95,7 +99,7 @@ export default function ExportDialog({
       clearTimeout(timer);
       controller.abort();
     };
-  }, [query, ready]);
+  }, [queryKey, ready]);
 
   const href = `${API_URL}/api${base}/companies/export?${query}`;
   const toggle = (id: number, on: boolean) => setChosen((ids) => (on ? [...ids, id] : ids.filter((x) => x !== id)));
