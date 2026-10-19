@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, API_URL } from "@/lib/api";
+import { api } from "@/lib/api";
 import {
   Advertisement,
   base,
@@ -14,6 +14,7 @@ import {
   Filters,
   Fit,
   fitLabels,
+  LeadList,
   message,
   money,
   Outreach,
@@ -29,6 +30,7 @@ import {
 } from "../shared";
 import styles from "../leadgen.module.css";
 import EnrollDialog from "../../outreach/email/EnrollDialog";
+import ExportDialog from "../ExportDialog";
 import ImportDialog from "../ImportDialog";
 
 const channels: Record<string, string> = {
@@ -463,6 +465,76 @@ function SegmentDialog({
   );
 }
 
+function AddToListDialog({
+  ids,
+  lists,
+  close,
+  done,
+}: {
+  ids: number[];
+  lists: LeadList[];
+  close: () => void;
+  done: (text: string) => void;
+}) {
+  const ref = useDialog(close);
+  const manual = lists.filter((l) => l.kind === "manual");
+  const [target, setTarget] = useState<string>(manual[0] ? String(manual[0].id) : "new");
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  async function save() {
+    setBusy(true);
+    setError("");
+    try {
+      if (target === "new") {
+        const created = await post<LeadList>("/lists", { name: name.trim(), company_ids: ids });
+        done(`Создан список «${created.name}» · ${created.total} компаний`);
+      } else {
+        const r = await post<LeadList & { added: number }>(`/lists/${target}/companies`, { company_ids: ids });
+        done(`В список «${r.name}» добавлено ${r.added}${r.added < ids.length ? ` (остальные уже были в нём)` : ""}`);
+      }
+    } catch (e) {
+      setError(message(e));
+      setBusy(false);
+    }
+  }
+  return (
+    <>
+      <button type="button" className={styles.overlay} aria-label="Закрыть" tabIndex={-1} onClick={close} />
+      <div ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="add-list" className={`${styles.card} ${styles.modal}`}>
+        <h2 id="add-list">Добавить {ids.length} в список</h2>
+        <p className={styles.muted}>Компании останутся и в своих прежних списках — база одна, без дублей.</p>
+        {error && <p className={styles.error}>{error}</p>}
+        <label className={styles.field}>
+          Список
+          <select value={target} onChange={(e) => setTarget(e.target.value)}>
+            <option value="new">＋ Новый список</option>
+            {lists.map((l) => (
+              <option key={l.id} value={l.id}>
+                {l.name} · {l.total}
+              </option>
+            ))}
+          </select>
+        </label>
+        {target === "new" && (
+          <label className={styles.field}>
+            Название нового списка
+            <input autoFocus value={name} onChange={(e) => setName(e.target.value)} maxLength={180} placeholder="Например, «Горячие — позвонить»" />
+          </label>
+        )}
+        <div className={styles.actions}>
+          <button type="button" className={styles.primary} disabled={busy || (target === "new" && !name.trim())} onClick={save}>
+            {busy ? "Добавляем…" : "Добавить"}
+          </button>
+          <button type="button" className={styles.secondary} onClick={close}>
+            Отмена
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
 function CompaniesPage() {
   const router = useRouter();
   const search = useSearchParams();
@@ -470,6 +542,8 @@ function CompaniesPage() {
   const filters = useMemo(() => readFilters(new URLSearchParams(raw)), [raw]);
   const segmentId = search.get("segment_id");
   const runId = search.get("run_id");
+  const listIds = search.getAll("list_id");
+  const listKey = listIds.join(",");
   const sort = ["score", "new", "seen", "name"].includes(search.get("sort") || "")
     ? search.get("sort")!
     : "score";
@@ -479,11 +553,17 @@ function CompaniesPage() {
     const q = filtersQuery(filters);
     if (segmentId) q.set("segment_id", segmentId);
     if (runId) q.set("run_id", runId);
+    listKey.split(",").filter(Boolean).forEach((id) => q.append("list_id", id));
     q.set("sort", sort);
     q.set("limit", "50");
     q.set("offset", String(offset));
     return q.toString();
-  }, [filters, segmentId, runId, sort, offset]);
+  }, [filters, segmentId, runId, listKey, sort, offset]);
+  const [allLists, setAllLists] = useState<LeadList[]>([]);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [addToList, setAddToList] = useState<number[] | null>(null);
+  const closeExport = useCallback(() => setExportOpen(false), []);
+  const closeAddToList = useCallback(() => setAddToList(null), []);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -515,6 +595,13 @@ function CompaniesPage() {
     write(params);
   }, [raw, write]);
   const closeSegment = useCallback(() => setSegmentDialog(false), []);
+  useEffect(() => {
+    const controller = new AbortController();
+    api<{ items: LeadList[] }>(`${base}/lists`, { signal: controller.signal })
+      .then((data) => !controller.signal.aborted && setAllLists(data.items))
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [revision]);
   function change(key: string, value: string | string[]) {
     const q = new URLSearchParams(raw);
     q.delete(key);
@@ -693,14 +780,15 @@ function CompaniesPage() {
     q.set("segment_id", String(segment.id));
     write(q);
   }
-  const exportHref = (() => {
+  const exportFilter = (() => {
     const q = filtersQuery(filters);
     if (segmentId) q.set("segment_id", segmentId);
     if (runId) q.set("run_id", runId);
+    listIds.forEach((id) => q.append("list_id", id));
     q.set("sort", sort);
-    selected.forEach((id) => q.append("ids", String(id)));
-    return `${API_URL}/api${base}/companies/export?${q}`;
+    return q.toString();
   })();
+  const listName = (id: string) => allLists.find((l) => String(l.id) === id)?.name || `Список #${id}`;
   const eligible = companies;
   const viewingHidden = !!filters.stages?.includes("hidden");
   const allSelected = !!eligible.length && eligible.every((company) => selected.includes(company.id));
@@ -839,6 +927,23 @@ function CompaniesPage() {
             </select>
           </label>
           <details>
+            <summary>Списки{listIds.length ? ` · ${listIds.length}` : ""}</summary>
+            {!allLists.length && <p className={styles.muted}>Списков пока нет</p>}
+            {allLists.map((list) => (
+              <label key={list.id} className={styles.check}>
+                <input
+                  type="checkbox"
+                  checked={listIds.includes(String(list.id))}
+                  onChange={(e) =>
+                    change("list_id", e.target.checked ? [...listIds, String(list.id)] : listIds.filter((v) => v !== String(list.id)))
+                  }
+                />
+                {list.name} <span className={styles.muted}>· {list.total}</span>
+              </label>
+            ))}
+            <Link href="/admin/leadgen/lists">Управлять списками →</Link>
+          </details>
+          <details>
             <summary>Канал{filters.channels?.length ? ` · ${filters.channels.length}` : ""}</summary>
             {Object.entries(channels).map(([value, label]) => (
               <label key={value} className={styles.check}>
@@ -898,6 +1003,19 @@ function CompaniesPage() {
               </button>
             </span>
           )}
+          {listIds.map((id) => (
+            <span key={id} className={styles.chip}>
+              Список: {listName(id)}{" "}
+              <button
+                type="button"
+                className={styles.close}
+                aria-label="Убрать фильтр по списку"
+                onClick={() => change("list_id", listIds.filter((v) => v !== id))}
+              >
+                ×
+              </button>
+            </span>
+          ))}
           {filters.fit && <span className={styles.chip}>ЦА: {fitLabels[filters.fit]}</span>}
           {filters.cities?.map((city) => (
             <span key={city} className={styles.chip}>
@@ -936,18 +1054,9 @@ function CompaniesPage() {
           <button type="button" className={styles.secondary} onClick={() => setRevision((n) => n + 1)}>
             Обновить
           </button>
-          <a
-            className={styles.secondary}
-            href={exportHref}
-            download
-            aria-disabled={!total}
-            onClick={(e) => {
-              if (!total) e.preventDefault();
-            }}
-            title={selected.length ? "Только выбранные компании" : "Все компании по текущим фильтрам"}
-          >
-            {selected.length ? `Скачать Excel · ${selected.length}` : `Скачать Excel · ${total}`}
-          </a>
+          <button type="button" className={styles.primary} disabled={!total} onClick={() => setExportOpen(true)}>
+            Выгрузка в Excel
+          </button>
         </div>
         <div className={styles.actions}>
           <span>Выбрано: {selected.length}</span>
@@ -958,6 +1067,14 @@ function CompaniesPage() {
             onClick={() => act("enrich", selected)}
           >
             Собрать контакты
+          </button>
+          <button
+            type="button"
+            className={styles.secondary}
+            disabled={busy || loading || !selected.length}
+            onClick={() => setAddToList([...selected])}
+          >
+            В список…
           </button>
           <button
             type="button"
@@ -1028,7 +1145,7 @@ function CompaniesPage() {
         ) : !companies.length ? (
           <div className={styles.empty}>
             <h2>
-              {filtersQuery(filters).size || segmentId || runId
+              {filtersQuery(filters).size || segmentId || runId || listIds.length
                 ? "По этим фильтрам компаний нет."
                 : "Пока пусто. Запустите поиск компаний"}
             </h2>
@@ -1094,6 +1211,17 @@ function CompaniesPage() {
                         <small>{company.domain_display || company.domain || "Домен не найден"}</small>
                       ) : null}
                       {company.needs_review && <span className={styles.badge}>На проверке</span>}
+                      {(company.lists?.length || !company.exported_at) && (
+                        <span className={styles.listChips}>
+                          {!company.exported_at && <span className={`${styles.listChip} ${styles.freshChip}`}>не выгружалась</span>}
+                          {company.lists?.slice(0, 2).map((l) => (
+                            <span key={l.id} className={styles.listChip} title={l.name}>
+                              {l.name}
+                            </span>
+                          ))}
+                          {(company.lists?.length || 0) > 2 && <span className={styles.listChip}>+{(company.lists?.length || 0) - 2}</span>}
+                        </span>
+                      )}
                     </td>
                     <td>
                       {company.score_reasons?.length ? (
@@ -1192,6 +1320,29 @@ function CompaniesPage() {
         <SegmentDialog close={closeSegment} save={saveSegment} busy={segmentBusy} error={error} />
       )}
       {importOpen && <ImportDialog close={closeImport} completed={() => setRevision((n) => n + 1)} />}
+      {exportOpen && (
+        <ExportDialog
+          close={closeExport}
+          done={() => setRevision((n) => n + 1)}
+          lists={allLists}
+          filterQuery={exportFilter}
+          filterLabel={`${total} ${total === 1 ? "компания" : "компаний"} в базе`}
+          selectedIds={selected}
+          initialLists={listIds.map(Number)}
+        />
+      )}
+      {addToList && (
+        <AddToListDialog
+          ids={addToList}
+          lists={allLists}
+          close={closeAddToList}
+          done={(text) => {
+            setNotice(text);
+            setAddToList(null);
+            setRevision((n) => n + 1);
+          }}
+        />
+      )}
       {enrollIds && (
         <EnrollDialog
           ids={enrollIds}

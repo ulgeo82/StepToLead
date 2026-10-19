@@ -645,3 +645,186 @@
 .danger:disabled {
   opacity: 0.55;
 }
+
+/* ---- Списки и окно выгрузки ---- */
+.modalWide {
+  width: min(620px, calc(100vw - 32px));
+  max-height: calc(100dvh - 40px);
+  overflow: auto;
+  display: grid;
+  gap: 18px;
+}
+.legend {
+  color: #fff;
+  font-weight: 700;
+  font-size: 14px;
+  margin-bottom: 10px;
+  padding: 0;
+}
+.segmented {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+}
+.segmented button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  min-height: 56px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #26324d;
+  background: #111b30;
+  color: #e6ebf5;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.segmented button small {
+  color: #8391ad;
+  font-weight: 400;
+  font-size: 12px;
+}
+.segmented button[aria-checked="true"] {
+  border-color: #2f6bff;
+  background: #142450;
+  box-shadow: 0 0 0 1px #2f6bff inset;
+}
+.listPicker {
+  margin-top: 10px;
+  max-height: 240px;
+  overflow: auto;
+  display: grid;
+  gap: 6px;
+  padding-right: 4px;
+}
+.listOption {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 9px 11px;
+  border-radius: 9px;
+  background: #111b30;
+  border: 1px solid #1e2942;
+  cursor: pointer;
+}
+.listOption:has(input:checked) {
+  border-color: #2f6bff;
+}
+.listOption span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.listOption b {
+  color: #fff;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.listOption small,
+.hint {
+  display: block;
+  color: #8391ad;
+  font-size: 12px;
+  font-weight: 400;
+  margin: 2px 0 0;
+}
+.exportSummary {
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: #0b1222;
+  border: 1px solid #1e2942;
+  color: #c9d2e3;
+}
+.exportSummary b {
+  color: #fff;
+  font-size: 18px;
+}
+.inlineForm {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.inlineForm input {
+  min-width: 220px;
+}
+.rowActions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.menu {
+  position: relative;
+}
+.menu summary {
+  list-style: none;
+  cursor: pointer;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  border: 1px solid #26324d;
+  color: #c9d2e3;
+}
+.menu summary::-webkit-details-marker {
+  display: none;
+}
+.menu > div {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 20;
+  min-width: 210px;
+  display: grid;
+  padding: 6px;
+  border-radius: 10px;
+  background: #121c33;
+  border: 1px solid #26324d;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+}
+.menu > div a,
+.menu > div button {
+  text-align: left;
+  font: inherit;
+  font-size: 14px;
+  color: #e6ebf5;
+  background: none;
+  border: 0;
+  padding: 9px 10px;
+  border-radius: 7px;
+  cursor: pointer;
+  text-decoration: none;
+}
+.menu > div a:hover,
+.menu > div button:hover:not(:disabled) {
+  background: #1a2745;
+}
+.menu > div button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.listChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+.listChip {
+  font-size: 11px;
+  color: #a9c4ff;
+  background: #142450;
+  border-radius: 999px;
+  padding: 2px 8px;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.freshChip {
+  color: #7ee2b8;
+  background: #0f2e25;
+}

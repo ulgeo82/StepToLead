@@ -49,6 +49,9 @@ class LgCompany(Base):
     provenance: Mapped[dict] = mapped_column(JSON, default=dict)               # поле -> {source, url, at}
     first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # Учёт выгрузок: «только новые с прошлой выгрузки» = ни разу не выгружались (по всей базе).
+    last_exported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    export_count: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -266,3 +269,45 @@ class LgEnrollment(Base):
     stop_reason: Mapped[str | None] = mapped_column(String(40))
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+
+class LgList(Base):
+    """Список компаний поверх единой базы. kind: run — создан запуском поиска/импортом, manual — собран вручную."""
+    __tablename__ = "lg_lists"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    workspace_id: Mapped[int] = mapped_column(ForeignKey("client_workspaces.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(180))
+    kind: Mapped[str] = mapped_column(String(12), default="manual")
+    run_id: Mapped[int | None] = mapped_column(ForeignKey("lg_source_runs.id", ondelete="SET NULL"), unique=True)
+    note: Mapped[str | None] = mapped_column(String(500))
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("admin_users.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class LgListItem(Base):
+    """Компания в списке. is_new — компании не было в базе до этого запуска."""
+    __tablename__ = "lg_list_items"
+
+    list_id: Mapped[int] = mapped_column(ForeignKey("lg_lists.id", ondelete="CASCADE"), primary_key=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey("lg_companies.id", ondelete="CASCADE"), primary_key=True, index=True)
+    is_new: Mapped[bool] = mapped_column(Boolean, default=False)
+    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class LgExport(Base):
+    """История выгрузок: что, кем и сколько скачано. company_ids — чтобы повторить ровно тот же файл."""
+    __tablename__ = "lg_exports"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    workspace_id: Mapped[int] = mapped_column(ForeignKey("client_workspaces.id", ondelete="CASCADE"), index=True)
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("admin_users.id", ondelete="SET NULL"))
+    title: Mapped[str] = mapped_column(String(300))
+    params: Mapped[dict] = mapped_column(JSON, default=dict)
+    company_ids: Mapped[list] = mapped_column(JSON, default=list)
+    count: Mapped[int] = mapped_column(Integer, default=0)
+    preset: Mapped[str] = mapped_column(String(12), default="full")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)

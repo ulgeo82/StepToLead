@@ -36,7 +36,7 @@ export const adminNavigation: NavigationNode[] = [
         children: [
           { kind: "item", id: "company-search", label: "Поиск компаний", href: "/admin/leadgen/search" },
           { kind: "item", id: "companies", label: "База компаний", href: "/admin/leadgen/companies" },
-          { kind: "item", id: "segments", label: "Сегменты", disabled: true },
+          { kind: "item", id: "leadgen-lists", label: "Списки и выгрузки", href: "/admin/leadgen/lists" },
           { kind: "item", id: "enrichment", label: "Обогащение", disabled: true },
           { kind: "item", id: "leadgen-analytics", label: "Аналитика", href: "/admin/leadgen/analytics" },
           { kind: "item", id: "leadgen-dnc", label: "Стоп-лист", href: "/admin/leadgen/dnc" },

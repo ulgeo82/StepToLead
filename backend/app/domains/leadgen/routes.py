@@ -17,7 +17,7 @@ from app.core.access import require_admin
 from app.core.config import settings as app_settings
 from app.db import SessionLocal, get_db
 from app.domains.leadgen import (
-    analytics, dadata, direct_search, export, fit_ai, importer, inbox, outreach, sequences, service, site_enrich,
+    analytics, dadata, direct_search, export, fit_ai, importer, inbox, lists, outreach, sequences, service, site_enrich,
 )
 from app.domains.leadgen.core import table_import
 from app.domains.leadgen.core import sequence as seq_core
@@ -25,7 +25,8 @@ from app.domains.leadgen.models import LgEnrollment, LgMailbox, LgSequence
 from app.core.crypto import encrypt_secret
 from app.domains.leadgen.core.normalize import display_domain, normalize_domain, normalize_phone
 from app.domains.leadgen.models import (
-    LgAd, LgCompany, LgContact, LgDnc, LgEnrichment, LgSegment, LgSignal, LgSourceRun, LgTouch,
+    LgAd, LgCompany, LgContact, LgDnc, LgEnrichment, LgExport, LgList, LgListItem, LgSegment, LgSignal, LgSourceRun,
+    LgTouch,
 )
 from app.domains.leadgen.providers import ProviderNotConfigured, XmlStockLiveProvider
 from app.domains.leadgen.queries import SORTS, FilterError, clean_filters, company_query
@@ -153,6 +154,7 @@ async def _execute_now(run_id: int) -> list[int]:
             return []
         try:
             await direct_search.execute_run(db, run, make_provider())
+            await lists.sync_run(db, run)  # каждый запуск — свой список
             await db.commit()
             stats = run.stats or {}
             enrich_ids = (list(stats.get("new_company_ids") or []) + list(stats.get("organic_new_ids") or [])
@@ -222,7 +224,7 @@ async def get_run(run_id: int, db: AsyncSession = Depends(get_db), admin: AdminU
 
 async def filtered_companies(db: AsyncSession, ws: int, *, q=None, niche=None, city=(), min_score=None, stage=(),
                              channel=(), signal=(), new_days=None, needs_review=None, fit=None, run_id=None,
-                             segment_id=None):
+                             segment_id=None, list_ids=(), not_exported=None, has_contacts=None):
     """Запрос компаний по фильтрам базы (общий для списка и выгрузки в Excel)."""
     if await outreach.sync_from_crm(db, ws):
         await db.commit()
@@ -246,6 +248,16 @@ async def filtered_companies(db: AsyncSession, ws: int, *, q=None, niche=None, c
         stats = run.stats or {}
         ids = list(stats.get("company_ids") or []) + list(stats.get("organic_company_ids") or [])
         base = base.where(LgCompany.id.in_([int(i) for i in ids]))
+    if list_ids:
+        found = (await db.scalars(select(LgList.id).where(LgList.workspace_id == ws, LgList.id.in_(list(list_ids))))).all()
+        if len(found) != len(set(list_ids)):
+            raise HTTPException(404, "Список не найден")
+        base = base.where(LgCompany.id.in_(select(LgListItem.company_id).where(LgListItem.list_id.in_(list(list_ids)))))
+    if not_exported:
+        base = base.where(LgCompany.last_exported_at.is_(None))
+    if has_contacts:
+        base = base.where(LgCompany.id.in_(select(LgContact.company_id).where(
+            LgContact.bounced.is_(False), LgContact.kind.in_(("phone", "email", "whatsapp", "telegram")))))
     return base
 
 
@@ -257,14 +269,62 @@ async def list_companies(q: str | None = None, niche: str | None = None, city: l
                          fit: str | None = Query(None, pattern="^(fit|maybe|no)$"),
                          run_id: int | None = None,  # только компании, найденные этим запуском поиска
                          segment_id: int | None = None, sort: str = Query("score", pattern="^(score|new|seen|name)$"),
+                         list_id: list[int] = Query(default=[]), not_exported: bool | None = None,
+                         has_contacts: bool | None = None,
                          limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0),
                          db: AsyncSession = Depends(get_db), admin: AdminUser = Depends(require_admin)):
     base = await filtered_companies(db, workspace_id(), q=q, niche=niche, city=city, min_score=min_score,
                                     stage=stage, channel=channel, signal=signal, new_days=new_days,
-                                    needs_review=needs_review, fit=fit, run_id=run_id, segment_id=segment_id)
+                                    needs_review=needs_review, fit=fit, run_id=run_id, segment_id=segment_id,
+                                    list_ids=list_id, not_exported=not_exported, has_contacts=has_contacts)
     total = await db.scalar(select(func.count()).select_from(base.subquery()))
     rows = (await db.execute(base.order_by(*SORTS[sort]).limit(limit).offset(offset))).scalars().all()
-    return {"total": total, "items": [company_row(c) for c in rows]}
+    in_lists = await lists.company_lists(db, [c.id for c in rows])
+    return {"total": total, "items": [{**company_row(c), "lists": in_lists.get(c.id, []),
+                                       "exported_at": iso(c.last_exported_at)} for c in rows]}
+
+
+EXPORT_EXCLUDED = ("dnc", "rejected", "hidden")  # стоп-лист и отказы в файл не попадают никогда
+
+
+async def export_query(db, *, q=None, niche=None, city=(), min_score=None, stage=(), channel=(), signal=(),
+                       new_days=None, needs_review=None, fit=None, run_id=None, segment_id=None, ids=(),
+                       list_ids=(), not_exported=None, has_contacts=None):
+    base = await filtered_companies(db, workspace_id(), q=q, niche=niche, city=city, min_score=min_score, stage=stage,
+                                    channel=channel, signal=signal, new_days=new_days, needs_review=needs_review,
+                                    fit=fit, run_id=run_id, segment_id=segment_id, list_ids=list_ids,
+                                    not_exported=not_exported, has_contacts=has_contacts)
+    if ids:
+        base = base.where(LgCompany.id.in_(list(ids)))
+    return base.where(LgCompany.stage.not_in(EXPORT_EXCLUDED))
+
+
+async def export_title(db, list_ids, ids, not_exported) -> str:
+    if ids:
+        title = f"Выбранные компании ({len(ids)})"
+    elif list_ids:
+        names = (await db.scalars(select(LgList.name).where(LgList.id.in_(list(list_ids))))).all()
+        title = "Списки: " + ", ".join(names) if len(names) > 1 else f"Список: {names[0]}" if names else "Списки"
+    else:
+        title = "База компаний по фильтру"
+    return (title + (" · только новые" if not_exported else ""))[:300]
+
+
+async def send_xlsx(db, companies, *, preset, title, params, admin, record=True):
+    from fastapi.responses import Response
+    from urllib.parse import quote
+    in_lists = await lists.company_lists(db, [c.id for c in companies])
+    data = await export.build_xlsx(db, companies, base_url=app_settings.frontend_origin, preset=preset, lists=in_lists)
+    if record:
+        now = service.utcnow()
+        for c in companies:
+            c.last_exported_at, c.export_count = now, (c.export_count or 0) + 1
+        db.add(LgExport(workspace_id=workspace_id(), created_by_id=admin.id, title=title, params=params,
+                        company_ids=[c.id for c in companies], count=len(companies), preset=preset))
+        await db.commit()
+    name = f"baza-kompaniy-{service.utcnow():%Y-%m-%d}.xlsx"
+    return Response(data, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f"attachment; filename=\"{name}\"; filename*=UTF-8''{quote(name)}"})
 
 
 @router.get("/companies/export")
@@ -274,21 +334,53 @@ async def export_companies(q: str | None = None, niche: str | None = None, city:
                            new_days: int | None = Query(None, ge=1, le=365), needs_review: bool | None = None,
                            fit: str | None = Query(None, pattern="^(fit|maybe|no)$"), run_id: int | None = None,
                            segment_id: int | None = None, ids: list[int] = Query(default=[]),
+                           list_id: list[int] = Query(default=[]), not_exported: bool | None = None,
+                           has_contacts: bool | None = None,
+                           preset: str = Query("full", pattern="^(full|outreach)$"),
+                           count_only: bool = False,
                            sort: str = Query("score", pattern="^(score|new|seen|name)$"),
                            db: AsyncSession = Depends(get_db), admin: AdminUser = Depends(require_admin)):
-    """Выгрузка базы в Excel: по текущим фильтрам или только выбранные (ids)."""
-    from fastapi.responses import Response
-    ws = workspace_id()
-    base = await filtered_companies(db, ws, q=q, niche=niche, city=city, min_score=min_score, stage=stage,
-                                    channel=channel, signal=signal, new_days=new_days, needs_review=needs_review,
-                                    fit=fit, run_id=run_id, segment_id=segment_id)
-    if ids:
-        base = base.where(LgCompany.id.in_(ids))
+    """Выгрузка в Excel: по фильтру, по спискам или выбранные. Стоп-лист и отказы — никогда.
+    count_only — сколько попадёт в файл (для окна выгрузки). Каждая выгрузка пишется в историю."""
+    base = await export_query(db, q=q, niche=niche, city=city, min_score=min_score, stage=stage, channel=channel,
+                              signal=signal, new_days=new_days, needs_review=needs_review, fit=fit, run_id=run_id,
+                              segment_id=segment_id, ids=ids, list_ids=list_id, not_exported=not_exported,
+                              has_contacts=has_contacts)
+    if count_only:
+        total = await db.scalar(select(func.count()).select_from(base.subquery()))
+        return {"count": min(int(total or 0), export.MAX_ROWS), "total": int(total or 0), "max": export.MAX_ROWS}
     companies = (await db.execute(base.order_by(*SORTS[sort]).limit(export.MAX_ROWS))).scalars().all()
-    data = await export.build_xlsx(db, companies, base_url=app_settings.frontend_origin)
-    name = f"baza-kompaniy-{service.utcnow():%Y-%m-%d}.xlsx"
-    return Response(data, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    headers={"Content-Disposition": f'attachment; filename="{name}"'})
+    params = {k: v for k, v in {"q": q, "niche": niche, "city": city, "min_score": min_score, "stage": stage,
+              "channel": channel, "signal": signal, "new_days": new_days, "fit": fit, "run_id": run_id,
+              "segment_id": segment_id, "list_id": list_id, "not_exported": not_exported,
+              "has_contacts": has_contacts, "ids": ids[:50]}.items() if v not in (None, [], "", False)}
+    title = await export_title(db, list_id, ids, not_exported)
+    return await send_xlsx(db, companies, preset=preset, title=title, params=params, admin=admin)
+
+
+@router.get("/exports")
+async def list_exports(limit: int = Query(30, ge=1, le=100), db: AsyncSession = Depends(get_db),
+                       admin: AdminUser = Depends(require_admin)):
+    rows = (await db.scalars(select(LgExport).where(LgExport.workspace_id == workspace_id())
+                             .order_by(LgExport.id.desc()).limit(limit))).all()
+    names = {u.id: u.username for u in (await db.scalars(select(AdminUser).where(
+        AdminUser.id.in_({r.created_by_id for r in rows if r.created_by_id})))).all()} if rows else {}
+    return {"items": [{"id": r.id, "title": r.title, "count": r.count, "preset": r.preset, "params": r.params,
+                       "created_at": iso(r.created_at), "created_by": names.get(r.created_by_id)} for r in rows]}
+
+
+@router.get("/exports/{export_id}/download")
+async def repeat_export(export_id: int, db: AsyncSession = Depends(get_db), admin: AdminUser = Depends(require_admin)):
+    """Повторить прошлую выгрузку: ровно те же компании (кроме удалённых и ушедших в стоп-лист)."""
+    row = await db.get(LgExport, export_id)
+    if row is None or row.workspace_id != workspace_id():
+        raise HTTPException(404, "Выгрузка не найдена")
+    ids = [int(i) for i in row.company_ids or []]
+    companies = (await db.execute(select(LgCompany).where(LgCompany.workspace_id == workspace_id(), LgCompany.id.in_(ids),
+                                                          LgCompany.stage.not_in(EXPORT_EXCLUDED)))).scalars().all() if ids else []
+    order = {cid: i for i, cid in enumerate(ids)}
+    companies.sort(key=lambda c: order.get(c.id, 0))
+    return await send_xlsx(db, companies, preset=row.preset, title=row.title, params=row.params, admin=admin, record=False)
 
 
 @router.get("/companies/{company_id}")
@@ -849,6 +941,7 @@ class EnrollIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     company_ids: list[int] = Field(default_factory=list, max_length=500)
     segment_id: int | None = None
+    list_id: int | None = None  # вся компания списка; уже идущие в любой цепочке пропускаются
 
 
 ENROLL_REASONS = {**REASONS, "already_in_sequence": "уже в цепочке", "no_email": "нет рабочей почты",
@@ -867,8 +960,16 @@ async def enroll(sequence_id: int, payload: EnrollIn, db: AsyncSession = Depends
             raise HTTPException(404, "Сегмент не найден")
         q = company_query(ws, segment.filters, service.utcnow()).with_only_columns(LgCompany.id).limit(500)
         ids += [i for (i,) in (await db.execute(q)).all() if i not in ids]
+    if payload.list_id:
+        lst = await db.get(LgList, payload.list_id)
+        if lst is None or lst.workspace_id != ws:
+            raise HTTPException(404, "Список не найден")
+        q = (select(LgCompany.id).where(LgCompany.workspace_id == ws, LgCompany.stage.not_in(EXPORT_EXCLUDED),
+             LgCompany.id.in_(select(LgListItem.company_id).where(LgListItem.list_id == lst.id)))
+             .order_by(LgCompany.score.desc(), LgCompany.id).limit(500))
+        ids += [i for i in (await db.scalars(q)).all() if i not in ids]
     if not ids:
-        raise HTTPException(422, "Передайте company_ids или segment_id")
+        raise HTTPException(422, "Передайте company_ids, segment_id или list_id")
     if not await db.scalar(select(LgMailbox.id).where(LgMailbox.workspace_id == ws, LgMailbox.is_active.is_(True))) \
             and any(s.get("channel") == "email" for s in seq.steps):
         raise HTTPException(409, "Добавьте и проверьте хотя бы один почтовый ящик")
@@ -1105,6 +1206,7 @@ async def import_companies(tasks: BackgroundTasks, file: UploadFile | None = Fil
                                        city=(city or "").strip() or None, filename=filename, user_id=admin.id)
     run.params = {**run.params, "enrich": enrich}
     enrich_ids = list(run.stats.get("company_ids") or []) if enrich else []  # only_stale пропустит свежие
+    await lists.sync_run(db, run)
     await db.commit()
     if enrich_ids:
         tasks.add_task(_enrich, enrich_ids, only_stale=True)
@@ -1183,7 +1285,7 @@ async def delete_companies(payload: DeleteIn, db: AsyncSession = Depends(get_db)
         if c.domain:
             domains.append(c.domain)
     if ids:
-        for model in (LgEnrollment, LgTouch, LgSignal, LgAd, LgContact, LgEnrichment, LgCompanyKey):
+        for model in (LgEnrollment, LgTouch, LgSignal, LgAd, LgContact, LgEnrichment, LgCompanyKey, LgListItem):
             await db.execute(sa_delete(model).where(model.company_id.in_(ids)))
         await db.execute(sa_delete(LgCompany).where(LgCompany.id.in_(ids)))
     blocked = 0
@@ -1196,3 +1298,162 @@ async def delete_companies(payload: DeleteIn, db: AsyncSession = Depends(get_db)
         blocked = len(new)
     await db.commit()
     return {"deleted": len(ids), "skipped": skipped, "blocked_domains": blocked}
+
+
+# ---------------------------------------------------------------- списки
+
+class ListIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=1, max_length=180)
+    note: str | None = Field(default=None, max_length=500)
+    company_ids: list[int] = Field(default_factory=list, max_length=5000)
+
+
+class ListPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str | None = Field(default=None, min_length=1, max_length=180)
+    note: str | None = Field(default=None, max_length=500)
+    archived: bool | None = None
+
+
+class ListCompaniesIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    company_ids: list[int] = Field(min_length=1, max_length=5000)
+
+
+class ListMergeIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    list_ids: list[int] = Field(min_length=2, max_length=50)
+    name: str = Field(min_length=1, max_length=180)
+    archive_sources: bool = True
+
+
+class ListDeleteIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    with_companies: bool = False  # удалить и компании, которых нет ни в одном другом списке
+
+
+async def list_or_404(db: AsyncSession, list_id: int) -> LgList:
+    row = await db.get(LgList, list_id)
+    if row is None or row.workspace_id != workspace_id():
+        raise HTTPException(404, "Список не найден")
+    return row
+
+
+async def list_out(db: AsyncSession, row: LgList) -> dict:
+    return lists.list_row(row, (await lists.stats(db, [row.id])).get(row.id))
+
+
+@router.get("/lists")
+async def get_lists(archived: bool = False, db: AsyncSession = Depends(get_db), admin: AdminUser = Depends(require_admin)):
+    ws = workspace_id()
+    if await lists.ensure_run_lists(db, ws):
+        await db.commit()
+    rows = (await db.scalars(select(LgList).where(LgList.workspace_id == ws, LgList.archived_at.is_not(None) if archived
+                                                  else LgList.archived_at.is_(None)).order_by(LgList.id.desc()))).all()
+    counts = await lists.stats(db, [r.id for r in rows])
+    archived_count = await db.scalar(select(func.count(LgList.id)).where(LgList.workspace_id == ws,
+                                                                          LgList.archived_at.is_not(None)))
+    return {"items": [lists.list_row(r, counts.get(r.id)) for r in rows], "archived_count": int(archived_count or 0)}
+
+
+@router.post("/lists", status_code=201)
+async def create_list(payload: ListIn, db: AsyncSession = Depends(get_db), admin: AdminUser = Depends(require_admin)):
+    row = LgList(workspace_id=workspace_id(), name=payload.name.strip(), note=payload.note, kind="manual",
+                 created_by_id=admin.id)
+    db.add(row)
+    await db.flush()
+    await lists.add_companies(db, row, payload.company_ids)
+    await db.commit()
+    return await list_out(db, row)
+
+
+@router.patch("/lists/{list_id}")
+async def update_list(list_id: int, payload: ListPatch, db: AsyncSession = Depends(get_db),
+                      admin: AdminUser = Depends(require_admin)):
+    row = await list_or_404(db, list_id)
+    if payload.name is not None:
+        row.name = payload.name.strip()
+    if payload.note is not None:
+        row.note = payload.note.strip() or None
+    if payload.archived is not None:
+        row.archived_at = service.utcnow() if payload.archived else None
+    await db.commit()
+    return await list_out(db, row)
+
+
+@router.post("/lists/{list_id}/companies")
+async def add_to_list(list_id: int, payload: ListCompaniesIn, db: AsyncSession = Depends(get_db),
+                      admin: AdminUser = Depends(require_admin)):
+    row = await list_or_404(db, list_id)
+    added = await lists.add_companies(db, row, payload.company_ids)
+    await db.commit()
+    return {**(await list_out(db, row)), "added": added}
+
+
+@router.post("/lists/{list_id}/companies/remove")
+async def remove_from_list(list_id: int, payload: ListCompaniesIn, db: AsyncSession = Depends(get_db),
+                           admin: AdminUser = Depends(require_admin)):
+    from sqlalchemy import delete as sa_delete
+    row = await list_or_404(db, list_id)
+    res = await db.execute(sa_delete(LgListItem).where(LgListItem.list_id == row.id,
+                                                       LgListItem.company_id.in_(payload.company_ids)))
+    await db.commit()
+    return {**(await list_out(db, row)), "removed": res.rowcount or 0}
+
+
+@router.post("/lists/merge", status_code=201)
+async def merge_lists(payload: ListMergeIn, db: AsyncSession = Depends(get_db), admin: AdminUser = Depends(require_admin)):
+    sources = [await list_or_404(db, i) for i in dict.fromkeys(payload.list_ids)]
+    row = LgList(workspace_id=workspace_id(), name=payload.name.strip(), kind="manual", created_by_id=admin.id,
+                 note="Объединены: " + ", ".join(s.name for s in sources)[:480])
+    db.add(row)
+    await db.flush()
+    new_ids = set((await db.scalars(select(LgListItem.company_id).where(
+        LgListItem.list_id.in_([s.id for s in sources]), LgListItem.is_new.is_(True)))).all())
+    await lists.add_companies(db, row, await lists.company_ids_in(db, [s.id for s in sources]), new_ids)
+    if payload.archive_sources:
+        for src in sources:
+            src.archived_at = src.archived_at or service.utcnow()
+    await db.commit()
+    return await list_out(db, row)
+
+
+@router.post("/lists/{list_id}/delete")
+async def delete_list(list_id: int, payload: ListDeleteIn, db: AsyncSession = Depends(get_db),
+                      admin: AdminUser = Depends(require_admin)):
+    """Удалить список. С компаниями — только теми, что больше ни в одном списке и не заняты (CRM, цепочка)."""
+    from sqlalchemy import delete as sa_delete
+    row = await list_or_404(db, list_id)
+    members = await lists.company_ids_in(db, [row.id])
+    elsewhere = set((await db.scalars(select(LgListItem.company_id).where(
+        LgListItem.company_id.in_(members), LgListItem.list_id != row.id))).all()) if members else set()
+    only_here = [cid for cid in members if cid not in elsewhere]
+    await db.execute(sa_delete(LgListItem).where(LgListItem.list_id == row.id))
+    await db.delete(row)
+    await db.commit()
+    result = {"deleted": 0, "skipped": [], "kept_in_other_lists": len(elsewhere)}
+    if payload.with_companies and only_here:
+        for i in range(0, len(only_here), 1000):
+            part = await delete_companies(DeleteIn(company_ids=only_here[i:i + 1000]), db, admin)
+            result["deleted"] += part["deleted"]
+            result["skipped"] += part["skipped"]
+    return result
+
+
+class AssessListIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    force: bool = False
+
+
+@router.post("/lists/{list_id}/assess", status_code=202)
+async def assess_list(list_id: int, payload: AssessListIn, tasks: BackgroundTasks, db: AsyncSession = Depends(get_db),
+                      admin: AdminUser = Depends(require_admin)):
+    """ИИ-оценка всего списка (уже оценённые пропускаются, если не force)."""
+    if not fit_available():
+        raise HTTPException(400, "ИИ не подключён в портале (LLM_PROVIDER, модель, ключ) — оценка недоступна")
+    row = await list_or_404(db, list_id)
+    ids = (await db.scalars(select(LgCompany.id).where(LgCompany.stage.not_in(EXPORT_EXCLUDED),
+           LgCompany.id.in_(select(LgListItem.company_id).where(LgListItem.list_id == row.id))))).all()
+    tasks.add_task(_assess, list(ids), payload.force)
+    return {"queued": len(ids)}

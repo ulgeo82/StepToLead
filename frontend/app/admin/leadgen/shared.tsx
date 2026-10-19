@@ -82,7 +82,34 @@ export type Company = {
   crm_deal_id?: number | null;
   first_seen_at?: string;
   last_seen_at?: string;
+  lists?: { id: number; name: string; run_id?: number | null }[];
+  exported_at?: string | null;
 };
+/** Список компаний: запуск поиска/импорт (kind=run) или собранный вручную. */
+export type LeadList = {
+  id: number;
+  name: string;
+  kind: "run" | "manual";
+  run_id: number | null;
+  note: string | null;
+  archived: boolean;
+  created_at: string | null;
+  total: number;
+  new: number;
+  with_contacts: number;
+  fit: number;
+  not_exported: number;
+};
+export type ExportRecord = {
+  id: number;
+  title: string;
+  count: number;
+  preset: "full" | "outreach";
+  created_at: string | null;
+  created_by: string | null;
+};
+export const plural = (n: number, one: string, few: string, many: string) =>
+  n % 10 === 1 && n % 100 !== 11 ? one : [2, 3, 4].includes(n % 10) && ![12, 13, 14].includes(n % 100) ? few : many;
 export type Ad = {
   title?: string | null;
   text?: string | null;

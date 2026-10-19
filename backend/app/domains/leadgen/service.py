@@ -19,7 +19,7 @@ from app.domains.leadgen.core.normalize import (
 )
 from app.domains.leadgen.core.scoring import DEFAULT_WEIGHTS, compute_score
 from app.domains.leadgen.models import (
-    LgAd, LgCompany, LgCompanyKey, LgContact, LgDnc, LgEnrichment, LgSignal, LgTouch,
+    LgAd, LgCompany, LgCompanyKey, LgContact, LgDnc, LgEnrichment, LgListItem, LgSignal, LgTouch,
 )
 from app.models.crm import CrmDeal
 from app.models.system import AppSetting
@@ -307,11 +307,15 @@ async def merge_companies(db: AsyncSession, keep_id: int, drop_id: int, *, reaso
         "contacts": await move_unique(LgContact, ("kind", "value_norm")),
         "ads": await move_unique(LgAd, ("content_hash",)),
         "enrichments": await move_unique(LgEnrichment, ("step",)),
+        "lists": await move_unique(LgListItem, ("list_id",)),
     }
     for model in (LgSignal, LgTouch):
         res = await db.execute(update(model).where(model.company_id == drop_id).values(company_id=keep_id))
         moved[model.__tablename__] = res.rowcount or 0
 
+    if drop.last_exported_at and (not keep.last_exported_at or _aware(drop.last_exported_at) > _aware(keep.last_exported_at)):
+        keep.last_exported_at = drop.last_exported_at  # уже выгружалась под другим именем — не «новая»
+    keep.export_count = (keep.export_count or 0) + (drop.export_count or 0)
     keep.first_seen_at = min(_aware(keep.first_seen_at), _aware(drop.first_seen_at))
     keep.last_seen_at = max(_aware(keep.last_seen_at), _aware(drop.last_seen_at))
     if keep.needs_review and keep.needs_review.endswith(f":{drop_id}"):
