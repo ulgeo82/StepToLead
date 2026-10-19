@@ -134,14 +134,20 @@ class XmlStockLiveProvider:
 
     retries = 3            # всего попыток на ключ
     retry_pause = 10.0     # пауза перед повтором (рекомендация XMLStock для кодов 20/110)
-    min_interval = 1.0     # не чаще 1 запроса в секунду
+    min_interval = float(os.getenv("XMLSTOCK_MIN_INTERVAL", "0.3") or 0.3)  # пауза между стартами запросов
+    threads = int(os.getenv("XMLSTOCK_THREADS", "4") or 4)                   # сколько запросов в работе сразу
     _last_at = 0.0
+    _lock: asyncio.Lock | None = None
 
     async def _throttle(self) -> None:
-        wait = self.min_interval - (time.monotonic() - self._last_at)
-        if wait > 0:
-            await asyncio.sleep(wait)
-        self._last_at = time.monotonic()
+        # Параллельные запросы стартуют по очереди с паузой — XMLStock не получает «залп».
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        async with self._lock:
+            wait = self.min_interval - (time.monotonic() - self._last_at)
+            if wait > 0:
+                await asyncio.sleep(wait)
+            self._last_at = time.monotonic()
 
     async def search(self, keyword: str, region_code: int | None) -> list[SerpAd]:
         return (await self.search_page(keyword, region_code)).ads

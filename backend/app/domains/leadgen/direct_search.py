@@ -4,6 +4,8 @@
 """
 from __future__ import annotations
 
+import asyncio
+import os
 from datetime import datetime, timedelta
 from typing import Protocol
 
@@ -18,6 +20,7 @@ from app.domains.leadgen.models import LgAd, LgCompany, LgSignal, LgSourceRun
 
 SOURCE = "yandex_direct"
 NEW_ADVERTISER_TTL = timedelta(days=14)
+SEARCH_THREADS = int(os.getenv("XMLSTOCK_THREADS", "4") or 4)  # одновременных запросов к XMLStock
 AD_SIGNAL_TTL = timedelta(days=8)       # еженедельный перезапуск продлевает сигнал
 ADS_STOPPED_TTL = timedelta(days=30)
 ORGANIC_TTL = timedelta(days=30)
@@ -106,18 +109,26 @@ async def execute_run(db: AsyncSession, run: LgSourceRun, provider: SerpProvider
     ads: list[SerpAd] = []
     organic: list[SerpOrganic] = []
     failed: dict[str, str] = {}
-    requests = 0
-    for kw in params["keywords"]:
-        for device in devices:
-            requests += 1
+    # Запросы к выдаче идут параллельно (по SEARCH_THREADS), темп держит сам провайдер. Порядок результатов
+    # сохраняется, чтобы агрегация была такой же, как при последовательном обходе.
+    jobs = [(kw, device) for kw in params["keywords"] for device in devices]
+    requests = len(jobs)
+    gate = asyncio.Semaphore(max(1, int(getattr(provider, "threads", SEARCH_THREADS) or 1)))
+
+    async def fetch(kw, device):
+        async with gate:
             try:
-                page = await _page(provider, kw, params.get("region_code"), device)
-                ads.extend(page.ads)
-                if want_organic and device == "desktop":
-                    organic.extend(page.organic)
+                return await _page(provider, kw, params.get("region_code"), device), None
             except Exception as exc:  # noqa: BLE001 — запуск продолжается, причина в отчёте
-                key = kw if device == "desktop" else f"{kw} (телефон)"
-                failed[key] = f"{type(exc).__name__}: {exc}"[:300]
+                return None, f"{type(exc).__name__}: {exc}"[:300]
+
+    for (kw, device), (page, error) in zip(jobs, await asyncio.gather(*(fetch(kw, d) for kw, d in jobs))):
+        if error:
+            failed[kw if device == "desktop" else f"{kw} (телефон)"] = error
+            continue
+        ads.extend(page.ads)
+        if want_organic and device == "desktop":
+            organic.extend(page.organic)
 
     advertisers = aggregate(ads, platforms=tuple(settings["platform_domains"]))
     company_ids: list[int] = []

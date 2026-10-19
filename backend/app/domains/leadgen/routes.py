@@ -47,6 +47,7 @@ inbox_complete = None          # подмена ai.complete для размет�
 inbox_available = inbox.available
 site_delay = site_enrich.DELAY_SECONDS
 ENRICH_FRESH_DAYS = 30
+ENRICH_THREADS = 6             # сколько сайтов обходим одновременно
 
 # Фоновые задачи лидогенерации идут по одной на вид: повторные нажатия встают в очередь,
 # а не запускают параллельные обходы сайтов — портал у клиентов не должен проседать.
@@ -625,35 +626,46 @@ async def _enrich_now(company_ids: list[int], *, only_stale: bool) -> None:
     except dadata.DadataNotConfigured:
         provider = None  # без ключа DaData собираем только сайт
     with_fit = fit_available()
-    for cid in company_ids:
-        async with session_factory() as db:
-            company = await db.get(LgCompany, cid)
-            if company is None or not company.domain:
-                continue
-            if only_stale:
-                done = await db.scalar(select(LgEnrichment.ran_at).where(
-                    LgEnrichment.company_id == cid, LgEnrichment.step == site_enrich.STEP,
-                    LgEnrichment.status == "done"))
-                if done and service._aware(done) > service.utcnow() - timedelta(days=ENRICH_FRESH_DAYS):
-                    continue
+    gate = asyncio.Semaphore(ENRICH_THREADS)
+
+    async def one(cid: int) -> None:
+        async with gate:
+            await _enrich_one(cid, provider, with_fit, only_stale)
+
+    # Разные сайты обходим параллельно; вежливость к одному сайту (robots, пауза между страницами) сохраняется.
+    await asyncio.gather(*(one(cid) for cid in dict.fromkeys(company_ids)))
+
+
+async def _enrich_one(cid: int, provider, with_fit: bool, only_stale: bool) -> None:
+    from datetime import timedelta
+    async with session_factory() as db:
+        company = await db.get(LgCompany, cid)
+        if company is None or not company.domain:
+            return
+        if only_stale:
+            done = await db.scalar(select(LgEnrichment.ran_at).where(
+                LgEnrichment.company_id == cid, LgEnrichment.step == site_enrich.STEP,
+                LgEnrichment.status == "done"))
+            if done and service._aware(done) > service.utcnow() - timedelta(days=ENRICH_FRESH_DAYS):
+                return
+        try:
+            await site_enrich.enrich_company(db, company, transport=site_transport, delay=site_delay)
+            await db.commit()
+        except Exception:  # noqa: BLE001 — одна компания не должна останавливать очередь
+            await db.rollback()
+            return
+        if provider is not None and company.inn:
             try:
-                await site_enrich.enrich_company(db, company, transport=site_transport, delay=site_delay)
+                await dadata.enrich_legal(db, company, provider)
                 await db.commit()
-            except Exception:  # noqa: BLE001 — одна компания не должна останавливать очередь
+            except Exception:  # noqa: BLE001
                 await db.rollback()
-                continue
-            if provider is not None and company.inn:
-                try:
-                    await dadata.enrich_legal(db, company, provider)
-                    await db.commit()
-                except Exception:  # noqa: BLE001
-                    await db.rollback()
-            if with_fit and not company.fit_label:
-                try:
-                    await fit_ai.assess(db, company, complete=fit_complete)
-                    await db.commit()
-                except Exception:  # noqa: BLE001
-                    await db.rollback()
+        if with_fit and not company.fit_label:
+            try:
+                await fit_ai.assess(db, company, complete=fit_complete)
+                await db.commit()
+            except Exception:  # noqa: BLE001
+                await db.rollback()
 
 
 @router.post("/companies/enrich", status_code=202)
