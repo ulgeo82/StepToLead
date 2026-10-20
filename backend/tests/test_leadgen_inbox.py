@@ -101,7 +101,7 @@ class Base_(unittest.TestCase):
         async def fn(db):
             mb = LgMailbox(workspace_id=7, email="egor@team.ru", sender_name="Егор", smtp_host="s", imap_host="i",
                            login="egor@team.ru", password_encrypted=encrypt_secret("p"), daily_limit=30)
-            seq = LgSequence(workspace_id=7, name="Кухни", window={"tz": "Europe/Moscow"},
+            seq = LgSequence(workspace_id=7, name="Кухни", window={"tz": "Europe/Moscow", "gap_minutes": 0},
                              steps=[{"channel": "email", "subject": "Привет", "body": "Текст"},
                                     {"channel": "email", "delay_days": 3, "body": "Напомню"}])
             db.add_all([mb, seq])

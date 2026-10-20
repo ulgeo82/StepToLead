@@ -44,6 +44,8 @@ function EmailPage() {
     [companies, setCompanies] = useState<{ id: number; display_name: string }[]>([]),
     [companyId, setCompanyId] = useState("");
   const [preview, setPreview] = useState<{ steps: Step[] } | null>(null);
+  const [testTo, setTestTo] = useState(""),
+    [testNote, setTestNote] = useState("");
   const editorRef = useRef<HTMLDivElement>(null),
     dragIndex = useRef<number | null>(null),
     target = useRef<{ index: number; field: "subject" | "body"; start: number; end: number } | null>(null);
@@ -258,6 +260,24 @@ function EmailPage() {
       setPreview(
         await post<{ steps: Step[] }>("/sequences/preview", { company_id: Number(companyId), steps }),
       );
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function sendTest() {
+    if (busy || !testTo.trim()) return;
+    setBusy(true);
+    setError("");
+    setTestNote("");
+    try {
+      const r = await post<{ sent: number; from: string }>("/sequences/test", {
+        to: testTo.trim(),
+        steps,
+        ...(companyId ? { company_id: Number(companyId) } : {}),
+      });
+      setTestNote(`Отправлено ${r.sent} ${r.sent === 1 ? "письмо" : "письма"} с ${r.from} — проверьте, во «Входящие» ли они пришли, а не в спам.`);
     } catch (e) {
       fail(e);
     } finally {
@@ -554,8 +574,36 @@ function EmailPage() {
                 </label>
               ))}
             </div>
+            <h3>Темп отправки</h3>
+            <div className={styles.fields}>
+              <label className={styles.field}>
+                Пауза между письмами с одного ящика, мин
+                <input
+                  type="number"
+                  min={0}
+                  max={240}
+                  value={window.gap_minutes}
+                  onChange={(e) => setWindow({ ...window, gap_minutes: Number(e.target.value) })}
+                />
+                <small className={styles.muted}>Письма уходят по одному с разбросом ±30%, а не пачкой — так не попадают в спам. Рекомендуем 8–15.</small>
+              </label>
+              <label className={styles.field}>
+                Новых компаний в день
+                <input
+                  type="number"
+                  min={0}
+                  max={2000}
+                  value={window.daily_new}
+                  onChange={(e) => setWindow({ ...window, daily_new: Number(e.target.value) })}
+                />
+                <small className={styles.muted}>Сколько компаний в день получают первое письмо; 0 — без ограничения. Повторные письма идут сверх этого.</small>
+              </label>
+            </div>
             <h3>Переменные</h3>
-            <p className={styles.muted}>Поставьте курсор в теме или тексте, затем нажмите переменную.</p>
+            <p className={styles.muted}>
+              Поставьте курсор в теме или тексте, затем нажмите переменную. Варианты текста пишите в фигурных скобках через
+              черту: <code>{"{Добрый день|Здравствуйте}"}</code> — каждый получатель увидит свой вариант.
+            </p>
             <div className={styles.actions}>
               {variables.map((variable) => (
                 <button
@@ -795,6 +843,21 @@ function EmailPage() {
             >
               Предпросмотр
             </button>
+            <h3>Тестовая отправка</h3>
+            <p className={styles.muted}>Все письма цепочки сразу придут на ваш адрес с пометкой [ТЕСТ]. Если выбрана компания — с её данными.</p>
+            <div className={styles.actions}>
+              <input
+                type="email"
+                placeholder="you@example.ru"
+                aria-label="Адрес для теста"
+                value={testTo}
+                onChange={(e) => setTestTo(e.target.value)}
+              />
+              <button type="button" className={styles.secondary} disabled={busy || !testTo.trim()} onClick={sendTest}>
+                {busy ? "Отправляем…" : "Отправить тест себе"}
+              </button>
+            </div>
+            {testNote && <p className={styles.notice}>{testNote}</p>}
             {preview?.steps.map((step, index) => (
               <article className={styles.ad} key={index}>
                 <h3>

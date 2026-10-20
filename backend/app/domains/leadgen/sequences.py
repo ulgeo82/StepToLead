@@ -265,19 +265,51 @@ async def _sent_today(db: AsyncSession, mailbox_id: int, now: datetime, tz: str)
         LgTouch.status.in_(("sent", "delivered", "replied")), LgTouch.happened_at >= start)) or 0
 
 
-async def _choose_mailbox(db: AsyncSession, enrollment: LgEnrollment, now: datetime, tz: str) -> LgMailbox | None:
-    """Ящик закрепляется за компанией: вся ветка писем идёт от одного отправителя."""
+async def _ready_at(db: AsyncSession, mailbox_id: int, gap_minutes: int) -> datetime | None:
+    """Когда ящик снова можно использовать: последнее письмо + пауза с разбросом."""
+    last = (await db.execute(select(LgTouch.id, LgTouch.happened_at).where(
+        LgTouch.mailbox_id == mailbox_id, LgTouch.channel == "email", LgTouch.direction == "out",
+        LgTouch.status.in_(("sent", "delivered", "replied"))).order_by(LgTouch.happened_at.desc()).limit(1))).first()
+    if not gap_minutes or not last or not last[1]:
+        return None
+    return service._aware(last[1]) + core.gap_for(gap_minutes, last[0])
+
+
+async def _choose_mailbox(db: AsyncSession, enrollment: LgEnrollment, now: datetime, tz: str,
+                          gap_minutes: int = 10) -> tuple[LgMailbox | None, datetime | None]:
+    """Ящик закрепляется за компанией: вся ветка писем идёт от одного отправителя.
+    Возвращает (ящик, None) или (None, когда попробовать снова, если мешает только пауза между письмами)."""
     async def capacity(mb: LgMailbox) -> int:
         local_today = now.astimezone(ZoneInfo(tz)).date()
         return core.mailbox_capacity(mb.daily_limit, mb.warmup_started_on, local_today,
                                      await _sent_today(db, mb.id, now, tz))
     if enrollment.mailbox_id:
-        mb = await db.get(LgMailbox, enrollment.mailbox_id)
-        return mb if mb and mb.is_active and await capacity(mb) > 0 else None
-    boxes = (await db.execute(select(LgMailbox).where(LgMailbox.workspace_id == enrollment.workspace_id,
-                                                      LgMailbox.is_active.is_(True)))).scalars().all()
-    picked = core.pick_mailbox([(mb.id, await capacity(mb)) for mb in boxes])
-    return next((mb for mb in boxes if mb.id == picked), None)
+        boxes = [mb for mb in [await db.get(LgMailbox, enrollment.mailbox_id)] if mb and mb.is_active]
+    else:
+        boxes = (await db.execute(select(LgMailbox).where(LgMailbox.workspace_id == enrollment.workspace_id,
+                                                          LgMailbox.is_active.is_(True)))).scalars().all()
+    candidates, soonest = [], None
+    for mb in boxes:
+        left = await capacity(mb)
+        if left <= 0:
+            continue
+        ready = await _ready_at(db, mb.id, gap_minutes)
+        if ready and ready > now:
+            soonest = ready if soonest is None or ready < soonest else soonest
+            continue
+        candidates.append((mb.id, left))
+    picked = core.pick_mailbox(candidates)
+    return next((mb for mb in boxes if mb.id == picked), None), soonest
+
+
+async def _new_today(db: AsyncSession, sequence_id: int, now: datetime, tz: str) -> int:
+    """Сколько компаний получили ПЕРВОЕ письмо этой цепочки сегодня (лимит «новых в день»)."""
+    local = now.astimezone(ZoneInfo(tz))
+    start = local.replace(hour=0, minute=0, second=0, microsecond=0)
+    first = (select(LgTouch.sequence_id, func.min(LgTouch.happened_at).label("first_at"))
+             .where(LgTouch.campaign_kind == "sequence", LgTouch.campaign_id == sequence_id,
+                    LgTouch.direction == "out", LgTouch.channel == "email").group_by(LgTouch.sequence_id).subquery())
+    return await db.scalar(select(func.count()).select_from(first).where(first.c.first_at >= start)) or 0
 
 
 async def _move_deal(db: AsyncSession, company: LgCompany, stage_name: str, note: str | None = None,
@@ -350,16 +382,22 @@ async def _send_email_step(db, transport, enr, company, step, window, now) -> st
     if not decision.ok and decision.reason != "crm:open_deal":
         _finish(enr, "stopped", decision.reason, now)
         return "stopped"
-    mailbox = await _choose_mailbox(db, enr, now, window.tz)
-    if mailbox is None:  # лимиты на сегодня выбраны — переносим на следующее окно
-        enr.next_at = core.in_window(now + NO_CAPACITY_RETRY, window)
+    if enr.current_step == 0 and window.daily_new and await _new_today(db, enr.sequence_id, now, window.tz) >= window.daily_new:
+        tomorrow = now.astimezone(ZoneInfo(window.tz)).replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+        enr.next_at = core.in_window(tomorrow, window)  # лимит новых на сегодня — первое письмо завтра
+        return "postponed"
+    mailbox, retry_at = await _choose_mailbox(db, enr, now, window.tz, window.gap_minutes)
+    if mailbox is None:
+        # Пауза между письмами — пробуем, когда ящик освободится; дневной лимит — через час/в следующее окно.
+        enr.next_at = core.in_window(retry_at if retry_at else now + NO_CAPACITY_RETRY, window)
         return "postponed"
     ctx = await _context(db, company, mailbox)
+    seed = f"{enr.id}:{enr.current_step}"
     first_in_thread = step.new_thread or not enr.thread_message_id
-    subject = core.render(step.subject or "", ctx) if (first_in_thread or step.subject) else ""
+    subject = core.render(step.subject or "", ctx, seed) if (first_in_thread or step.subject) else ""
     if not first_in_thread:
         subject = subject or f"Re: {enr.thread_subject}"
-    body = core.render(step.body, ctx)
+    body = core.render(step.body, ctx, seed)
     message_id = make_msgid(domain=mailbox.email.split("@")[-1])
     mail = OutgoingMail(mailbox.email, mailbox.sender_name, contact.value_norm, subject, body, message_id,
                         None if first_in_thread else enr.thread_message_id)

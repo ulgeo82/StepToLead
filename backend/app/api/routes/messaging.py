@@ -448,7 +448,7 @@ async def ai_suggest(conversation_id: int, request: Request, db: AsyncSession = 
                                                    ai_settings(project), deal_line, limit),
                                  ai.transcript(messages, row.title), max_tokens=400, feature="chat", workspace_id=row.workspace_id)
     except ai.AIError as exc:
-        raise HTTPException(422, str(exc)) from None
+        raise HTTPException(402 if exc.code == "tokens_empty" else 422, ai.client_error(exc)) from None
     return {"text": text[:limit]}
 
 
@@ -472,7 +472,7 @@ async def ai_summary(conversation_id: int, payload: SummaryIn, request: Request,
         text = await ai.complete(ai.SUMMARY_PROMPT, [{"role": "user", "content": lines[-12000:]}], max_tokens=500, temperature=0.1,
                                  feature="summary", workspace_id=row.workspace_id)
     except ai.AIError as exc:
-        raise HTTPException(422, str(exc)) from None
+        raise HTTPException(402 if exc.code == "tokens_empty" else 422, ai.client_error(exc)) from None
     saved = False
     if payload.save and row.deal_id:
         deal = await db.get(CrmDeal, row.deal_id)

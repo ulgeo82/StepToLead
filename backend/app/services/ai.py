@@ -80,6 +80,17 @@ def trim_input(system, messages):
     return system, list(reversed(turns))
 
 
+def client_error(exc: "AIError") -> str:
+    """Текст ошибки для клиента: без провайдера, ключей и моделей. Технические детали — только в логах и админке."""
+    if getattr(exc, "code", None) == "tokens_empty":
+        return str(exc)
+    if "лимит ИИ" in str(exc):
+        return "Сегодня ИИ уже обработал максимум запросов. Попробуйте позже или напишите вашему маркетологу StepToLead"
+    import logging
+    logging.getLogger("uvicorn.error.ai").warning("client AI error: %s", exc)
+    return "ИИ сейчас недоступен — мы уже знаем и чиним. Попробуйте через несколько минут"
+
+
 def failure(status):
     if status == 401:
         return "ИИ-сервис отклонил API-ключ: проверьте ключ подключения"

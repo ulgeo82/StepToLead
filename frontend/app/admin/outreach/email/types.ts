@@ -5,7 +5,7 @@ export type Step = {
   body: string;
   new_thread: boolean;
 };
-export type Window = { tz: string; start_hour: number; end_hour: number; weekdays: number[] };
+export type Window = { tz: string; start_hour: number; end_hour: number; weekdays: number[]; gap_minutes: number; daily_new: number };
 export type Sequence = {
   id: number;
   name: string;
@@ -61,6 +61,8 @@ export const emptyWindow = (): Window => ({
   start_hour: 10,
   end_hour: 18,
   weekdays: [0, 1, 2, 3, 4],
+  gap_minutes: 10,
+  daily_new: 30,
 });
 export function fieldForError(text: string) {
   const step = text.match(/Шаг (\d+):/i);

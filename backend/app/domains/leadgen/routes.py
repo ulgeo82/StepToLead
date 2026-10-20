@@ -882,7 +882,8 @@ def validate_sequence(payload: SequenceIn) -> tuple[list, dict]:
         raise HTTPException(422, str(exc))
     return ([{"channel": s.channel, "delay_days": s.delay_days, "subject": s.subject, "body": s.body,
               "new_thread": s.new_thread} for s in steps],
-            {"tz": window.tz, "start_hour": window.start_hour, "end_hour": window.end_hour, "weekdays": list(window.weekdays)})
+            {"tz": window.tz, "start_hour": window.start_hour, "end_hour": window.end_hour, "weekdays": list(window.weekdays),
+             "gap_minutes": window.gap_minutes, "daily_new": window.daily_new})
 
 
 async def sequence_row(db: AsyncSession, seq: LgSequence) -> dict:
@@ -947,6 +948,57 @@ async def preview_sequence(payload: PreviewIn, db: AsyncSession = Depends(get_db
     ctx = await sequences._context(db, company, mailbox)
     return {"context": ctx, "steps": [{"channel": s.channel, "subject": seq_core.render(s.subject or "", ctx) or None,
                                        "body": seq_core.render(s.body, ctx)} for s in steps]}
+
+
+class TestSendIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    to: str = Field(pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$", max_length=254)
+    steps: list[dict] = Field(min_length=1, max_length=seq_core.MAX_STEPS)
+    company_id: int | None = None
+    mailbox_id: int | None = None
+
+
+@router.post("/sequences/test")
+async def test_sequence(payload: TestSendIn, db: AsyncSession = Depends(get_db), admin: AdminUser = Depends(require_admin)):
+    """Тест перед запуском: все письма цепочки уходят на ваш адрес сразу, с пометкой [ТЕСТ]. В статистику не идут."""
+    from email.utils import make_msgid
+    from app.core.crypto import decrypt_secret
+    ws = workspace_id()
+    try:
+        steps = seq_core.parse_steps(payload.steps)
+    except seq_core.SequenceError as exc:
+        raise HTTPException(422, str(exc))
+    q = select(LgMailbox).where(LgMailbox.workspace_id == ws, LgMailbox.is_active.is_(True))
+    if payload.mailbox_id:
+        q = q.where(LgMailbox.id == payload.mailbox_id)
+    mailbox = await db.scalar(q.order_by(LgMailbox.id).limit(1))
+    if mailbox is None:
+        raise HTTPException(409, "Нет активного почтового ящика — добавьте и проверьте ящик")
+    company = await company_or_404(db, ws, payload.company_id) if payload.company_id else None
+    ctx = await sequences._context(db, company, mailbox) if company else {
+        "company": "Ромашка", "domain": "romashka.ru", "city": "Самара", "niche": "Ремонт квартир",
+        "ad_title": "Ремонт квартир под ключ", "ad_text": "Фиксированная смета, гарантия 3 года",
+        "director_name": "Иванов Иван Иванович", "director_first_name": "Иван", "sender_name": mailbox.sender_name}
+    transport, sent, thread_id, thread_subject = mail_transport_factory(), 0, None, None
+    for i, step in enumerate(steps):
+        if step.channel != "email":
+            continue
+        first = step.new_thread or not thread_id
+        subject = seq_core.render(step.subject or "", ctx, f"test:{i}") if (first or step.subject) else ""
+        subject = subject or f"Re: {thread_subject}"
+        message_id = make_msgid(domain=mailbox.email.split("@")[-1])
+        mail = sequences.OutgoingMail(mailbox.email, mailbox.sender_name, payload.to, f"[ТЕСТ] {subject}",
+                                      seq_core.render(step.body, ctx, f"test:{i}"), message_id, None if first else thread_id)
+        try:
+            await transport.send(mailbox, decrypt_secret(mailbox.password_encrypted), mail)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(502, f"Ящик {mailbox.email} не отправил письмо: {type(exc).__name__}: {exc}"[:400])
+        if first:
+            thread_id, thread_subject = message_id, subject
+        sent += 1
+    if not sent:
+        raise HTTPException(422, "В цепочке нет писем — тестировать нечего")
+    return {"sent": sent, "from": mailbox.email, "to": payload.to}
 
 
 class EnrollIn(BaseModel):

@@ -1,4 +1,5 @@
 "use client";
+import { AiTokensMini } from "@/components/ai-tokens";
 import { BrandMark } from "@/components/brand-mark";
 import BriefDemoBanner from "@/components/brief-demo-banner";
 
@@ -32,7 +33,7 @@ export function ProjectSidebar({ project, projectId, active, role }: {
       <small>МАРКЕТИНГ</small>
       {allowed("view_ads") && <Link className={active === "ads" ? "active" : ""} href={`/ads${suffix}`}><b>05</b> Реклама</Link>}
       <small>УПРАВЛЕНИЕ</small>{permissions?.includes("manage_team") && <Link className={active === "team" ? "active" : ""} href="/team" title="Команда клиентской организации"><b>06</b> Команда</Link>}{(permissions?.includes("manage_settings") || permissions?.includes("manage_sources")) && <Link className={active === "settings" ? "active" : ""} href={`/settings${suffix}`} title="Настройки клиентской организации"><b>07</b> Настройки</Link>}{role !== "admin" && <Link className={active === "profile" ? "active" : ""} href={`/profile${suffix}`} title="Личный Telegram и пуш-уведомления"><b>08</b> Мои уведомления</Link>}
-    </nav><div className="resultSidebarFoot"><span>●</span> Данные вашего проекта · {role === "admin" ? <Link href="/admin">В админку</Link>
+    </nav>{role !== "admin" && <AiTokensMini href={permissions?.includes("manage_settings") ? `/settings${suffix}#tokens` : undefined}/>}<div className="resultSidebarFoot"><span>●</span> Данные вашего проекта · {role === "admin" ? <Link href="/admin">В админку</Link>
       : <button type="button" onClick={async () => { await api("/portal/auth/logout", { method: "POST" }).catch(() => undefined); location.assign("/login"); }}>Выйти</button>}</div>
   </aside>;
 }

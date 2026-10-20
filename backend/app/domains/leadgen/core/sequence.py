@@ -1,6 +1,7 @@
 """Цепочки касаний: шаги, шаблоны, рабочие часы, лимиты ящиков с прогревом, разбор входящих. Без сети и БД."""
 from __future__ import annotations
 
+import random
 import re
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
@@ -13,6 +14,8 @@ VARIABLES = ("company", "domain", "city", "niche", "ad_title", "ad_text", "direc
              "sender_name")
 MAX_STEPS = 10
 _VAR = re.compile(r"\{\{\s*([a-z_]+)\s*(?:\|([^}]*))?\}\}")
+# Спинтакс как в Instantly: {Добрый день|Здравствуйте} — у каждого получателя свой вариант (стабильно).
+_SPIN = re.compile(r"(?<!\{)\{([^{}]*\|[^{}]*)\}(?!\})")
 
 
 class SequenceError(ValueError):
@@ -34,6 +37,8 @@ class Window:
     start_hour: int = 10
     end_hour: int = 18
     weekdays: tuple[int, ...] = (0, 1, 2, 3, 4)   # пн–пт
+    gap_minutes: int = 10        # пауза между письмами с одного ящика (±30% случайно), как «delay between emails»
+    daily_new: int = 0           # сколько новых компаний в день получают первое письмо; 0 — без ограничения
 
 
 def parse_steps(raw: list[dict]) -> list[Step]:
@@ -66,7 +71,13 @@ def parse_steps(raw: list[dict]) -> list[Step]:
 def parse_window(raw: dict | None) -> Window:
     raw = raw or {}
     w = Window(tz=raw.get("tz") or "Europe/Moscow", start_hour=int(raw.get("start_hour", 10)),
-               end_hour=int(raw.get("end_hour", 18)), weekdays=tuple(sorted(set(raw.get("weekdays", (0, 1, 2, 3, 4))))))
+               end_hour=int(raw.get("end_hour", 18)), weekdays=tuple(sorted(set(raw.get("weekdays", (0, 1, 2, 3, 4))))),
+               gap_minutes=int(raw["gap_minutes"]) if raw.get("gap_minutes") is not None else 10,
+               daily_new=int(raw.get("daily_new", 0) or 0))
+    if not 0 <= w.gap_minutes <= 240:
+        raise SequenceError("Пауза между письмами — от 0 до 240 минут")
+    if not 0 <= w.daily_new <= 2000:
+        raise SequenceError("Новых компаний в день — от 0 до 2000")
     try:
         ZoneInfo(w.tz)
     except Exception as exc:  # noqa: BLE001
@@ -76,8 +87,21 @@ def parse_window(raw: dict | None) -> Window:
     return w
 
 
-def render(template: str, ctx: dict) -> str:
-    """{{company}} или {{director_first_name|коллеги}} — значение по умолчанию после |."""
+def spin(template: str, seed: str | int | None = None) -> str:
+    """{a|b|c} -> один вариант. seed — чтобы у одного получателя текст не менялся между предпросмотром и отправкой."""
+    rng = random.Random(seed)
+    for _ in range(20):  # вложенные варианты раскрываем изнутри наружу
+        new = _SPIN.sub(lambda m: rng.choice(m.group(1).split("|")), template)
+        if new == template:
+            break
+        template = new
+    return template
+
+
+def render(template: str, ctx: dict, seed: str | int | None = None) -> str:
+    """{{company}} или {{director_first_name|коллеги}} — значение по умолчанию после |. {a|b} — спинтакс."""
+    template = spin(template, seed)
+
     def sub(m: re.Match) -> str:
         value = ctx.get(m.group(1))
         return str(value).strip() if value not in (None, "") else (m.group(2) or "").strip()
@@ -112,6 +136,11 @@ def step_due(previous_at: datetime, step: Step, w: Window) -> datetime:
 
 
 WARMUP = ((7, 5), (14, 10), (21, 20))   # (до дня, писем в день) — дальше дневной лимит ящика
+
+
+def gap_for(base_minutes: int, key: int) -> timedelta:
+    """Пауза между письмами с разбросом 0.7–1.3: письма уходят не по таймеру, как у живого человека."""
+    return timedelta(minutes=base_minutes * (0.7 + (key * 7919 % 61) / 100))
 
 
 def mailbox_capacity(daily_limit: int, warmup_started: date | None, today: date, sent_today: int) -> int:

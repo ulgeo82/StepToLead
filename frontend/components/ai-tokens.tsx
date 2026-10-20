@@ -179,3 +179,64 @@ export function AdminTokensClient({ workspaceId }: { workspaceId: number }) {
       <b>+{tokens(p.tokens)}</b><span>{p.price_rub ? rub(p.price_rub) : p.comment || "бонус"}</span><em className={p.status}>{STATUS[p.status]}</em></li>)}</ul>}
   </section>;
 }
+
+/* ------------------------------------------------------------------ состояние для всего портала */
+
+type Mini = Pick<TokenState, "ai_included" | "unlimited" | "level" | "remaining" | "capacity" | "days_left" | "days_to_renew" | "renews_at" | "bought_left" | "warn_share"> & { can_buy?: boolean };
+let cache: { at: number; value: Mini | null } | null = null;
+let pending: Promise<Mini | null> | null = null;
+const listeners = new Set<(v: Mini | null) => void>();
+
+/** Остаток токенов одной загрузкой на страницу (кэш 60 с). refreshAiTokens() — после ИИ-действия. */
+export function useAiTokens(): Mini | null {
+  const [value, setValue] = useState<Mini | null>(cache?.value ?? null);
+  useEffect(() => {
+    listeners.add(setValue);
+    if (!cache || Date.now() - cache.at > 60_000) void refreshAiTokens();
+    return () => { listeners.delete(setValue); };
+  }, []);
+  return value;
+}
+
+export function refreshAiTokens(): Promise<Mini | null> {
+  if (!pending) {
+    pending = api<Mini>("/ai-tokens").catch(() => null).then(v => {
+      cache = { at: Date.now(), value: v }; pending = null;
+      listeners.forEach(fn => fn(v));
+      return v;
+    });
+  }
+  return pending;
+}
+
+const shown = (s: Mini | null): s is Mini => !!s && !s.unlimited && (s.ai_included || s.bought_left > 0);
+
+/** Сайдбар клиента: компактная полоса остатка и «хватит на N дней». */
+export function AiTokensMini({ href }: { href?: string }) {
+  const s = useAiTokens();
+  if (!shown(s)) return null;
+  const f = forecast(s as TokenState);
+  const body = <>
+    <span className="tokMiniHead"><span>✦ ИИ-токены</span><b>{tokens(s.remaining)}</b></span>
+    <Meter s={s as TokenState}/>
+    <span className={`tokMiniNote ${s.level}`}>{s.level === "empty" ? "Закончились — ИИ на паузе" : s.level === "low" ? `Мало: ${f.chip}` : `Хватит на ${f.chip}`}</span>
+  </>;
+  return href ? <a className={`tokMini ${s.level}`} href={href} title="Подробнее и пополнение">{body}</a>
+    : <div className={`tokMini ${s.level}`}>{body}</div>;
+}
+
+/** Рядом с ИИ-кнопками: предупреждение, когда токенов мало или они закончились. */
+export function AiTokensHint({ settingsHref }: { settingsHref?: string }) {
+  const s = useAiTokens();
+  if (!shown(s) || s.level === "ok") return null;
+  return <p className={`tokHint ${s.level}`} role="status">
+    {s.level === "empty" ? "Токены ИИ закончились — подсказки и резюме на паузе." : `Токены ИИ заканчиваются: ${forecast(s as TokenState).chip}.`}
+    {settingsHref && s.can_buy ? <> <a href={settingsHref}>{s.level === "empty" ? "Пополнить" : "Подробнее"}</a></>
+      : <> Пополнить может владелец аккаунта.</>}
+  </p>;
+}
+
+/** true — кнопки ИИ отключаем заранее, а не после ошибки. */
+export function aiTokensEmpty(s: Mini | null) {
+  return shown(s) && s.level === "empty";
+}

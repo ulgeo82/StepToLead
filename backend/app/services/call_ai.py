@@ -412,6 +412,7 @@ def public(call: Call, *, full: bool = False) -> dict | None:
     data = {"status": call.ai_status, "score": info.get("score"), "summary": info.get("summary"),
             "error": info.get("error") if call.ai_status == "error" else None}
     if full:
-        data.update({k: info.get(k) for k in ("need", "next_step", "objections", "client_mood", "checklist", "advice", "reason", "provider", "at")})
+        # Провайдера/модель клиенту не показываем.
+        data.update({k: info.get(k) for k in ("need", "next_step", "objections", "client_mood", "checklist", "advice", "reason", "at")})
         data["transcript"] = transcript_text(info.get("transcript") or [])
     return data

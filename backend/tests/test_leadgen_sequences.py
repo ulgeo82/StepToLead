@@ -134,7 +134,7 @@ class FlowBase(unittest.TestCase):
         mb = LgMailbox(workspace_id=7, email="egor@steptolead-team.ru", sender_name="Егор", smtp_host="smtp.x",
                        imap_host="imap.x", login="egor@steptolead-team.ru", password_encrypted=encrypt_secret("secret"),
                        daily_limit=30, warmup_started_on=warmup)
-        seq = LgSequence(workspace_id=7, name="Кухни", steps=steps, window={"tz": "Europe/Moscow"})
+        seq = LgSequence(workspace_id=7, name="Кухни", steps=steps, window={"tz": "Europe/Moscow", "gap_minutes": 0})
         db.add_all([mb, seq])
         await db.flush()
         companies = []
@@ -249,6 +249,29 @@ class FlowTests(FlowBase):
         self.assertEqual(len(t.sent), 5)                      # прогрев: 5 писем в первый день
         self.assertEqual((stats["emails"], stats["postponed"]), (5, 2))
         self.assertEqual(statuses.count("active"), 7)
+
+    def test_pacing_gap_daily_new_and_spintax(self):
+        """Как в Instantly: пауза между письмами с ящика, лимит новых в день, у получателей разные варианты текста."""
+        from app.domains.leadgen.core import sequence as core
+        t = FakeTransport()
+
+        async def fn(db):
+            mb, seq, cs = await self.setup_world(db, n=4)
+            seq.window = {"tz": "Europe/Moscow", "gap_minutes": 10, "daily_new": 3}
+            seq.steps = [{"channel": "email", "subject": "{Вопрос|Идея} для {{company}}", "body": "{Добрый день|Здравствуйте}!"}]
+            for c in cs:
+                await sequences.enroll(db, seq, c, now=NOW)
+            first = await sequences.process_due(db, t, now=NOW)            # с ящика сразу только одно письмо
+            moments = [NOW + timedelta(minutes=15 * k) for k in range(1, 8)]
+            for m in moments:
+                await sequences.process_due(db, t, now=m)
+            return first
+        first = self.run_db(fn)
+        self.assertEqual(first["emails"], 1)
+        self.assertEqual(len(t.sent), 3)                                     # лимит 3 новых в день
+        self.assertTrue(all(m.subject.split()[0] in ("Вопрос", "Идея") for m in t.sent))
+        self.assertTrue(all(m.body in ("Добрый день!", "Здравствуйте!") for m in t.sent))
+        self.assertEqual(core.spin("{a|b}", "x"), core.spin("{a|b}", "x"))   # стабильно для одного получателя
 
     def test_refused_recipient_is_bounced(self):
         t = FakeTransport(refuse={"info@kuhni0.ru"})

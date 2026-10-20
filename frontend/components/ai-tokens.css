@@ -43,3 +43,16 @@
 .tokAdmin .tokMeter{margin:10px 0 6px}
 .tokAdmin .tokFacts{margin:12px 0}
 @media (max-width:640px){.tokHistory li{grid-template-columns:1fr auto}.tokBig strong{font-size:26px}}
+/* Мини-бар в тёмном сайдбаре клиента */
+.tokMini{display:flex;flex-direction:column;gap:7px;margin:14px 2px 0;padding:11px 12px;border-radius:12px;border:1px solid #2b394a;background:#1c293b;color:#fff;text-decoration:none;transition:border-color .2s}
+a.tokMini:hover{border-color:#3d6dd8}
+.tokMiniHead{display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-size:11px;color:#9caabd}
+.tokMiniHead b{font-size:13px;color:#fff;font-weight:800}
+.tokMini .tokMeter{height:6px;background:#2a3a52}
+.tokMiniNote{font-size:10px;color:#9caabd}
+.tokMiniNote.low{color:#fbbf24}.tokMiniNote.empty{color:#fca5a5}
+.tokMini.empty{border-color:#7f1d1d}
+@media(max-width:960px){.tokMini{display:none}}
+.tokHint{margin:6px 12px 0;padding:8px 11px;border-radius:9px;font-size:12px;background:#fff5e8;color:#9a5a0c}
+.tokHint.empty{background:#fdeceb;color:#b42318}
+.tokHint a{color:inherit;font-weight:700;text-decoration:underline}

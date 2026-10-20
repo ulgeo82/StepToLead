@@ -109,7 +109,7 @@ function CallAiModal({ callId, onClose }: { callId: number; onClose: () => void 
       {data && <CallPlayer call={data.call}/>}
       {a.transcript && <section><button type="button" className="crmLinkButton" onClick={() => setShowText(v => !v)}>{showText ? "Скрыть расшифровку" : "Показать расшифровку"}</button>
         {showText && <pre className="callAiTranscript">{a.transcript}</pre>}</section>}
-      <p className="crmMuted">Разбор сделан ИИ{a.provider ? ` (${a.provider})` : ""} по записи разговора — возможны неточности распознавания.</p></>}
+      <p className="crmMuted">Разбор сделан ИИ по записи разговора — возможны неточности распознавания.</p></>}
   </div></div>;
 }
 

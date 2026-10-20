@@ -1,5 +1,6 @@
 "use client";
 
+import { AiTokensHint, aiTokensEmpty, refreshAiTokens, useAiTokens } from "@/components/ai-tokens";
 import { FormEvent, KeyboardEvent, useCallback, useEffect, useRef, useState } from "react";
 import { request, Team, when } from "./shared";
 import { TelegramProfileConnect } from "./telegram-profile-connect";
@@ -49,6 +50,8 @@ export function ChatThread({ conversationId, projectId, compact, canWrite, onCha
   const [showTemplates, setShowTemplates] = useState(false);
   const [aiBusy, setAiBusy] = useState("");
   const [summary, setSummary] = useState<{ text: string; saved: boolean } | null>(null);
+  const aiTokens = useAiTokens();
+  const noTokens = aiTokensEmpty(aiTokens);
   const bottom = useRef<HTMLDivElement>(null);
   const draftSeen = useRef("");
   const draft = detail?.meta.auto_draft as { text: string; created_at: string } | undefined;
@@ -73,12 +76,12 @@ export function ChatThread({ conversationId, projectId, compact, canWrite, onCha
   }
   async function suggest() {
     setAiBusy("suggest"); setError("");
-    try { const r = await request<{ text: string }>(`/crm/conversations/${conversationId}/ai/suggest`, "POST", {}); setText(r.text); }
+    try { const r = await request<{ text: string }>(`/crm/conversations/${conversationId}/ai/suggest`, "POST", {}); setText(r.text); void refreshAiTokens(); }
     catch (e) { setError((e as Error).message); } finally { setAiBusy(""); }
   }
   async function summarize(save = false) {
     setAiBusy(save ? "save" : "summary"); setError("");
-    try { setSummary(await request<{ text: string; saved: boolean }>(`/crm/conversations/${conversationId}/ai/summary`, "POST", { save })); }
+    try { setSummary(await request<{ text: string; saved: boolean }>(`/crm/conversations/${conversationId}/ai/summary`, "POST", { save })); void refreshAiTokens(); }
     catch (e) { setError((e as Error).message); } finally { setAiBusy(""); }
   }
   async function saveTemplate() {
@@ -89,7 +92,8 @@ export function ChatThread({ conversationId, projectId, compact, canWrite, onCha
   const limit = detail?.channel_kind === "telegram_user" ? Infinity
     : detail?.channel_kind === "avito" ? 1000 : 4096;
   return <div className={`chatThread ${compact ? "compact" : ""}`}>
-    {detail?.ai_available && <div className="chatAiBar"><button type="button" className="crmLinkButton" disabled={!!aiBusy || !detail.messages.length} onClick={() => summarize(false)}>{aiBusy === "summary" ? "Готовим резюме…" : "✨ Резюме переписки"}</button></div>}
+    {detail?.ai_available && <AiTokensHint settingsHref="/settings#tokens"/>}
+    {detail?.ai_available && <div className="chatAiBar"><button type="button" className="crmLinkButton" disabled={!!aiBusy || !detail.messages.length || noTokens} title={noTokens ? "Токены ИИ закончились" : undefined} onClick={() => summarize(false)}>{aiBusy === "summary" ? "Готовим резюме…" : "✨ Резюме переписки"}</button></div>}
     {summary && <div className="chatSummary"><div><b>Резюме (ИИ)</b><button type="button" onClick={() => setSummary(null)} aria-label="Закрыть">×</button></div><p className="crmPre">{summary.text}</p>
       {detail?.deal_id && (summary.saved ? <small>Сохранено в историю сделки</small> : canWrite && <button type="button" className="crmLinkButton" disabled={!!aiBusy} onClick={() => summarize(true)}>{aiBusy === "save" ? "Сохраняем…" : "Сохранить в сделку"}</button>)}</div>}
     <div className="chatMessages">{!detail ? <p className="crmMuted">Загружаем…</p> : detail.messages.map((m, i) => {
@@ -109,7 +113,7 @@ export function ChatThread({ conversationId, projectId, compact, canWrite, onCha
         {!templates.length && <p className="crmMuted">Шаблонов пока нет: напишите ответ и нажмите «В шаблоны».</p>}</div>}
       <textarea value={text} onChange={e => setText(e.target.value)} onKeyDown={onKey} maxLength={Number.isFinite(limit) ? limit : undefined} placeholder={`Ответ клиенту${detail?.channel_kind ? ` в ${channelNames[detail.channel_kind] || "чат"}` : ""} · Ctrl+Enter — отправить`}/>
       <div className="chatComposerBar"><button type="button" className="crmLinkButton" onClick={() => setShowTemplates(v => !v)}>⚡ Шаблоны</button>
-        {detail?.ai_available && <button type="button" className="crmLinkButton chatAiSuggest" disabled={!!aiBusy || !detail.messages.length} onClick={suggest} title="ИИ напишет черновик — проверьте и отправьте сами">{aiBusy === "suggest" ? "Пишем черновик…" : "✨ Подсказать ответ"}</button>}
+        {detail?.ai_available && <button type="button" className="crmLinkButton chatAiSuggest" disabled={!!aiBusy || !detail.messages.length || noTokens} onClick={suggest} title={noTokens ? "Токены ИИ закончились — пополните в настройках" : "ИИ напишет черновик — проверьте и отправьте сами"}>{aiBusy === "suggest" ? "Пишем черновик…" : "✨ Подсказать ответ"}</button>}
         {text.trim().length > 5 && <button type="button" className="crmLinkButton" onClick={saveTemplate}>В шаблоны</button>}
         <span className="crmMuted">{text.length}{Number.isFinite(limit) ? `/${limit}` : ""}</span><button className="crmPrimary" disabled={busy || !text.trim()}>{busy ? "Отправляем…" : "Отправить"}</button></div></form>}
   </div>;
