@@ -193,15 +193,18 @@ class FlowTests(FlowBase):
             enr = await db.scalar(select(LgEnrollment))
             deal = await db.get(CrmDeal, c.crm_deal_id)
             stage = (await db.get(CrmStage, deal.stage_id)).name
-            note = await db.scalar(select(CrmActivity.payload).where(CrmActivity.deal_id == deal.id)
-                                   .order_by(CrmActivity.id.desc()).limit(1))
+            notes = (await db.scalars(select(CrmActivity.payload).where(CrmActivity.deal_id == deal.id)
+                                      .order_by(CrmActivity.id.desc()))).all()
+            note = {"text": "\n".join((n or {}).get("text", "") for n in notes)}
             inbound = await db.scalar(select(LgTouch).where(LgTouch.direction == "in"))
             return counts, later, enr, c, stage, note, inbound, mb
         counts, later, enr, c, stage, note, inbound, mb = self.run_db(fn)
         self.assertEqual(counts, {"reply": 1})
         self.assertEqual((later["emails"], later["tasks"]), (0, 0))
-        self.assertEqual((enr.status, c.stage, stage), ("replied", "replied", "Ответил"))
+        # «Давайте созвонимся завтра» — явный интерес: триггер сразу переводит сделку в «Интерес».
+        self.assertEqual((enr.status, c.stage, stage), ("replied", "replied", "Интерес"))
         self.assertIn("Давайте созвонимся завтра", note["text"])
+        self.assertIn("Горячий ответ", note["text"])
         self.assertEqual(inbound.body, "Давайте созвонимся завтра")
         self.assertEqual(mb.imap_last_uid, 10)
 

@@ -582,12 +582,15 @@ class SettingsIn(BaseModel):
     recontact_days: int | None = Field(default=None, ge=1, le=3650)
     outreach_pipeline_id: int | None = None
     icp: str | None = Field(default=None, min_length=20, max_length=3000)  # портрет клиента для ИИ-оценки
+    hot: dict | None = None  # триггер «Явный интерес»: threshold, sla_minutes, notify, remind
 
 
 @router.get("/settings")
 async def get_settings(db: AsyncSession = Depends(get_db), admin: AdminUser = Depends(require_admin)):
+    from app.domains.leadgen import hot
     value = await service.get_settings(db)
-    return {**value, "icp": value.get("icp") or fit_ai.DEFAULT_ICP, "fit_ai_available": fit_available()}
+    return {**value, "icp": value.get("icp") or fit_ai.DEFAULT_ICP, "fit_ai_available": fit_available(),
+            "hot": await hot.config(db)}
 
 
 @router.put("/settings")
@@ -598,6 +601,14 @@ async def put_settings(payload: SettingsIn, db: AsyncSession = Depends(get_db), 
         if any(not -10 <= v <= 10 for v in patch["weights"].values()):
             raise HTTPException(422, "Вес сигнала: от −10 до 10")
         patch["weights"] = {**current["weights"], **patch["weights"]}
+    if "hot" in patch:
+        h = patch["hot"]
+        try:
+            patch["hot"] = {"threshold": max(1, min(100, int(h.get("threshold", 70)))),
+                            "sla_minutes": max(5, min(1440, int(h.get("sla_minutes", 15)))),
+                            "notify": bool(h.get("notify", True)), "remind": bool(h.get("remind", True))}
+        except (TypeError, ValueError):
+            raise HTTPException(422, "Триггер интереса: порог 1–100, срок 5–1440 минут")
     if "platform_domains" in patch:
         patch["platform_domains"] = sorted({d for d in (normalize_domain(x) for x in patch["platform_domains"]) if d})
     value = {**current, **patch}
@@ -1149,11 +1160,22 @@ async def outreach_analytics(days: int = Query(30, ge=1, le=365), niche: str | N
 async def inbox_list(status: str = Query("unhandled", pattern="^(unhandled|handled|all)$"),
                      label: str | None = Query(None, pattern="^(" + "|".join(inbox.LABELS) + ")$"),
                      mailbox_id: int | None = None, q: str | None = Query(None, max_length=200),
+                     hot: bool = False,
                      limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0),
                      db: AsyncSession = Depends(get_db), admin: AdminUser = Depends(require_admin)):
     data = await inbox.listing(db, workspace_id(), status=status, label=label, mailbox_id=mailbox_id, q=q,
-                               limit=limit, offset=offset)
+                               limit=limit, offset=offset, hot=hot)
     return {**data, "ai_available": inbox_available()}
+
+
+@router.get("/inbox-counter")
+async def inbox_counter(db: AsyncSession = Depends(get_db), admin: AdminUser = Depends(require_admin)):
+    """Для меню: сколько неразобранных ответов и сколько из них горячих."""
+    from app.domains.leadgen.models import LgTouch as T
+    base = (select(func.count(T.id)).join(LgCompany, LgCompany.id == T.company_id)
+            .where(LgCompany.workspace_id == workspace_id(), T.direction == "in", T.channel == "email",
+                   T.handled_at.is_(None)))
+    return {"unhandled": await db.scalar(base) or 0, "hot": await db.scalar(base.where(T.hot_at.is_not(None))) or 0}
 
 
 async def inbox_touch_or_404(db: AsyncSession, touch_id: int):

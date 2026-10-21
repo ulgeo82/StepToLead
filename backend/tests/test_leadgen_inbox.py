@@ -61,7 +61,7 @@ class RuleTests(unittest.TestCase):
 
     def test_parse(self):
         self.assertEqual(inbox.parse_answer('{"label":"LATER","summary":"  после  сезона "}'),
-                         {"label": "later", "summary": "после сезона"})
+                         {"label": "later", "summary": "после сезона", "score": None, "signals": []})
         with self.assertRaises(inbox.LabelParseError):
             inbox.parse_answer('{"label":"maybe"}')
 

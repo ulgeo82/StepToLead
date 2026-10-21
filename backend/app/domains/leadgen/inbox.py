@@ -65,7 +65,12 @@ SYSTEM = (
     "Ты разбираешь ответы компаний на холодное письмо маркетингового агентства. "
     "Определи намерение и ответь ТОЛЬКО JSON без пояснений вокруг:\n"
     '{"label": "interested" | "question" | "later" | "not_interested" | "unsubscribe" | "auto" | "other", '
-    '"summary": "суть ответа по-русски, до 120 символов"}\n'
+    '"summary": "суть ответа по-русски, до 120 символов", "score": 0-100, '
+    '"signals": ["phone" | "call" | "price" | "trial" | "meeting" | "details"]}\n'
+    "score — сила интереса к продолжению разговора (0 — отказ, 100 — просят позвонить прямо сейчас). "
+    "signals — только то, что явно есть в тексте: phone — оставили телефон, call — предлагают/просят созвон, "
+    "price — спрашивают цену, trial — интересуются тестом/демо, meeting — называют день или время, "
+    "details — просят подробности или материалы.\n"
     "interested — готовы обсуждать или просят подробности/цену/созвон; question — задают вопрос, но интереса не "
     "выразили; later — просят вернуться позже; not_interested — вежливый отказ; unsubscribe — просят больше не "
     "писать; auto — автоответ или отпуск; other — всё остальное. Не выдумывай того, чего нет в тексте."
@@ -89,7 +94,13 @@ def parse_answer(text: str) -> dict:
     if label not in LABELS:
         raise LabelParseError(f"неизвестная метка {label!r}")
     summary = re.sub(r"\s+", " ", str(data.get("summary") or "")).strip()[:300] or None
-    return {"label": label, "summary": summary}
+    try:
+        score = max(0, min(100, int(data.get("score")))) if data.get("score") is not None else None
+    except (TypeError, ValueError):
+        score = None
+    allowed = {"phone", "call", "price", "trial", "meeting", "details"}
+    signals = [s for s in (data.get("signals") or []) if isinstance(s, str) and s in allowed]
+    return {"label": label, "summary": summary, "score": score, "signals": signals}
 
 
 def _validator(text: str) -> None:
@@ -122,6 +133,9 @@ async def classify(db: AsyncSession, touch: LgTouch, *, complete=None) -> dict:
     if result["label"] in SELF_HANDLED and touch.handled_at is None:
         touch.handled_at = service.utcnow()
     await db.flush()
+    if company is not None and result["label"] in ("interested", "question"):
+        from app.domains.leadgen import hot
+        await hot.mark(db, touch, company, score=result["score"], signals=result["signals"])
     return {"status": "done", **result}
 
 
@@ -163,6 +177,8 @@ async def row_out(db: AsyncSession, touch: LgTouch, company: LgCompany, *, full:
            "subject": touch.subject, "snippet": re.sub(r"\s+", " ", body)[:240], "label": touch.label,
            "label_name": LABEL_NAMES.get(touch.label or "", None), "label_source": touch.label_source,
            "summary": touch.summary, "handled": touch.handled_at is not None,
+           "hot": touch.hot_at is not None, "hot_at": _iso(touch.hot_at), "intent_score": touch.intent_score,
+           "intent_signals": touch.intent_signals or [],
            "handled_at": _iso(touch.handled_at), "happened_at": _iso(touch.happened_at)}
     if full:
         out["body"] = body
@@ -182,7 +198,8 @@ def _iso(dt: datetime | None) -> str | None:
 
 
 async def listing(db: AsyncSession, workspace_id: int, *, status: str = "unhandled", label: str | None = None,
-                  mailbox_id: int | None = None, q: str | None = None, limit: int = 50, offset: int = 0) -> dict:
+                  mailbox_id: int | None = None, q: str | None = None, limit: int = 50, offset: int = 0,
+                  hot: bool = False) -> dict:
     base = _inbound(workspace_id)
     if status == "unhandled":
         base = base.where(LgTouch.handled_at.is_(None))
@@ -199,14 +216,20 @@ async def listing(db: AsyncSession, workspace_id: int, *, status: str = "unhandl
     sub = base.with_only_columns(LgTouch.label).subquery()
     counts = {k or "none": v for k, v in (await db.execute(
         select(sub.c.label, func.count()).group_by(sub.c.label))).all()}
+    hot_count = await db.scalar(select(func.count()).select_from(
+        base.where(LgTouch.hot_at.is_not(None)).with_only_columns(LgTouch.id).subquery())) or 0
     if label:
         base = base.where(LgTouch.label == label)
+    if hot:
+        base = base.where(LgTouch.hot_at.is_not(None))
     total = await db.scalar(select(func.count()).select_from(base.with_only_columns(LgTouch.id).subquery())) or 0
-    rows = (await db.execute(base.order_by(LgTouch.happened_at.desc(), LgTouch.id.desc())
+    # Горячие неразобранные — всегда сверху.
+    rows = (await db.execute(base.order_by((LgTouch.hot_at.is_not(None) & LgTouch.handled_at.is_(None)).desc(),
+                                           LgTouch.happened_at.desc(), LgTouch.id.desc())
                              .limit(limit).offset(offset))).all()
     unhandled = await db.scalar(select(func.count()).select_from(
         _inbound(workspace_id).where(LgTouch.handled_at.is_(None)).with_only_columns(LgTouch.id).subquery())) or 0
-    return {"total": total, "unhandled": unhandled, "counts": counts,
+    return {"total": total, "unhandled": unhandled, "counts": counts, "hot": hot_count,
             "labels": [{"key": k, "name": LABEL_NAMES[k]} for k in LABELS],
             "items": [await row_out(db, t, c) for t, c in rows]}
 
@@ -259,6 +282,12 @@ async def apply_label(db: AsyncSession, touch: LgTouch, company: LgCompany, labe
         await db.flush()
         return Applied()
     excerpt = (touch.body or "")[:500]
+    if touch.hot_at and label != "interested":
+        from app.domains.leadgen import hot
+        await hot.cool(db, touch, company, now)  # ИИ ошибся: снимаем задачу «Связаться» и этап «Интерес»
+    if label == "interested" and touch.hot_task_id:
+        await db.flush()
+        return Applied(touch.hot_task_id, "task:call")  # задача уже создана триггером — не дублируем
     if label == "interested":
         task_id = await _task(db, company, "CALL", f"Связаться: {company.display_name or company.domain} — интересно",
                               f"Ответ от {touch.address or 'компании'}:\n{excerpt}", now)

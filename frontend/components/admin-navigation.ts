@@ -48,7 +48,7 @@ export const adminNavigation: NavigationNode[] = [
         id: "outreach",
         label: "Аутрич",
         children: [
-          { kind: "item", id: "inbound", label: "Входящие", disabled: true },
+          { kind: "item", id: "inbound", label: "Входящие", href: "/admin/outreach/inbox" },
           { kind: "item", id: "email", label: "Email-кампании", href: "/admin/outreach/email" },
           {
             kind: "folder",

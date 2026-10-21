@@ -192,6 +192,13 @@ class LgTouch(Base):
     label_source: Mapped[str | None] = mapped_column(String(10))
     summary: Mapped[str | None] = mapped_column(String(300))
     handled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    # Триггер «Явный интерес»: сила интереса 0–100 (ИИ), признаки (телефон, созвон, цена…), когда стал горячим,
+    # задача «Связаться» в CRM и когда напомнили, что горячий ответ ждёт.
+    intent_score: Mapped[int | None] = mapped_column(Integer)
+    intent_signals: Mapped[list | None] = mapped_column(JSON)
+    hot_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    hot_task_id: Mapped[int | None] = mapped_column(Integer)
+    hot_reminded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     happened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 
 

@@ -83,7 +83,9 @@ def upgrade_existing_schema(connection):
                         "telegram_link_code_hash": "VARCHAR(64)", "telegram_link_expires_at": "TIMESTAMP WITH TIME ZONE"},
         "website_sites": {"widget": "JSON"},
         "lg_companies": {"last_exported_at": "TIMESTAMP WITH TIME ZONE", "export_count": "INTEGER NOT NULL DEFAULT 0"},
-        "lg_touches": {"mailbox_id": "INTEGER REFERENCES lg_mailboxes(id)", "address": "VARCHAR(254)",
+        "lg_touches": {"intent_score": "INTEGER", "intent_signals": "JSON", "hot_at": "TIMESTAMP WITH TIME ZONE",
+                       "hot_task_id": "INTEGER", "hot_reminded_at": "TIMESTAMP WITH TIME ZONE",
+                       "mailbox_id": "INTEGER REFERENCES lg_mailboxes(id)", "address": "VARCHAR(254)",
                        "label": "VARCHAR(16)", "label_source": "VARCHAR(10)", "summary": "VARCHAR(300)",
                        "handled_at": "TIMESTAMP WITH TIME ZONE"},
     }

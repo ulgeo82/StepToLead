@@ -151,7 +151,7 @@ class AnalyticsTests(Base_):
         async def fn(db):
             mb = LgMailbox(workspace_id=7, email="egor@team.ru", smtp_host="s", imap_host="i", login="egor@team.ru",
                            password_encrypted=encrypt_secret("p"), daily_limit=30)
-            seq = LgSequence(workspace_id=7, name="Кухни", window={"tz": "Europe/Moscow"},
+            seq = LgSequence(workspace_id=7, name="Кухни", window={"tz": "Europe/Moscow", "gap_minutes": 0},
                              steps=[{"channel": "email", "subject": "Привет", "body": "Текст"},
                                     {"channel": "email", "delay_days": 3, "body": "Напомню"}])
             db.add_all([mb, seq])
@@ -173,8 +173,8 @@ class AnalyticsTests(Base_):
         self.assertEqual(data["funnel"][1]["from_previous"], 66.7)
         seq = data["sequences"][0]
         self.assertEqual((seq["enrolled"], seq["replied"], seq["reply_rate"]), (2, 1, 50.0))
-        self.assertEqual(seq["emails"], [{"email": 1, "sent": 2, "replies": 1, "bounced": 0, "reply_rate": 50.0},
-                                         {"email": 2, "sent": 1, "replies": 0, "bounced": 0, "reply_rate": 0.0}])
+        self.assertEqual(seq["emails"], [{"email": 1, "sent": 2, "replies": 1, "bounced": 0, "hot": 0, "reply_rate": 50.0, "hot_rate": 0.0},
+                                         {"email": 2, "sent": 1, "replies": 0, "bounced": 0, "hot": 0, "reply_rate": 0.0, "hot_rate": 0.0}])
         niches = {n["niche"]: n for n in data["niches"]}
         self.assertEqual((niches["Кухни на заказ"]["in_outreach"], niches["Кухни на заказ"]["replied"]), (2, 1))
         self.assertEqual(data["mailboxes"][0]["sent_7d"], 3)

@@ -85,19 +85,34 @@ async def sequences_report(db: AsyncSession, workspace_id: int, since: datetime)
                 counter[t.sequence_id] = counter.get(t.sequence_id, 0) + 1
                 n = counter[t.sequence_id]
                 last_step[t.sequence_id] = n
-                step = per_step.setdefault(n, {"email": n, "sent": 0, "replies": 0, "bounced": 0})
+                step = per_step.setdefault(n, {"email": n, "sent": 0, "replies": 0, "bounced": 0, "hot": 0})
                 step["sent" if t.status != "bounced" else "bounced"] += 1
             elif t.direction == "in" and t.status == "replied" and t.sequence_id in last_step:
                 per_step[last_step[t.sequence_id]]["replies"] += 1
-        steps = [{**v, "reply_rate": _rate(v["replies"], v["sent"])} for _, v in sorted(per_step.items())]
+                if t.hot_at is not None:
+                    per_step[last_step[t.sequence_id]]["hot"] += 1
+        steps = [{**v, "reply_rate": _rate(v["replies"], v["sent"]), "hot_rate": _rate(v["hot"], v["sent"])}
+                 for _, v in sorted(per_step.items())]
         enrolled = sum(statuses.values())
         replied = statuses.get("replied", 0)
         out.append({"id": seq.id, "name": seq.name, "is_active": seq.is_active, "enrolled": enrolled,
                     "statuses": statuses, "replied": replied, "reply_rate": _rate(replied, enrolled),
                     "unsubscribed": await db.scalar(select(func.count(LgEnrollment.id)).where(
                         LgEnrollment.id.in_(enr_ids), LgEnrollment.stop_reason == "unsubscribed")) or 0,
-                    "emails": steps})
+                    "hot": sum(s["hot"] for s in steps), "emails": steps})
     return out
+
+
+async def hot_report(db: AsyncSession, workspace_id: int, since: datetime) -> dict:
+    """Горячие ответы за период и сколько из них взяли в работу до срока задачи «Связаться»."""
+    from app.models.crm import CrmTask
+    rows = (await db.execute(select(LgTouch.handled_at, CrmTask.due_at).join(LgCompany, LgCompany.id == LgTouch.company_id)
+                             .outerjoin(CrmTask, CrmTask.id == LgTouch.hot_task_id)
+                             .where(LgCompany.workspace_id == workspace_id, LgTouch.hot_at.is_not(None),
+                                    LgTouch.happened_at >= since))).all()
+    in_time = sum(1 for handled, due in rows if handled and due and service._aware(handled) <= service._aware(due))
+    waiting = sum(1 for handled, _ in rows if handled is None)
+    return {"total": len(rows), "in_time": in_time, "in_time_rate": _rate(in_time, len(rows)), "waiting": waiting}
 
 
 async def mailboxes_report(db: AsyncSession, workspace_id: int, now: datetime) -> list[dict]:
@@ -135,4 +150,5 @@ async def overview(db: AsyncSession, workspace_id: int, *, days: int = 30, niche
     return {"days": days, "niche": niche, "funnel": await funnel(db, workspace_id, since, text_key(niche)),
             "enriched": enriched, "niches": await by_niche(db, workspace_id, since),
             "sequences": await sequences_report(db, workspace_id, since),
-            "mailboxes": await mailboxes_report(db, workspace_id, now)}
+            "mailboxes": await mailboxes_report(db, workspace_id, now),
+            "hot": await hot_report(db, workspace_id, since)}

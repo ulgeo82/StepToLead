@@ -501,12 +501,13 @@ async def handle_inbound(db: AsyncSession, mailbox: LgMailbox, mail: IncomingMai
     from app.domains.leadgen import inbox
     label, source = inbox.initial_label(kind, fresh)
     status = {"auto_reply": "auto", "unsubscribe": "unsubscribed"}.get(kind, "replied")
-    db.add(LgTouch(company_id=company.id, contact_id=contact.id if contact else None, channel="email",
-                   direction="in", sequence_id=seq_key(enr), campaign_kind="sequence", campaign_id=enr.sequence_id,
-                   mailbox_id=mailbox.id, status=status, subject=mail.subject[:300], body=fresh,
-                   external_id=(mail.message_id or "")[:300] or None, address=(mail.sender or "")[:254] or None,
-                   label=label, label_source=source, handled_at=now if label in inbox.SELF_HANDLED else None,
-                   happened_at=now))
+    touch = LgTouch(company_id=company.id, contact_id=contact.id if contact else None, channel="email",
+                    direction="in", sequence_id=seq_key(enr), campaign_kind="sequence", campaign_id=enr.sequence_id,
+                    mailbox_id=mailbox.id, status=status, subject=mail.subject[:300], body=fresh,
+                    external_id=(mail.message_id or "")[:300] or None, address=(mail.sender or "")[:254] or None,
+                    label=label, label_source=source, handled_at=now if label in inbox.SELF_HANDLED else None,
+                    happened_at=now)
+    db.add(touch)
     if kind == "auto_reply":
         await db.flush()
         return kind
@@ -524,6 +525,9 @@ async def handle_inbound(db: AsyncSession, mailbox: LgMailbox, mail: IncomingMai
         company.stage = "replied"
         await _move_deal(db, company, STAGE_REPLIED, note=f"Ответ на письмо от {mail.sender}:\n{fresh}")
         await db.flush()
+        # Явные признаки (телефон, «созвонимся») ловим сразу правилами, не дожидаясь ИИ.
+        from app.domains.leadgen import hot
+        await hot.mark(db, touch, company, score=None, signals=hot.rule_signals(fresh), now=now)
     return kind
 
 
@@ -562,6 +566,10 @@ async def run_worker() -> None:
             async with routes.session_factory() as db:
                 await process_due(db, transport)
                 await db.commit()
+            async with routes.session_factory() as db:
+                from app.domains.leadgen import hot
+                if await hot.remind_due(db):
+                    await db.commit()
             if tick % POLL_EVERY_TICKS == 0:
                 async with routes.session_factory() as db:
                     boxes = (await db.execute(select(LgMailbox).where(LgMailbox.is_active.is_(True)))).scalars().all()

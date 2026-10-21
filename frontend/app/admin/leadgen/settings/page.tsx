@@ -12,8 +12,11 @@ type Settings = {
   outreach_pipeline_id: number | null;
   icp: string;
   fit_ai_available: boolean;
+  hot: Hot;
 };
-type Patch = Partial<Pick<Settings, "weights" | "platform_domains" | "recontact_days" | "icp">>;
+type Hot = { threshold: number; sla_minutes: number; notify: boolean; remind: boolean };
+type Patch = Partial<Pick<Settings, "weights" | "platform_domains" | "recontact_days" | "icp" | "hot">>;
+const HOT_DEFAULT: Hot = { threshold: 70, sla_minutes: 15, notify: true, remind: true };
 
 export default function Page() {
   const [saved, setSaved] = useState<Settings | null>(null);
@@ -21,6 +24,7 @@ export default function Page() {
   const [domains, setDomains] = useState("");
   const [days, setDays] = useState("30");
   const [icp, setIcp] = useState("");
+  const [hot, setHot] = useState<Hot>(HOT_DEFAULT);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -34,6 +38,7 @@ export default function Page() {
     setDomains(result.platform_domains.join("\n"));
     setDays(String(result.recontact_days));
     setIcp(result.icp);
+    setHot({ ...HOT_DEFAULT, ...(result.hot || {}) });
   }
 
   useEffect(() => {
@@ -73,6 +78,7 @@ export default function Page() {
       Object.entries(weights).filter(([kind, weight]) => weight !== saved.weights[kind]),
     );
     if (Object.keys(changedWeights).length) patch.weights = changedWeights;
+    if (JSON.stringify(hot) !== JSON.stringify({ ...HOT_DEFAULT, ...(saved.hot || {}) })) patch.hot = hot;
   }
   const changed = Object.keys(patch).length > 0;
 
@@ -94,6 +100,10 @@ export default function Page() {
       Object.values(patch.weights).some((weight) => !Number.isInteger(weight) || weight < -5 || weight > 5)
     ) {
       setError("Вес сигнала: целое число от −5 до 5.");
+      return;
+    }
+    if (patch.hot && (patch.hot.threshold < 1 || patch.hot.threshold > 100 || patch.hot.sla_minutes < 5 || patch.hot.sla_minutes > 1440)) {
+      setError("Триггер: порог от 1 до 100, срок от 5 до 1440 минут.");
       return;
     }
     const controller = new AbortController();
@@ -122,7 +132,7 @@ export default function Page() {
 
   return (
     <div className={styles.page}>
-      <PageHeader title="Настройки" subtitle="ИИ-оценка, скоринг и повторные контакты." />
+      <PageHeader title="Настройки" subtitle="ИИ-оценка, скоринг, повторные контакты и триггер горячих ответов." />
       {loading && <p role="status">Загружаем настройки…</p>}
       {busy && <p role="status">Сохраняем настройки…</p>}
       {error && (
@@ -217,6 +227,33 @@ export default function Page() {
                   value={days}
                   onChange={(event) => setDays(event.target.value)}
                 />
+              </label>
+            </section>
+            <section className={styles.card} id="hot">
+              <h2>🔥 Триггер «Явный интерес»</h2>
+              <p className={styles.muted}>
+                Ответ на рассылку становится горячим, если ИИ оценил интерес не ниже порога или в письме есть телефон,
+                просьба созвониться, время встречи. Тогда сразу: сообщение в Telegram, задача «Связаться» в CRM, сделка → «Интерес».
+              </p>
+              <label className={styles.field}>
+                Порог интереса ИИ, 1–100
+                <input type="number" min={1} max={100} step={1} required value={hot.threshold}
+                  onChange={(event) => setHot({ ...hot, threshold: Number(event.target.value) })} />
+                <small>Ниже — меньше пропусков, но больше ложных тревог. Рекомендуем 70.</small>
+              </label>
+              <label className={styles.field}>
+                Связаться в течение, минут
+                <input type="number" min={5} max={1440} step={5} required value={hot.sla_minutes}
+                  onChange={(event) => setHot({ ...hot, sla_minutes: Number(event.target.value) })} />
+                <small>Считается в рабочих часах цепочки: ответ ночью ждёт утра.</small>
+              </label>
+              <label className={styles.check}>
+                <input type="checkbox" checked={hot.notify} onChange={(event) => setHot({ ...hot, notify: event.target.checked })} />
+                Сообщать в Telegram сразу
+              </label>
+              <label className={styles.check}>
+                <input type="checkbox" checked={hot.remind} onChange={(event) => setHot({ ...hot, remind: event.target.checked })} />
+                Напомнить ещё раз, если к сроку не разобрали
               </label>
             </section>
             <section className={styles.card}>

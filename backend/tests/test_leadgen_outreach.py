@@ -86,7 +86,7 @@ class HandOffTests(OutreachBase):
         c, r, deal, contact, project, stages, note, main_leads = self.run_db(fn)
         self.assertTrue(r.ok)
         self.assertEqual((project.name, project.is_default), ("Аутрич", False))
-        self.assertEqual(stages, ["Новый", "Написали", "Ответил", "Созвон назначен", "Тест портала", "Клиент", "Отказ"])
+        self.assertEqual(stages, ["Новый", "Написали", "Ответил", "Интерес", "Созвон назначен", "Тест портала", "Клиент", "Отказ"])
         self.assertEqual((contact.phones, contact.emails, contact.telegram),
                          (["+79120001122"], ["info@kuhni-sever.ru"], "kuhni_sever"))
         self.assertEqual((deal.name, deal.tags), ("Кухни Северная — аутрич", ["лидогенерация"]))
