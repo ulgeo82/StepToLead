@@ -242,14 +242,15 @@ class FlowTests(FlowBase):
         t = FakeTransport(refuse={"info@kuhni6.ru"})
 
         async def fn(db):
-            mb, seq, cs = await self.setup_world(db, n=7, warmup=NOW.date())
+            # 10-й день прогрева: по графику 5 холодных (первые 7 дней — ни одного)
+            mb, seq, cs = await self.setup_world(db, n=7, warmup=NOW.date() - timedelta(days=9))
             for c in cs:
                 await sequences.enroll(db, seq, c, now=NOW)
             stats = await sequences.process_due(db, t, now=NOW)
             statuses = [e.status for e in (await db.execute(select(LgEnrollment).order_by(LgEnrollment.id))).scalars()]
             return stats, statuses
         stats, statuses = self.run_db(fn)
-        self.assertEqual(len(t.sent), 5)                      # прогрев: 5 писем в первый день
+        self.assertEqual(len(t.sent), 5)                      # прогрев: 5 холодных на 10-й день
         self.assertEqual((stats["emails"], stats["postponed"]), (5, 2))
         self.assertEqual(statuses.count("active"), 7)
 
@@ -334,7 +335,7 @@ class SequenceApiTests(FlowBase):
         mb = self.client.post(f"{base}/mailboxes", headers=ORIGIN, json=box)
         self.assertEqual(mb.status_code, 201, mb.text)
         self.assertNotIn("password", mb.json())
-        self.assertEqual(mb.json()["left_today"], 5)
+        self.assertEqual(mb.json()["left_today"], 0)   # новый ящик: первые 7 дней только прогрев
         self.assertEqual(self.client.post(f"{base}/mailboxes/{mb.json()['id']}/check", headers=ORIGIN).json()["ok"], True)
         bad = self.client.post(f"{base}/sequences", headers=ORIGIN,
                                json={"name": "x", "steps": [{"channel": "email", "body": "{{price}}", "subject": "s"}]})

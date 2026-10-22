@@ -32,11 +32,15 @@ from app.domains.leadgen.models import LgMailbox, LgTouch, LgWarmupMail
 logger = logging.getLogger("uvicorn.error.leadgen.warmup")
 
 TZ = "Europe/Moscow"
-WARM_DAYS = 21           # столько длится разгон
+WARM_DAYS = 28           # разгон до пика — 4 недели, с 29-го дня «гибридный режим»
+QUIET_DAYS = 7           # первая неделя — только прогрев, холодных писем нет
 START = 2                # писем в первый день
-MAINTENANCE = 10         # после разгона прогрев не выключается
-HELPER_DAILY = 6         # помощники пишут немного — в основном отвечают
-REPLY_RATE = 0.35
+# Всего писем в день (прогрев + холодные) по дням разгона, для пика 70; для другого пика масштабируется.
+ANCHORS = ((1, 2), (7, 10), (14, 25), (21, 45), (28, 65), (29, 70))
+COLD_SHARE_START = 0.3   # 8-й день: ~30% от объёма — холодные, остальное прогрев
+WARM_FLOOR = 20          # на пике прогрев не опускается ниже — он перекрывает жалобы холодных получателей
+HELPER_DAILY = 10        # помощники создают входящий поток новым ящикам
+MAX_TARGET = 120
 MAX_DEPTH = 3            # письмо + до 3 ответов в ветке
 FIND_AFTER = timedelta(minutes=3)
 MISSING_AFTER = timedelta(hours=6)
@@ -58,21 +62,58 @@ def age_days(mb: LgMailbox, today: date) -> int | None:
     return (today - mb.warmup_started_on).days if mb.warmup_started_on else None
 
 
+def _total(day: int, target: int) -> int:
+    """Всего писем в этот день разгона: 2 → 10 → 25 → 45 → 65 → пик (масштаб от пика 70)."""
+    scale = target / 70
+    points = [(d, START if d == 1 else round(v * scale)) for d, v in ANCHORS]
+    if day >= points[-1][0]:
+        return target
+    for (d1, v1), (d2, v2) in zip(points, points[1:]):
+        if d1 <= day <= d2:
+            return round(v1 + (v2 - v1) * (day - d1) / (d2 - d1))
+    return START
+
+
+def schedule(age: int | None, target: int, cold_peak: int, quiet: int = QUIET_DAYS) -> tuple[int, int]:
+    """(прогревочных, холодных) в день. age None — ящик уже живой (старый), сразу гибридный режим."""
+    target = max(START, min(MAX_TARGET, target))
+    cold_peak = max(0, min(cold_peak, target - WARM_FLOOR))
+    if age is None or age + 1 > WARM_DAYS:
+        return target - cold_peak, cold_peak
+    day = age + 1
+    total = _total(day, target)
+    if day <= quiet:
+        return total, 0
+    span = max(1, WARM_DAYS + 1 - (quiet + 1))
+    share = COLD_SHARE_START + (cold_peak / target - COLD_SHARE_START) * (day - quiet - 1) / span
+    cold = min(cold_peak, round(total * share))
+    return total - cold, cold
+
+
+def _plan(mb: LgMailbox, today: date) -> tuple[int, int]:
+    return schedule(age_days(mb, today), mb.warmup_target or 70, mb.daily_limit or 45)
+
+
 def daily_plan(mb: LgMailbox, today: date) -> int:
+    """Прогревочных писем с ящика сегодня."""
     if not mb.is_active or not mb.warmup_enabled:
         return 0
-    if mb.role == "helper":
-        plan = HELPER_DAILY
-    else:
-        target = max(START, min(60, mb.warmup_target or 25))
-        age = age_days(mb, today)
-        if age is not None and age < WARM_DAYS:
-            plan = min(target, START + round(max(age, 0) * (target - START) / (WARM_DAYS - 1)))
-        else:
-            plan = min(target, MAINTENANCE)
+    plan = HELPER_DAILY if mb.role == "helper" else _plan(mb, today)[0]
     if today.weekday() >= 5:  # в выходные живые люди пишут меньше
         plan = max(1, (plan + 1) // 2)
     return plan
+
+
+def cold_limit(mb: LgMailbox, today: date) -> int:
+    """Холодных писем с ящика в день по графику прогрева. Первые 7 дней — ноль."""
+    if mb.role == "helper":
+        return 0
+    if not mb.warmup_enabled:
+        return core.mailbox_capacity(mb.daily_limit, mb.warmup_started_on, today, 0)
+    return _plan(mb, today)[1]
+
+
+PHASES = ((7, "Тихий старт · только прогрев"), (14, "Эмуляция человека"), (21, "Входящий поток"), (28, "Выход на пик"))
 
 
 def stage(mb: LgMailbox, today: date) -> dict:
@@ -84,8 +125,16 @@ def stage(mb: LgMailbox, today: date) -> dict:
         return {"phase": "helper", "title": "Помощник прогрева"}
     age = age_days(mb, today)
     if age is not None and age < WARM_DAYS:
-        return {"phase": "warming", "title": f"Прогревается · день {age + 1} из {WARM_DAYS}", "day": age + 1, "of": WARM_DAYS}
-    return {"phase": "ready", "title": "Прогрет · поддерживаем репутацию"}
+        day = age + 1
+        name = next(title for until, title in PHASES if day <= until)
+        out = {"phase": "warming", "title": f"{name} · день {day} из {WARM_DAYS}", "day": day, "of": WARM_DAYS}
+        if day <= QUIET_DAYS:
+            out["note"] = f"Холодные письма начнутся с {QUIET_DAYS + 1}-го дня"
+        elif day >= 27:
+            out["note"] = ("Время контрольного теста: письмо на mail-tester.com (нужно 9.5/10 и выше) и проверка домена "
+                           "в MXToolbox. Ниже 9.5 или чёрный список — не выходите на пик")
+        return out
+    return {"phase": "ready", "title": "Гибридный режим · холодные + прогрев"}
 
 
 # ---------------------------------------------------------------- тексты
@@ -175,6 +224,11 @@ def _domain(mb: LgMailbox) -> str:
 
 async def _pick_recipient(db: AsyncSession, sender: LgMailbox, boxes: list[LgMailbox], now: datetime) -> LgMailbox | None:
     options = [b for b in boxes if b.id != sender.id and (sender.role != "helper" or b.role != "helper")]
+    age = age_days(sender, now.astimezone(ZoneInfo(TZ)).date())
+    if sender.role != "helper" and age is not None and age < QUIET_DAYS:
+        # «Тихий старт»: только на авторитетные почтовики (Gmail, Яндекс, Mail.ru), если такие есть в пуле
+        big = [b for b in options if _provider(b) in BIG_PROVIDERS]
+        options = big or options
     if not options:
         return None
     since = local_midnight(now)
@@ -257,6 +311,14 @@ async def send_due(db: AsyncSession, transport, workspace_id: int, *, now: datet
 
 # ---------------------------------------------------------------- получатель: найти, спасти из спама, ответить
 
+def reply_rate(sender: LgMailbox | None, today: date) -> float:
+    """Доля писем, на которые отвечает получатель. Молодому ящику (первые 2 недели) нужна живая
+    двусторонняя переписка — отвечаем на 55%, дальше на 40%."""
+    if sender is None:
+        return 0.0
+    age = age_days(sender, today)
+    return 0.55 if sender.role != "helper" and age is not None and age < 14 else 0.4
+
 async def check_due(db: AsyncSession, transport, workspace_id: int, *, now: datetime | None = None) -> dict:
     now = now or service.utcnow()
     stats = {"inbox": 0, "spam": 0, "missing": 0, "replies": 0}
@@ -271,9 +333,11 @@ async def check_due(db: AsyncSession, transport, workspace_id: int, *, now: date
         if box is None:
             continue
         flag = {r.message_id for r in items if _stable(r.message_id, "flag") < 0.15}
+        today = now.astimezone(ZoneInfo(TZ)).date()
         try:
             found = await transport.warm_locate(box, decrypt_secret(box.password_encrypted),
-                                                [r.message_id for r in items if r.message_id], flag)
+                                                [r.message_id for r in items if r.message_id], flag,
+                                                flag_rescued=True)
         except Exception as exc:  # noqa: BLE001
             box.warmup_error = f"IMAP: {type(exc).__name__}: {exc}"[:500]
             continue
@@ -287,10 +351,8 @@ async def check_due(db: AsyncSession, transport, workspace_id: int, *, now: date
                 continue
             row.status, row.found_at, row.rescued, row.auth = hit["folder"], now, hit["folder"] == "spam", hit.get("auth")
             stats[hit["folder"]] += 1
-            if row.depth < MAX_DEPTH and _stable(row.message_id, "reply") < REPLY_RATE:
-                sender = await db.get(LgMailbox, row.from_mailbox_id)
-                if sender is None:
-                    continue
+            sender = await db.get(LgMailbox, row.from_mailbox_id)
+            if row.depth < MAX_DEPTH and _stable(row.message_id, "reply") < reply_rate(sender, today):
                 subject, body = compose_reply(box, f"{row.id}:reply", row.subject)
                 delay = timedelta(minutes=10 + int(110 * _stable(row.message_id, "delay")))
                 db.add(LgWarmupMail(workspace_id=workspace_id, from_mailbox_id=box.id, to_mailbox_id=sender.id,
@@ -462,6 +524,8 @@ def cold_capacity(mb: LgMailbox, left: int) -> int:
 async def card(db: AsyncSession, mb: LgMailbox, now: datetime) -> dict:
     today = now.astimezone(ZoneInfo(TZ)).date()
     warm_sent, _ = await _sent_today(db, mb.id, now)
+    from app.domains.leadgen.sequences import _sent_today as cold_today
+    cold_sent = await cold_today(db, mb.id, now, TZ)
     start = local_midnight(now) - timedelta(days=13)
     rows = (await db.execute(select(LgWarmupMail.sent_at, LgWarmupMail.status).where(
         LgWarmupMail.from_mailbox_id == mb.id, LgWarmupMail.sent_at >= start))).all()
@@ -479,7 +543,9 @@ async def card(db: AsyncSession, mb: LgMailbox, now: datetime) -> dict:
     h = mb.health_json or {}
     return {"id": mb.id, "email": mb.email, "sender_name": mb.sender_name, "role": mb.role, "is_active": mb.is_active,
             "warmup_enabled": mb.warmup_enabled, "warmup_target": mb.warmup_target, "stage": stage(mb, today),
-            "today": {"warm_plan": daily_plan(mb, today), "warm_sent": warm_sent},
+            "today": {"warm_plan": daily_plan(mb, today), "warm_sent": warm_sent,
+                      "cold_plan": cold_limit(mb, today) if mb.is_active else 0, "cold_sent": cold_sent},
+            "peak": {"total": mb.warmup_target, "cold": mb.daily_limit},
             "health": {"score": mb.health, "measured": h.get("measured", 0), "inbox_rate": h.get("inbox_rate"),
                        "spam_rate": h.get("spam_rate"), "bounce_rate": h.get("bounce_rate"),
                        "cold_sent": h.get("cold_sent", 0), "checks": h.get("checks", []),
@@ -505,6 +571,9 @@ async def overview(db: AsyncSession, workspace_id: int, now: datetime | None = N
                      "helpers": sum(1 for b in active if b.role == "helper"), "providers": sorted(providers)},
             "running": len(active) >= 2, "in_window": in_window(now), "window": f"{WINDOW.start_hour}:00–{WINDOW.end_hour}:00 МСК",
             "tips": tips, "items": [await card(db, b, now) for b in boxes]}
+
+
+BIG_PROVIDERS = {"Яндекс", "Mail.ru", "Gmail"}
 
 
 def _provider(mb: LgMailbox) -> str:

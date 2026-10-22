@@ -243,7 +243,7 @@ class LgMailbox(Base):
     # Прогрев (warmup.py). role: outreach — рабочий ящик; helper — только участвует в прогреве, холодных не шлёт.
     role: Mapped[str] = mapped_column(String(10), default="outreach")
     warmup_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-    warmup_target: Mapped[int] = mapped_column(Integer, default=25)
+    warmup_target: Mapped[int] = mapped_column(Integer, default=70)   # всего писем в день на пике (прогрев + холодные)
     health: Mapped[int | None] = mapped_column(Integer)
     health_json: Mapped[dict | None] = mapped_column(JSON)
     health_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

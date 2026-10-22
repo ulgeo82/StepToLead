@@ -780,7 +780,7 @@ class MailboxIn(BaseModel):
     imap_port: int = Field(default=993, ge=1, le=65535)
     login: str | None = Field(default=None, max_length=254)
     password: str = Field(min_length=1, max_length=500)
-    daily_limit: int = Field(default=30, ge=1, le=200)
+    daily_limit: int = Field(default=45, ge=1, le=200)   # холодных в день на пике (после 28 дней прогрева)
     warmup: bool = True  # новый ящик: 5 → 10 → 20 писем в день первые три недели
     role: str = Field(default="outreach", pattern="^(outreach|helper)$")  # helper — только для прогрева
 
@@ -793,14 +793,14 @@ class MailboxPatch(BaseModel):
     is_active: bool | None = None
     role: str | None = Field(default=None, pattern="^(outreach|helper)$")
     warmup_enabled: bool | None = None
-    warmup_target: int | None = Field(default=None, ge=5, le=60)
+    warmup_target: int | None = Field(default=None, ge=20, le=120)   # всего писем в день на пике
 
 
 async def mailbox_row(db: AsyncSession, mb: LgMailbox) -> dict:
     now = service.utcnow()
     sent = await sequences._sent_today(db, mb.id, now, "Europe/Moscow")
     from app.domains.leadgen import warmup
-    left = warmup.cold_capacity(mb, seq_core.mailbox_capacity(mb.daily_limit, mb.warmup_started_on, now.date(), sent))
+    left = warmup.cold_capacity(mb, max(0, warmup.cold_limit(mb, now.date()) - sent))
     return {"id": mb.id, "email": mb.email, "sender_name": mb.sender_name, "smtp_host": mb.smtp_host,
             "smtp_port": mb.smtp_port, "imap_host": mb.imap_host, "imap_port": mb.imap_port, "login": mb.login,
             "daily_limit": mb.daily_limit, "warmup_started_on": mb.warmup_started_on.isoformat() if mb.warmup_started_on else None,
@@ -836,7 +836,7 @@ async def create_mailbox(payload: MailboxIn, db: AsyncSession = Depends(get_db),
                    smtp_port=payload.smtp_port, imap_host=payload.imap_host.strip(), imap_port=payload.imap_port,
                    login=(payload.login or email_).strip(), password_encrypted=encrypt_secret(payload.password),
                    daily_limit=payload.daily_limit, warmup_started_on=service.utcnow().date() if payload.warmup or helper else None,
-                   is_active=True, role=payload.role, warmup_enabled=True, warmup_target=25)
+                   is_active=True, role=payload.role, warmup_enabled=True, warmup_target=70)
     db.add(mb)
     await db.commit()
     return await mailbox_row(db, mb)

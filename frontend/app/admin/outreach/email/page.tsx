@@ -449,7 +449,7 @@ function EmailPage() {
                 ["imap_port", "IMAP port", "number", "993"],
                 ["login", "Логин (по умолчанию email)", "text", ""],
                 ["password", "Пароль приложения", "password", ""],
-                ["daily_limit", "Дневной лимит", "number", "30"],
+                ["daily_limit", "Холодных в день на пике", "number", "45"],
               ].map(([key, label, type, value]) => (
                 <label className={styles.field} key={key}>
                   {label}

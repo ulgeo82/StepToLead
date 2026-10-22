@@ -11,8 +11,9 @@ type Day = { day: string; sent: number; inbox: number; spam: number; missing: nu
 type Card = {
   id: number; email: string; sender_name: string | null; role: "outreach" | "helper"; is_active: boolean;
   warmup_enabled: boolean; warmup_target: number;
-  stage: { phase: "warming" | "ready" | "helper" | "off"; title: string; day?: number; of?: number };
-  today: { warm_plan: number; warm_sent: number };
+  stage: { phase: "warming" | "ready" | "helper" | "off"; title: string; day?: number; of?: number; note?: string };
+  today: { warm_plan: number; warm_sent: number; cold_plan: number; cold_sent: number };
+  peak: { total: number; cold: number };
   health: { score: number | null; measured: number; inbox_rate: number | null; spam_rate: number | null;
     bounce_rate: number | null; cold_sent: number; checks: Check[]; checked_at: string | null };
   cold_paused: { at: string; reason: string } | null; error: string | null; days: Day[];
@@ -61,6 +62,7 @@ function MailCard({ card, busy, act }: { card: Card; busy: boolean; act: (path: 
       <div className={styles.warmStage}>
         <span>{card.stage.title}</span>
         {card.stage.phase !== "off" && card.stage.phase !== "helper" && <div className={styles.warmProgress}><i style={{ width: `${progress}%` }} /></div>}
+        {card.stage.note && <small className={styles.hint}>{card.stage.note}</small>}
       </div>
 
       {card.cold_paused && (
@@ -73,6 +75,7 @@ function MailCard({ card, busy, act }: { card: Card; busy: boolean; act: (path: 
 
       <dl className={styles.warmFacts}>
         <div><dt>Прогрев сегодня</dt><dd>{card.today.warm_sent} / {card.today.warm_plan}</dd></div>
+        {card.role === "outreach" && <div><dt>Холодные сегодня</dt><dd>{card.today.cold_plan ? `${card.today.cold_sent} / ${card.today.cold_plan}` : <span className={styles.muted}>пока нет</span>}</dd></div>}
         <div><dt>Во «Входящих»</dt><dd>{h.measured >= 5 ? pct(h.inbox_rate) : <span className={styles.muted}>копим данные</span>}</dd></div>
         <div><dt>Недоставлено</dt><dd>{h.cold_sent >= 20 ? pct(h.bounce_rate) : <span className={styles.muted}>—</span>}</dd></div>
       </dl>
@@ -96,11 +99,12 @@ function MailCard({ card, busy, act }: { card: Card; busy: boolean; act: (path: 
           {card.warmup_enabled ? "Выключить прогрев" : "Включить прогрев"}
         </button>
         {card.role === "outreach" && (
-          <label className={styles.inlineForm} title="Сколько прогревочных писем в день к концу разгона">
-            <small className={styles.muted}>до</small>
+          <label className={styles.inlineForm} title="Всего писем в день с 29-го дня: холодные (дневной лимит ящика) + прогрев">
+            <small className={styles.muted}>пик</small>
             <select value={card.warmup_target} disabled={busy} onChange={(e) => act(`/mailboxes/${card.id}`, { warmup_target: Number(e.target.value) }, "PATCH")}>
-              {[15, 20, 25, 30, 40].map((n) => <option key={n} value={n}>{n} писем/день</option>)}
+              {[...new Set([40, 50, 60, 70, 80, 100, card.warmup_target])].sort((a, b) => a - b).map((n) => <option key={n} value={n}>{n} писем/день</option>)}
             </select>
+            <small className={styles.muted}>из них холодных {Math.min(card.peak.cold, Math.max(0, card.peak.total - 20))}</small>
           </label>
         )}
       </div>
@@ -144,7 +148,8 @@ export default function WarmupPage() {
         <div>
           <p className="eyebrow">Аутрич</p>
           <h1>Прогрев</h1>
-          <p className="subtitle">Ящики переписываются между собой, достают письма из «Спама» и отвечают — так почтовики начинают доверять адресу.</p>
+          <p className="subtitle">Ящики переписываются между собой, достают письма из «Спама» и отвечают — так почтовики начинают доверять адресу.
+            Первые 7 дней — только прогрев, с 8-го дня добавляются холодные, к 29-му — пик: например, 70 писем в день, из них 45 холодных и 25 прогревочных.</p>
         </div>
       </section>
       {error && <p className={styles.error} role="alert">{error}</p>}

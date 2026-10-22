@@ -184,7 +184,7 @@ class SmtpImapTransport:
                     pass
         return await asyncio.to_thread(go)
 
-    async def warm_locate(self, mailbox, password, message_ids, flag=frozenset()):
+    async def warm_locate(self, mailbox, password, message_ids, flag=frozenset(), flag_rescued=True):
         """Прогрев: найти письма по Message-ID во «Входящих» и в «Спаме». Из «Спама» — перенести во «Входящие».
         Найденное отмечается прочитанным (часть — важным). Возвращает {message_id: {"folder", "auth"}}."""
         def go():
@@ -210,8 +210,10 @@ class SmtpImapTransport:
                         typ, hdr = box.uid("fetch", uid, "(BODY.PEEK[HEADER.FIELDS (AUTHENTICATION-RESULTS)])")
                         raw = b"".join(part[1] for part in hdr or [] if isinstance(part, tuple)).decode(errors="replace")
                         auth = {k.lower(): v.lower() for k, v in re.findall(r"\b(spf|dkim|dmarc)=(\w+)", raw, re.I)}
-                        box.uid("store", uid, "+FLAGS", "(\\Seen \\Flagged)" if mid in flag else "(\\Seen)")
                         where = "inbox" if folder == "INBOX" else "spam"
+                        # Вытащенное из «Спама» — со звёздочкой «Важное»: сильный сигнал «это не спам».
+                        star = mid in flag or (where == "spam" and flag_rescued)
+                        box.uid("store", uid, "+FLAGS", "(\\Seen \\Flagged)" if star else "(\\Seen)")
                         if where == "spam":
                             # «Не спам»: копия во «Входящие», из «Спама» убираем.
                             if box.uid("copy", uid, "INBOX")[0] == "OK":
@@ -352,8 +354,8 @@ async def _choose_mailbox(db: AsyncSession, enrollment: LgEnrollment, now: datet
 
     async def capacity(mb: LgMailbox) -> int:
         local_today = now.astimezone(ZoneInfo(tz)).date()
-        return warmup.cold_capacity(mb, core.mailbox_capacity(mb.daily_limit, mb.warmup_started_on, local_today,
-                                                              await _sent_today(db, mb.id, now, tz)))
+        limit = warmup.cold_limit(mb, local_today)   # первые 7 дней прогрева — 0
+        return warmup.cold_capacity(mb, max(0, limit - await _sent_today(db, mb.id, now, tz)))
     if enrollment.mailbox_id:
         boxes = [mb for mb in [await db.get(LgMailbox, enrollment.mailbox_id)] if mb and mb.is_active]
     else:

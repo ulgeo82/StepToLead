@@ -26,7 +26,7 @@ class WarmTransport(FakeTransport):
         self.spam = set(spam)   # адреса получателей, у которых письма падают в «Спам»
         self.located = []
 
-    async def warm_locate(self, mailbox, password, message_ids, flag=frozenset()):
+    async def warm_locate(self, mailbox, password, message_ids, flag=frozenset(), flag_rescued=True):
         assert password == "secret"
         self.located.append((mailbox.email, list(message_ids)))
         sent = {m.message_id: m for m in self.sent}
@@ -41,17 +41,38 @@ def box(email, role="outreach", started=date(2026, 10, 7), host="smtp.yandex.ru"
 
 
 class PlanTests(unittest.TestCase):
-    def test_ramp_maintenance_helper_weekend(self):
+    def test_schedule_matches_strategy(self):
+        # неделя 1 — только прогрев 2 → 10; с 8-го дня холодные; 29-й — пик 70 = 45 холодных + 25 прогрева
+        self.assertEqual(warmup.schedule(0, 70, 45), (2, 0))
+        self.assertEqual(warmup.schedule(6, 70, 45), (10, 0))
+        warm, cold = warmup.schedule(7, 70, 45)
+        self.assertTrue(cold > 0 and warm > cold)
+        self.assertEqual(sum(warmup.schedule(13, 70, 45)), 25)
+        self.assertEqual(sum(warmup.schedule(20, 70, 45)), 45)
+        self.assertEqual(sum(warmup.schedule(27, 70, 45)), 65)
+        self.assertEqual(warmup.schedule(28, 70, 45), (25, 45))
+        self.assertEqual(warmup.schedule(None, 70, 45), (25, 45))          # старый живой ящик
+        self.assertEqual(warmup.schedule(40, 70, 65), (20, 50))            # прогрев на пике не ниже 20
+        totals = [sum(warmup.schedule(d, 70, 45)) for d in range(29)]
+        self.assertEqual(totals, sorted(totals))                           # объём только растёт
+
+    def test_plan_cold_limit_helper_weekend(self):
         wed = date(2026, 10, 7)
-        mb = SimpleNamespace(is_active=True, warmup_enabled=True, role="outreach", warmup_target=25, warmup_started_on=wed)
-        self.assertEqual(warmup.daily_plan(mb, wed), 2)
-        mb.warmup_started_on = wed - timedelta(days=20)
-        self.assertEqual(warmup.daily_plan(mb, wed), 25)
+        mb = SimpleNamespace(is_active=True, warmup_enabled=True, role="outreach", warmup_target=70, daily_limit=45,
+                             warmup_started_on=wed)
+        self.assertEqual((warmup.daily_plan(mb, wed), warmup.cold_limit(mb, wed)), (2, 0))
+        self.assertEqual(warmup.cold_limit(mb, wed + timedelta(days=6)), 0)      # 7-й день — ещё нет
+        self.assertGreater(warmup.cold_limit(mb, wed + timedelta(days=7)), 0)    # 8-й — начали
         mb.warmup_started_on = wed - timedelta(days=40)
-        self.assertEqual(warmup.daily_plan(mb, wed), warmup.MAINTENANCE)
-        self.assertEqual(warmup.daily_plan(mb, date(2026, 10, 10)), 5)   # суббота — вполовину
+        self.assertEqual(warmup.daily_plan(mb, wed), 25)
+        self.assertEqual(warmup.daily_plan(mb, date(2026, 10, 10)), 13)   # суббота — прогрев вполовину
+        self.assertIn("Гибридный", warmup.stage(mb, wed)["title"])
+        mb.warmup_started_on = wed - timedelta(days=2)
+        st = warmup.stage(mb, wed)
+        self.assertIn("Тихий старт", st["title"])
+        self.assertIn("8-го дня", st["note"])
         mb.role = "helper"
-        self.assertEqual(warmup.daily_plan(mb, wed), warmup.HELPER_DAILY)
+        self.assertEqual((warmup.daily_plan(mb, wed), warmup.cold_limit(mb, wed)), (warmup.HELPER_DAILY, 0))
         mb.warmup_enabled = False
         self.assertEqual(warmup.daily_plan(mb, wed), 0)
 
@@ -194,12 +215,13 @@ class ApiTests(FlowBase):
         r = self.client.post(f"{base}/mailboxes", headers=ORIGIN, json={**common, "email": "h@yandex.ru", "role": "helper"})
         self.assertEqual(r.json()["role"], "helper")
         self.assertEqual(r.json()["left_today"], 0)   # помощник не шлёт холодных
+        self.assertEqual(self.client.get(f"{base}/mailboxes").json()["items"][0]["left_today"], 0)  # новый: 7 дней только прогрев
         data = self.client.get(f"{base}/warmup").json()
         self.assertEqual((data["pool"]["total"], data["pool"]["helpers"], data["running"]), (2, 1, True))
         self.assertTrue(any("меньше 4" in tip for tip in data["tips"]))
-        card = data["items"][0]
+        card = next(c for c in data["items"] if c["role"] == "outreach")
         self.assertEqual(len(card["days"]), 14)
-        self.assertIn("warm_plan", card["today"])
+        self.assertEqual((card["today"]["warm_plan"], card["today"]["cold_plan"]), (2, 0))
         mid = card["id"]
         self.assertEqual(self.client.patch(f"{base}/mailboxes/{mid}", headers=ORIGIN,
                                            json={"warmup_enabled": False}).json()["warmup_enabled"], False)

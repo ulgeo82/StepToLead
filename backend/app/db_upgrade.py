@@ -86,7 +86,7 @@ def upgrade_existing_schema(connection):
                         "disabled_at": "TIMESTAMP WITH TIME ZONE"},
         "website_sites": {"widget": "JSON"},
         "lg_mailboxes": {"role": "VARCHAR(10) NOT NULL DEFAULT 'outreach'",
-                         "warmup_enabled": "BOOLEAN NOT NULL DEFAULT true", "warmup_target": "INTEGER NOT NULL DEFAULT 25",
+                         "warmup_enabled": "BOOLEAN NOT NULL DEFAULT true", "warmup_target": "INTEGER NOT NULL DEFAULT 70",
                          "health": "INTEGER", "health_json": "JSON", "health_checked_at": "TIMESTAMP WITH TIME ZONE",
                          "cold_paused_at": "TIMESTAMP WITH TIME ZONE", "cold_paused_reason": "VARCHAR(300)",
                          "warmup_error": "VARCHAR(500)"},
