@@ -104,7 +104,15 @@ function MailCard({ card, busy, act }: { card: Card; busy: boolean; act: (path: 
             <select value={card.warmup_target} disabled={busy} onChange={(e) => act(`/mailboxes/${card.id}`, { warmup_target: Number(e.target.value) }, "PATCH")}>
               {[...new Set([40, 50, 60, 70, 80, 100, card.warmup_target])].sort((a, b) => a - b).map((n) => <option key={n} value={n}>{n} писем/день</option>)}
             </select>
-            <small className={styles.muted}>из них холодных {Math.min(card.peak.cold, Math.max(0, card.peak.total - 20))}</small>
+          </label>
+        )}
+        {card.role === "outreach" && (
+          <label className={styles.inlineForm} title="Сколько из них холодных писем клиентам (дневной лимит ящика). Прогрев на пике не меньше 20">
+            <small className={styles.muted}>из них холодных</small>
+            <select value={card.peak.cold} disabled={busy} onChange={(e) => act(`/mailboxes/${card.id}`, { daily_limit: Number(e.target.value) }, "PATCH")}>
+              {[...new Set([20, 30, 40, 45, 50, 60, card.peak.cold])].sort((a, b) => a - b).map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+            {card.peak.cold > card.peak.total - 20 && <small className={styles.errorText}>будет {Math.max(0, card.peak.total - 20)} — поднимите пик</small>}
           </label>
         )}
       </div>
