@@ -383,8 +383,11 @@ def _dns_checks(domain: str) -> dict:
     out: dict = {}
     spf = txt(domain)
     out["spf"] = None if spf is None else any(t.lower().startswith("v=spf1") for t in spf)
+    out["spf_spaces"] = any(t != t.lstrip() and t.lstrip().lower().startswith("v=spf1") for t in spf or [])
     dmarc = txt(f"_dmarc.{domain}")
+    # Запись должна начинаться ровно с «v=DMARC1»: пробелы в начале строгие почтовики не принимают.
     out["dmarc"] = None if dmarc is None else any(t.lower().startswith("v=dmarc1") for t in dmarc)
+    out["dmarc_spaces"] = any(t != t.lstrip() and t.lstrip().lower().startswith("v=dmarc1") for t in dmarc or [])
     out["dmarc_policy"] = next((m.group(1) for t in dmarc or [] for m in [re.search(r"\bp=(\w+)", t)] if m), None)
     try:
         out["mx"] = bool(resolver.resolve(domain, "MX"))
@@ -451,8 +454,10 @@ async def compute_health(db: AsyncSession, mb: LgMailbox, now: datetime, dns_res
     bounces = int(cold.get("bounced", 0))
     d = dns_result or {}
     checks = [
-        _check("spf", d.get("spf")),
-        _check("dmarc", d.get("dmarc"), f"политика p={d['dmarc_policy']}" if d.get("dmarc_policy") else None),
+        _check("spf", d.get("spf"), "в начале значения лишние пробелы — уберите их" if d.get("spf_spaces") else None),
+        _check("dmarc", d.get("dmarc"), "запись есть, но в начале значения лишние пробелы — удалите их, "
+                                         "значение должно начинаться ровно с v=DMARC1" if d.get("dmarc_spaces")
+               else f"политика p={d['dmarc_policy']}" if d.get("dmarc_policy") else None),
         _check("mx", d.get("mx")),
         _check("dkim", None if not dkim else sum(1 for x in dkim if x == "pass") >= len(dkim) * 0.8,
                f"подпись прошла в {sum(1 for x in dkim if x == 'pass')} из {len(dkim)}" if dkim else "нет данных от получателей"),
