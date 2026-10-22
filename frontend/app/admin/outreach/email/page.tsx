@@ -162,6 +162,7 @@ function EmailPage() {
         password: data.get("password"),
         daily_limit: Number(data.get("daily_limit")),
         warmup: data.has("warmup"),
+        role: data.has("helper") ? "helper" : "outreach",
       });
       form.reset();
       setNotice("Ящик добавлен. Нажмите «Проверить» для проверки подключения.");
@@ -386,7 +387,11 @@ function EmailPage() {
                   <tbody>
                     {mailboxes.map((mailbox) => (
                       <tr key={mailbox.id}>
-                        <td>{mailbox.email}</td>
+                        <td>
+                          {mailbox.email}
+                          {mailbox.role === "helper" && <small>помощник прогрева</small>}
+                          {mailbox.cold_paused && <small className={styles.errorText}>⏸ холодные на паузе</small>}
+                        </td>
                         <td>{mailbox.sender_name || "—"}</td>
                         <td>{mailbox.daily_limit}</td>
                         <td>
@@ -467,6 +472,14 @@ function EmailPage() {
               <input type="checkbox" name="warmup" defaultChecked />
               Прогрев
             </label>
+            <label className={styles.check}>
+              <input type="checkbox" name="helper" />
+              <span>
+                Ящик-помощник
+                <small className={styles.hint}>Только участвует в прогреве, холодные письма с него не уходят. Подойдут обычные ящики на Яндексе, Mail.ru, Gmail</small>
+              </span>
+            </label>
+            <p className={styles.muted}>Прогресс и здоровье ящиков — в разделе <a href="/admin/outreach/warmup">«Прогрев»</a>.</p>
             <p className={styles.muted}>Яндекс 360: smtp.yandex.ru / imap.yandex.ru, пароль приложения</p>
             <button type="submit" className={styles.primary} disabled={busy}>
               {busy ? "Сохраняем…" : "Добавить ящик"}

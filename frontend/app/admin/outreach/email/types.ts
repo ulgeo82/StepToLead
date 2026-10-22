@@ -24,6 +24,10 @@ export type Mailbox = {
   warmup_started_on: string | null;
   is_active: boolean;
   last_error: string | null;
+  role?: "outreach" | "helper";
+  warmup_enabled?: boolean;
+  health?: number | null;
+  cold_paused?: boolean;
 };
 export type Enrollment = {
   id: number;

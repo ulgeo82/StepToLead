@@ -9,6 +9,7 @@ import asyncio
 import email
 import imaplib
 import logging
+import re
 import smtplib
 import ssl
 from dataclasses import dataclass, field
@@ -102,6 +103,30 @@ def _text_of(msg: email.message.Message) -> str:
     return payload.decode(msg.get_content_charset() or "utf-8", errors="replace")
 
 
+_SPAM_NAMES = {"spam", "junk", "junk e-mail", "junk email", "[gmail]/spam", "&bceepwqwbdw-", "bulk mail"}
+
+
+def _quote(value: str) -> str:
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _spam_folders(box) -> list[str]:
+    """Папки «Спам» по атрибуту \\Junk (RFC 6154), иначе по известным именам (у Mail.ru — «Спам» в UTF-7)."""
+    typ, data = box.list()
+    found, named = [], []
+    for raw in data or []:
+        line = raw.decode(errors="replace") if isinstance(raw, bytes) else str(raw)
+        m = re.match(r'\((?P<flags>[^)]*)\) (?:"[^"]*"|NIL) (?P<name>.+)$', line)
+        if not m:
+            continue
+        name = m.group("name").strip().strip('"')
+        if "\\junk" in m.group("flags").lower():
+            found.append(name)
+        elif name.lower() in _SPAM_NAMES or name.lower().endswith("/spam"):
+            named.append(name)
+    return found or named
+
+
 class SmtpImapTransport:
     """Реальный транспорт: SMTP по SSL (465) или STARTTLS (587), IMAP по SSL. Блокирующие вызовы — в потоке."""
     timeout = 30
@@ -151,6 +176,50 @@ class SmtpImapTransport:
                                             in_reply_to=msg.get("In-Reply-To"), references=refs,
                                             headers={k: str(v) for k, v in msg.items() if k.lower() in (
                                                 "auto-submitted", "x-autoreply", "content-type", "precedence")}))
+                return out
+            finally:
+                try:
+                    box.logout()
+                except Exception:  # noqa: BLE001
+                    pass
+        return await asyncio.to_thread(go)
+
+    async def warm_locate(self, mailbox, password, message_ids, flag=frozenset()):
+        """Прогрев: найти письма по Message-ID во «Входящих» и в «Спаме». Из «Спама» — перенести во «Входящие».
+        Найденное отмечается прочитанным (часть — важным). Возвращает {message_id: {"folder", "auth"}}."""
+        def go():
+            box = imaplib.IMAP4_SSL(mailbox.imap_host, mailbox.imap_port, timeout=self.timeout)
+            out = {}
+            try:
+                box.login(mailbox.login, password)
+                folders = ["INBOX"] + _spam_folders(box)
+                for folder in folders:
+                    wanted = [m for m in message_ids if m and m not in out]
+                    if not wanted:
+                        break
+                    typ, _ = box.select(_quote(folder))
+                    if typ != "OK":
+                        continue
+                    moved = False
+                    for mid in wanted:
+                        typ, data = box.uid("search", None, "HEADER", "Message-ID", _quote(mid.strip("<>")))
+                        uids = (data[0] or b"").split() if typ == "OK" and data else []
+                        if not uids:
+                            continue
+                        uid = uids[-1]
+                        typ, hdr = box.uid("fetch", uid, "(BODY.PEEK[HEADER.FIELDS (AUTHENTICATION-RESULTS)])")
+                        raw = b"".join(part[1] for part in hdr or [] if isinstance(part, tuple)).decode(errors="replace")
+                        auth = {k.lower(): v.lower() for k, v in re.findall(r"\b(spf|dkim|dmarc)=(\w+)", raw, re.I)}
+                        box.uid("store", uid, "+FLAGS", "(\\Seen \\Flagged)" if mid in flag else "(\\Seen)")
+                        where = "inbox" if folder == "INBOX" else "spam"
+                        if where == "spam":
+                            # «Не спам»: копия во «Входящие», из «Спама» убираем.
+                            if box.uid("copy", uid, "INBOX")[0] == "OK":
+                                box.uid("store", uid, "+FLAGS", "(\\Deleted)")
+                                moved = True
+                        out[mid] = {"folder": where, "auth": auth}
+                    if moved:
+                        box.expunge()
                 return out
             finally:
                 try:
@@ -279,10 +348,12 @@ async def _choose_mailbox(db: AsyncSession, enrollment: LgEnrollment, now: datet
                           gap_minutes: int = 10) -> tuple[LgMailbox | None, datetime | None]:
     """Ящик закрепляется за компанией: вся ветка писем идёт от одного отправителя.
     Возвращает (ящик, None) или (None, когда попробовать снова, если мешает только пауза между письмами)."""
+    from app.domains.leadgen import warmup
+
     async def capacity(mb: LgMailbox) -> int:
         local_today = now.astimezone(ZoneInfo(tz)).date()
-        return core.mailbox_capacity(mb.daily_limit, mb.warmup_started_on, local_today,
-                                     await _sent_today(db, mb.id, now, tz))
+        return warmup.cold_capacity(mb, core.mailbox_capacity(mb.daily_limit, mb.warmup_started_on, local_today,
+                                                              await _sent_today(db, mb.id, now, tz)))
     if enrollment.mailbox_id:
         boxes = [mb for mb in [await db.get(LgMailbox, enrollment.mailbox_id)] if mb and mb.is_active]
     else:
@@ -490,6 +561,11 @@ async def handle_inbound(db: AsyncSession, mailbox: LgMailbox, mail: IncomingMai
                 _finish(enr, "bounced", "bounce", now)
         if address:
             await _dnc(db, mailbox.workspace_id, "email", address, "bounced")
+            original = await db.scalar(select(LgTouch).where(
+                LgTouch.direction == "out", LgTouch.channel == "email", LgTouch.address == address,
+                LgTouch.status == "sent").order_by(LgTouch.id.desc()).limit(1))
+            if original is not None:
+                original.status = "bounced"
         await db.flush()
         return "bounce" if contacts else "unmatched"
 
@@ -541,8 +617,11 @@ async def poll_mailbox(db: AsyncSession, transport: MailTransport, mailbox: LgMa
         mailbox.last_error, mailbox.last_checked_at = f"IMAP: {type(exc).__name__}: {exc}"[:500], now
         await db.flush()
         return {"error": 1}
+    from app.domains.leadgen import warmup
+    ours = await warmup.pool_addresses(db, mailbox.workspace_id)
     for mail in sorted(mails, key=lambda m: m.uid):
-        kind = await handle_inbound(db, mailbox, mail, now=now)
+        # Письма между нашими ящиками — прогрев: не ответы лидов, во «Входящие» и аналитику не идут.
+        kind = "warmup" if (mail.sender or "").lower() in ours else await handle_inbound(db, mailbox, mail, now=now)
         counts[kind] = counts.get(kind, 0) + 1
         mailbox.imap_last_uid = max(mailbox.imap_last_uid or 0, mail.uid)
     mailbox.last_checked_at = now
@@ -570,6 +649,13 @@ async def run_worker() -> None:
                 from app.domains.leadgen import hot
                 if await hot.remind_due(db):
                     await db.commit()
+            try:
+                async with routes.session_factory() as db:
+                    from app.domains.leadgen import warmup
+                    await warmup.run_tick(db, transport, check=tick % POLL_EVERY_TICKS == 0)
+                    await db.commit()
+            except Exception:  # noqa: BLE001 — прогрев не должен останавливать цепочки
+                logger.exception("leadgen warmup tick failed")
             if tick % POLL_EVERY_TICKS == 0:
                 async with routes.session_factory() as db:
                     boxes = (await db.execute(select(LgMailbox).where(LgMailbox.is_active.is_(True)))).scalars().all()

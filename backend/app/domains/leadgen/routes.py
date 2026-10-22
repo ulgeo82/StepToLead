@@ -782,6 +782,7 @@ class MailboxIn(BaseModel):
     password: str = Field(min_length=1, max_length=500)
     daily_limit: int = Field(default=30, ge=1, le=200)
     warmup: bool = True  # новый ящик: 5 → 10 → 20 писем в день первые три недели
+    role: str = Field(default="outreach", pattern="^(outreach|helper)$")  # helper — только для прогрева
 
 
 class MailboxPatch(BaseModel):
@@ -790,17 +791,22 @@ class MailboxPatch(BaseModel):
     password: str | None = Field(default=None, min_length=1, max_length=500)
     daily_limit: int | None = Field(default=None, ge=1, le=200)
     is_active: bool | None = None
+    role: str | None = Field(default=None, pattern="^(outreach|helper)$")
+    warmup_enabled: bool | None = None
+    warmup_target: int | None = Field(default=None, ge=5, le=60)
 
 
 async def mailbox_row(db: AsyncSession, mb: LgMailbox) -> dict:
     now = service.utcnow()
     sent = await sequences._sent_today(db, mb.id, now, "Europe/Moscow")
-    left = seq_core.mailbox_capacity(mb.daily_limit, mb.warmup_started_on, now.date(), sent)
+    from app.domains.leadgen import warmup
+    left = warmup.cold_capacity(mb, seq_core.mailbox_capacity(mb.daily_limit, mb.warmup_started_on, now.date(), sent))
     return {"id": mb.id, "email": mb.email, "sender_name": mb.sender_name, "smtp_host": mb.smtp_host,
             "smtp_port": mb.smtp_port, "imap_host": mb.imap_host, "imap_port": mb.imap_port, "login": mb.login,
             "daily_limit": mb.daily_limit, "warmup_started_on": mb.warmup_started_on.isoformat() if mb.warmup_started_on else None,
             "is_active": mb.is_active, "sent_today": sent, "left_today": left, "last_error": mb.last_error,
-            "last_checked_at": iso(mb.last_checked_at)}
+            "last_checked_at": iso(mb.last_checked_at), "role": mb.role, "warmup_enabled": mb.warmup_enabled,
+            "health": mb.health, "cold_paused": bool(mb.cold_paused_at)}
 
 
 async def mailbox_or_404(db: AsyncSession, mailbox_id: int) -> LgMailbox:
@@ -825,11 +831,12 @@ async def create_mailbox(payload: MailboxIn, db: AsyncSession = Depends(get_db),
         raise HTTPException(409, "Такой ящик уже добавлен")
     if email_.endswith("@steptolead.ru"):
         raise HTTPException(422, "Не используйте основной домен steptolead.ru для холодных писем — заведите отдельный")
+    helper = payload.role == "helper"
     mb = LgMailbox(workspace_id=ws, email=email_, sender_name=payload.sender_name, smtp_host=payload.smtp_host.strip(),
                    smtp_port=payload.smtp_port, imap_host=payload.imap_host.strip(), imap_port=payload.imap_port,
                    login=(payload.login or email_).strip(), password_encrypted=encrypt_secret(payload.password),
-                   daily_limit=payload.daily_limit, warmup_started_on=service.utcnow().date() if payload.warmup else None,
-                   is_active=True)
+                   daily_limit=payload.daily_limit, warmup_started_on=service.utcnow().date() if payload.warmup or helper else None,
+                   is_active=True, role=payload.role, warmup_enabled=True, warmup_target=25)
     db.add(mb)
     await db.commit()
     return await mailbox_row(db, mb)
@@ -847,6 +854,31 @@ async def patch_mailbox(mailbox_id: int, payload: MailboxPatch, db: AsyncSession
         setattr(mb, key, value)
     await db.commit()
     return await mailbox_row(db, mb)
+
+
+@router.get("/warmup")
+async def warmup_overview(db: AsyncSession = Depends(get_db), admin: AdminUser = Depends(require_admin)):
+    from app.domains.leadgen import warmup
+    return await warmup.overview(db, workspace_id())
+
+
+@router.post("/warmup/{mailbox_id}/resume-cold")
+async def warmup_resume_cold(mailbox_id: int, db: AsyncSession = Depends(get_db), admin: AdminUser = Depends(require_admin)):
+    from app.domains.leadgen import warmup
+    mb = await mailbox_or_404(db, mailbox_id)
+    mb.cold_paused_at, mb.cold_paused_reason = None, None
+    await db.commit()
+    return await warmup.card(db, mb, service.utcnow())
+
+
+@router.post("/warmup/{mailbox_id}/check")
+async def warmup_check(mailbox_id: int, db: AsyncSession = Depends(get_db), admin: AdminUser = Depends(require_admin)):
+    """Перепроверить домен (SPF, DMARC, MX, чёрный список) и пересчитать здоровье прямо сейчас."""
+    from app.domains.leadgen import warmup
+    mb = await mailbox_or_404(db, mailbox_id)
+    await warmup.refresh_health(db, mb, force_dns=True)
+    await db.commit()
+    return await warmup.card(db, mb, service.utcnow())
 
 
 @router.post("/mailboxes/{mailbox_id}/check")

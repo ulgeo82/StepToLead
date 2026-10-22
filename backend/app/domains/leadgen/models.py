@@ -240,6 +240,38 @@ class LgMailbox(Base):
     last_error: Mapped[str | None] = mapped_column(Text)
     last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # Прогрев (warmup.py). role: outreach — рабочий ящик; helper — только участвует в прогреве, холодных не шлёт.
+    role: Mapped[str] = mapped_column(String(10), default="outreach")
+    warmup_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    warmup_target: Mapped[int] = mapped_column(Integer, default=25)
+    health: Mapped[int | None] = mapped_column(Integer)
+    health_json: Mapped[dict | None] = mapped_column(JSON)
+    health_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cold_paused_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cold_paused_reason: Mapped[str | None] = mapped_column(String(300))
+    warmup_error: Mapped[str | None] = mapped_column(String(500))
+
+
+class LgWarmupMail(Base):
+    """Прогревочное письмо между ящиками пула. status: scheduled → sent → inbox / spam / missing (или failed)."""
+    __tablename__ = "lg_warmup_mails"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    workspace_id: Mapped[int] = mapped_column(ForeignKey("client_workspaces.id", ondelete="CASCADE"), index=True)
+    from_mailbox_id: Mapped[int] = mapped_column(ForeignKey("lg_mailboxes.id", ondelete="CASCADE"), index=True)
+    to_mailbox_id: Mapped[int] = mapped_column(ForeignKey("lg_mailboxes.id", ondelete="CASCADE"), index=True)
+    message_id: Mapped[str | None] = mapped_column(String(300), index=True)
+    in_reply_to: Mapped[str | None] = mapped_column(String(300))
+    depth: Mapped[int] = mapped_column(Integer, default=0)
+    subject: Mapped[str] = mapped_column(String(300))
+    body: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(10), default="sent", index=True)
+    send_after: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    found_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    rescued: Mapped[bool] = mapped_column(Boolean, default=False)
+    auth: Mapped[dict | None] = mapped_column(JSON)
+    error: Mapped[str | None] = mapped_column(String(300))
 
 
 class LgSequence(Base):

@@ -71,6 +71,7 @@ async def login(payload: Login, request: Request, response: Response, db: AsyncS
     if old_token:
         await db.execute(delete(AdminSession).where(AdminSession.token_hash == token_digest(old_token)))
     token = secrets.token_urlsafe(32)
+    user.last_login_at = now
     db.add(AdminSession(token_hash=token_digest(token), user_id=user.id, expires_at=now + timedelta(hours=12)))
     await db.commit()
     response.set_cookie(COOKIE, token, httponly=True, secure=settings.session_cookie_secure, samesite="strict", max_age=43200, path="/")

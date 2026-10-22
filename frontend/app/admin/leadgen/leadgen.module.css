@@ -1025,3 +1025,207 @@
     max-width: 100%;
   }
 }
+
+/* ── Прогрев ─────────────────────────────────────────────── */
+.warmPool {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.warmPool h2 {
+  margin-bottom: 6px;
+}
+.warmPool p {
+  margin: 4px 0;
+}
+.warmGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 16px;
+}
+.warmCard {
+  margin-bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.warmCard .actions {
+  margin: 0;
+  flex-wrap: wrap;
+}
+.warmHead {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.warmHead h3 {
+  margin: 0 0 4px;
+  overflow-wrap: anywhere;
+}
+.warmScore {
+  min-width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border: 3px solid #26324d;
+  flex-shrink: 0;
+}
+.warmScore b {
+  font-size: 20px;
+  color: #fff;
+  line-height: 1;
+}
+.warmScore small {
+  font-size: 9px;
+  color: #8391ad;
+}
+.warmScore.fitYes {
+  border-color: #2fb36d;
+}
+.warmScore.fitMaybe {
+  border-color: #e0a100;
+}
+.warmScore.fitNo {
+  border-color: #e5484d;
+}
+.warmStage {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: #c9d2e3;
+}
+.warmProgress {
+  height: 6px;
+  border-radius: 6px;
+  background: #1a2540;
+  overflow: hidden;
+}
+.warmProgress i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #2f6bff, #2fb36d);
+}
+.warmFacts {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin: 0;
+}
+.warmFacts div {
+  background: #0e1628;
+  border: 1px solid #1a2540;
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+.warmFacts dt {
+  font-size: 11px;
+  color: #8391ad;
+}
+.warmFacts dd {
+  margin: 4px 0 0;
+  color: #fff;
+  font-weight: 700;
+}
+.warmBars {
+  display: grid;
+  grid-template-columns: repeat(14, 1fr);
+  gap: 3px;
+  height: 56px;
+  align-items: end;
+}
+.warmBars span {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  background: #0e1628;
+  border-radius: 3px;
+  overflow: hidden;
+}
+.warmBars i {
+  display: block;
+}
+.barInbox,
+.legendInbox {
+  background: #2fb36d;
+  color: #2fb36d;
+}
+.barSpam,
+.legendSpam {
+  background: #e0a100;
+  color: #e0a100;
+}
+.barMissing,
+.legendMissing {
+  background: #e5484d;
+  color: #e5484d;
+}
+.barPending,
+.legendPending {
+  background: #3a4a6b;
+  color: #3a4a6b;
+}
+.legendInbox,
+.legendSpam,
+.legendMissing,
+.legendPending {
+  background: none;
+}
+.warmChecks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+}
+.warmChecks li {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+.warmChecks li > span {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.warmChecks p {
+  margin: 4px 0 0;
+  color: #c9d2e3;
+  font-size: 12px;
+}
+.warmChecks small {
+  color: #8391ad;
+}
+.warmOk > span {
+  background: #12372a;
+  color: #2fb36d;
+}
+.warmBad > span {
+  background: #3d1719;
+  color: #ff8b8f;
+}
+.warmUnknown > span {
+  background: #1a2540;
+  color: #8391ad;
+}
+@media (max-width: 600px) {
+  .warmGrid {
+    grid-template-columns: 1fr;
+  }
+  .warmFacts {
+    grid-template-columns: 1fr 1fr;
+  }
+}

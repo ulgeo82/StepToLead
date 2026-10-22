@@ -50,6 +50,7 @@ export const adminNavigation: NavigationNode[] = [
         children: [
           { kind: "item", id: "inbound", label: "Входящие", href: "/admin/outreach/inbox" },
           { kind: "item", id: "email", label: "Email-кампании", href: "/admin/outreach/email" },
+          { kind: "item", id: "warmup", label: "Прогрев", href: "/admin/outreach/warmup" },
           {
             kind: "folder",
             id: "telegram",
@@ -70,6 +71,7 @@ export const adminNavigation: NavigationNode[] = [
     id: "system",
     label: "Система",
     children: [
+      { kind: "item", id: "team", label: "Команда агентства", href: "/admin/team" },
       { kind: "item", id: "monitor", label: "Мониторинг", href: "/admin/monitor" },
       // Один пул прокси: и для рассылочных аккаунтов агентства, и для Telegram-профилей клиентов.
       { kind: "item", id: "proxies", label: "Прокси Telegram", href: "/admin/proxies" },

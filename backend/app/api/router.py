@@ -28,6 +28,8 @@ api_router.include_router(reports.router)
 api_router.include_router(reports.public_router)
 api_router.include_router(ai_admin.router)
 api_router.include_router(access.router)
+from app.api.routes import admin_team
+api_router.include_router(admin_team.router)
 api_router.include_router(growth.public_router)
 api_router.include_router(growth.admin_router)
 api_router.include_router(telegram_bot.router)

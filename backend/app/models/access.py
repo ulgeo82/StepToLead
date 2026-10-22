@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, ForeignKey, JSON, String, Text
+from sqlalchemy import DateTime, ForeignKey, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -17,6 +17,23 @@ class AdminUser(Base):
     telegram_username: Mapped[str | None] = mapped_column(String(64))
     telegram_link_code_hash: Mapped[str | None] = mapped_column(String(64))
     telegram_link_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Команда агентства (Система → Команда): отключённый админ получает role="disabled" — вход и сессии закрыты.
+    display_name: Mapped[str | None] = mapped_column(String(120))
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_by_id: Mapped[int | None] = mapped_column(Integer)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class AdminAudit(Base):
+    """Журнал команды агентства: кто кого добавил, отключил, сбросил пароль."""
+    __tablename__ = "admin_audit"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    actor_id: Mapped[int | None] = mapped_column(Integer)
+    actor: Mapped[str] = mapped_column(String(254))
+    action: Mapped[str] = mapped_column(String(40))
+    target: Mapped[str | None] = mapped_column(String(254))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
 class AdminSession(Base):
