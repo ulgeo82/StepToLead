@@ -159,7 +159,7 @@ def _imap_locate(box, message_ids, flag=frozenset(), flag_rescued=True) -> dict:
     во «Входящие» со звёздочкой. Возвращает {message_id: {"folder", "auth"}}."""
     wanted = {_norm_mid(m): m for m in message_ids if m}
     out: dict = {}
-    since = (datetime.utcnow() - timedelta(days=4)).strftime("%d-%b-%Y")
+    since = (datetime.utcnow() - timedelta(days=8)).strftime("%d-%b-%Y")
     for folder in ["INBOX"] + _spam_folders(box):
         if len(out) == len(wanted):
             break
@@ -167,7 +167,7 @@ def _imap_locate(box, message_ids, flag=frozenset(), flag_rescued=True) -> dict:
         if typ != "OK":
             continue
         typ, data = box.uid("search", None, "SINCE", since)
-        uids = (data[0] or b"").split()[-400:] if typ == "OK" and data else []
+        uids = (data[0] or b"").split()[-800:] if typ == "OK" and data else []
         if not uids:
             continue
         typ, rows = box.uid("fetch", b",".join(uids), "(UID BODY.PEEK[HEADER.FIELDS (MESSAGE-ID AUTHENTICATION-RESULTS)])")

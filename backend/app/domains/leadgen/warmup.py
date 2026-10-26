@@ -44,7 +44,7 @@ MAX_TARGET = 120
 MAX_DEPTH = 3            # письмо + до 3 ответов в ветке
 FIND_AFTER = timedelta(minutes=3)
 MISSING_AFTER = timedelta(hours=6)
-RECHECK_MISSING = timedelta(days=3)
+RECHECK_MISSING = timedelta(days=7)   # столько же, сколько окно здоровья
 CHECK_EVERY_TICKS = 15   # заходить в ящики по IMAP за прогревом раз в 15 минут — чаще почтовики рвут соединения
 WINDOW = core.Window(tz=TZ, start_hour=9, end_hour=20, weekdays=(0, 1, 2, 3, 4, 5, 6))
 HEALTH_EVERY = timedelta(hours=6)
