@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 
+from zoneinfo import ZoneInfo
 from datetime import datetime
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile
@@ -796,12 +797,33 @@ class MailboxPatch(BaseModel):
     warmup_target: int | None = Field(default=None, ge=20, le=120)   # всего писем в день на пике
 
 
+def ascii_email(value: str) -> str:
+    """Кириллический домен (ivan@стептолеад.рф) → punycode (ivan@xn--80aiba3argojc.xn--p1ai): SMTP, IMAP и
+    заголовки писем принимают только латиницу. Почтовики (Яндекс) понимают такой адрес как тот же ящик."""
+    local, _, domain = value.strip().lower().rpartition("@")
+    try:
+        domain = domain.encode("idna").decode("ascii")
+    except UnicodeError:
+        raise HTTPException(422, "Не получилось разобрать домен почты") from None
+    if not local.isascii():
+        raise HTTPException(422, "Имя ящика до @ должно быть латиницей (например, a_sokolova@стептолеад.рф)")
+    return f"{local}@{domain}"
+
+
+def unicode_email(value: str) -> str:
+    local, _, domain = value.rpartition("@")
+    try:
+        return f"{local}@{domain.encode('ascii').decode('idna')}"
+    except UnicodeError:
+        return value
+
+
 async def mailbox_row(db: AsyncSession, mb: LgMailbox) -> dict:
     now = service.utcnow()
     sent = await sequences._sent_today(db, mb.id, now, "Europe/Moscow")
     from app.domains.leadgen import warmup
     left = warmup.cold_capacity(mb, max(0, warmup.cold_limit(mb, now.date()) - sent))
-    return {"id": mb.id, "email": mb.email, "sender_name": mb.sender_name, "smtp_host": mb.smtp_host,
+    return {"id": mb.id, "email": unicode_email(mb.email), "sender_name": mb.sender_name, "smtp_host": mb.smtp_host,
             "smtp_port": mb.smtp_port, "imap_host": mb.imap_host, "imap_port": mb.imap_port, "login": mb.login,
             "daily_limit": mb.daily_limit, "warmup_started_on": mb.warmup_started_on.isoformat() if mb.warmup_started_on else None,
             "is_active": mb.is_active, "sent_today": sent, "left_today": left, "last_error": mb.last_error,
@@ -826,7 +848,7 @@ async def list_mailboxes(db: AsyncSession = Depends(get_db), admin: AdminUser = 
 @router.post("/mailboxes", status_code=201)
 async def create_mailbox(payload: MailboxIn, db: AsyncSession = Depends(get_db), admin: AdminUser = Depends(require_admin)):
     ws = workspace_id()
-    email_ = payload.email.strip().lower()
+    email_ = ascii_email(payload.email)
     if await db.scalar(select(LgMailbox.id).where(LgMailbox.workspace_id == ws, LgMailbox.email == email_)):
         raise HTTPException(409, "Такой ящик уже добавлен")
     if email_.endswith("@steptolead.ru"):
@@ -834,8 +856,8 @@ async def create_mailbox(payload: MailboxIn, db: AsyncSession = Depends(get_db),
     helper = payload.role == "helper"
     mb = LgMailbox(workspace_id=ws, email=email_, sender_name=payload.sender_name, smtp_host=payload.smtp_host.strip(),
                    smtp_port=payload.smtp_port, imap_host=payload.imap_host.strip(), imap_port=payload.imap_port,
-                   login=(payload.login or email_).strip(), password_encrypted=encrypt_secret(payload.password),
-                   daily_limit=payload.daily_limit, warmup_started_on=service.utcnow().date() if payload.warmup or helper else None,
+                   login=ascii_email(payload.login) if payload.login and "@" in payload.login else (payload.login or email_).strip(), password_encrypted=encrypt_secret(payload.password),
+                   daily_limit=payload.daily_limit, warmup_started_on=service.utcnow().astimezone(ZoneInfo("Europe/Moscow")).date() if payload.warmup or helper else None,
                    is_active=True, role=payload.role, warmup_enabled=True, warmup_target=70)
     db.add(mb)
     await db.commit()

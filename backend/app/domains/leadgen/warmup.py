@@ -44,6 +44,8 @@ MAX_TARGET = 120
 MAX_DEPTH = 3            # письмо + до 3 ответов в ветке
 FIND_AFTER = timedelta(minutes=3)
 MISSING_AFTER = timedelta(hours=6)
+RECHECK_MISSING = timedelta(days=3)
+CHECK_EVERY_TICKS = 15   # заходить в ящики по IMAP за прогревом раз в 15 минут — чаще почтовики рвут соединения
 WINDOW = core.Window(tz=TZ, start_hour=9, end_hour=20, weekdays=(0, 1, 2, 3, 4, 5, 6))
 HEALTH_EVERY = timedelta(hours=6)
 MIN_MEASURED = 5
@@ -322,9 +324,12 @@ def reply_rate(sender: LgMailbox | None, today: date) -> float:
 async def check_due(db: AsyncSession, transport, workspace_id: int, *, now: datetime | None = None) -> dict:
     now = now or service.utcnow()
     stats = {"inbox": 0, "spam": 0, "missing": 0, "replies": 0}
+    # «Не дошли» за последние 3 дня тоже перепроверяем: письмо могло найтись позже (или раньше мешал сбой IMAP).
     rows = (await db.scalars(select(LgWarmupMail).where(
-        LgWarmupMail.workspace_id == workspace_id, LgWarmupMail.status == "sent",
-        LgWarmupMail.sent_at <= now - FIND_AFTER).order_by(LgWarmupMail.id).limit(300))).all()
+        LgWarmupMail.workspace_id == workspace_id, LgWarmupMail.sent_at <= now - FIND_AFTER,
+        or_(LgWarmupMail.status == "sent",
+            (LgWarmupMail.status == "missing") & (LgWarmupMail.sent_at >= now - RECHECK_MISSING)))
+        .order_by(LgWarmupMail.id.desc()).limit(300))).all()
     by_recipient: dict[int, list[LgWarmupMail]] = {}
     for row in rows:
         by_recipient.setdefault(row.to_mailbox_id, []).append(row)
@@ -345,14 +350,15 @@ async def check_due(db: AsyncSession, transport, workspace_id: int, *, now: date
         for row in items:
             hit = found.get(row.message_id or "")
             if hit is None:
-                if service._aware(row.sent_at) <= now - MISSING_AFTER:
+                if row.status == "sent" and service._aware(row.sent_at) <= now - MISSING_AFTER:
                     row.status = "missing"
                     stats["missing"] += 1
                 continue
+            was_missing = row.status == "missing"
             row.status, row.found_at, row.rescued, row.auth = hit["folder"], now, hit["folder"] == "spam", hit.get("auth")
             stats[hit["folder"]] += 1
             sender = await db.get(LgMailbox, row.from_mailbox_id)
-            if row.depth < MAX_DEPTH and _stable(row.message_id, "reply") < reply_rate(sender, today):
+            if not was_missing and row.depth < MAX_DEPTH and _stable(row.message_id, "reply") < reply_rate(sender, today):
                 subject, body = compose_reply(box, f"{row.id}:reply", row.subject)
                 delay = timedelta(minutes=10 + int(110 * _stable(row.message_id, "delay")))
                 db.add(LgWarmupMail(workspace_id=workspace_id, from_mailbox_id=box.id, to_mailbox_id=sender.id,
@@ -546,7 +552,8 @@ async def card(db: AsyncSession, mb: LgMailbox, now: datetime) -> dict:
             if status in ("inbox", "spam", "missing"):
                 days[d][status] += 1
     h = mb.health_json or {}
-    return {"id": mb.id, "email": mb.email, "sender_name": mb.sender_name, "role": mb.role, "is_active": mb.is_active,
+    from app.domains.leadgen.routes import unicode_email
+    return {"id": mb.id, "email": unicode_email(mb.email), "sender_name": mb.sender_name, "role": mb.role, "is_active": mb.is_active,
             "warmup_enabled": mb.warmup_enabled, "warmup_target": mb.warmup_target, "stage": stage(mb, today),
             "today": {"warm_plan": daily_plan(mb, today), "warm_sent": warm_sent,
                       "cold_plan": cold_limit(mb, today) if mb.is_active else 0, "cold_sent": cold_sent},

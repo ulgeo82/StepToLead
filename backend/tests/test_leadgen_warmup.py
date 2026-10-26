@@ -147,6 +147,26 @@ class FlowTests(FlowBase):
             return await db.scalar(select(LgWarmupMail.status).where(LgWarmupMail.message_id == "<lost@x>"))
         self.assertEqual(self.run_db(fn), "missing")
 
+    def test_missing_is_rechecked_and_fixed(self):
+        """Письмо, которое раньше не нашли (сбой IMAP), находится позже — столбик перестаёт быть красным."""
+        t = WarmTransport()
+
+        async def fn(db):
+            a, b, h = self.world(db)
+            await db.flush()
+            await warmup.send_due(db, t, 7, now=NOW)
+            rows = (await db.scalars(select(LgWarmupMail))).all()
+            for r in rows:
+                r.status = "missing"
+            await db.flush()
+            await warmup.check_due(db, t, 7, now=NOW + timedelta(hours=8))
+            statuses = {r.status for r in (await db.scalars(select(LgWarmupMail).where(LgWarmupMail.depth == 0))).all()}
+            replies = await db.scalar(select(func.count(LgWarmupMail.id)).where(LgWarmupMail.status == "scheduled"))
+            return statuses, replies
+        statuses, replies = self.run_db(fn)
+        self.assertEqual(statuses, {"inbox"})
+        self.assertEqual(replies, 0)   # на «старые» письма не отвечаем задним числом
+
     def test_inbound_from_pool_is_not_a_lead_reply(self):
         t = WarmTransport()
         t.inbox.append(sequences.IncomingMail(uid=5, sender="anna@team-b.ru", subject="Re: План", body="Ок"))
@@ -188,6 +208,72 @@ class FlowTests(FlowBase):
         self.assertIn("v=spf1", spf["fix"])
 
 
+class FakeImap:
+    """Как отвечает imaplib у Яндекса: SEARCH HEADER не используется, письма находим по заголовкам из FETCH."""
+    folders = {"INBOX": [(11, "<a1@team-a.ru>", "dkim=pass header.d=team-a.ru; spf=pass")],
+               "Spam": [(5, "<B2@team-a.ru>", "dkim=pass; spf=softfail")]}
+    stored, copied, expunged = [], [], []
+    fail_first = 0
+
+    def __init__(self, host, port, timeout=None):
+        if FakeImap.fail_first:
+            FakeImap.fail_first -= 1
+            raise ConnectionResetError(104, "Connection reset by peer")
+        self.current = None
+
+    def login(self, user, password):
+        return "OK", [b"ok"]
+
+    def list(self):
+        return "OK", [b'(\\HasNoChildren) "|" INBOX', b'(\\HasNoChildren \\Junk) "|" Spam']
+
+    def select(self, name):
+        self.current = name.strip('"')
+        return ("OK", [b"1"]) if self.current in self.folders else ("NO", [b""])
+
+    def uid(self, command, *args):
+        rows = self.folders[self.current]
+        if command == "search":
+            assert args[1] == "SINCE"   # не HEADER Message-ID
+            return "OK", [b" ".join(str(u).encode() for u, _, _ in rows)]
+        if command == "fetch":
+            out = []
+            for u, mid, auth in rows:
+                out.append((f"{u} (UID {u} BODY[HEADER.FIELDS (MESSAGE-ID AUTHENTICATION-RESULTS)] {{80}}".encode(),
+                            f"Message-ID: {mid}\r\nAuthentication-Results: mx.yandex.ru; {auth}\r\n\r\n".encode()))
+                out.append(b")")
+            return "OK", out
+        if command == "store":
+            FakeImap.stored.append((self.current, args[0], args[2]))
+        if command == "copy":
+            FakeImap.copied.append((self.current, args[0], args[1]))
+        return "OK", [b""]
+
+    def expunge(self):
+        FakeImap.expunged.append(self.current)
+
+    def logout(self):
+        pass
+
+
+class ImapLocateTests(unittest.TestCase):
+    def test_locate_by_fetched_headers_rescue_and_retry(self):
+        import asyncio
+        FakeImap.stored, FakeImap.copied, FakeImap.expunged = [], [], []
+        FakeImap.fail_first = 1   # первое подключение Яндекс оборвал
+        mb = SimpleNamespace(imap_host="imap.yandex.ru", imap_port=993, login="x@team-b.ru")
+        with patch.object(sequences.imaplib, "IMAP4_SSL", FakeImap), patch.object(sequences.asyncio, "sleep", new=AsyncMock()):
+            found = asyncio.run(sequences.SmtpImapTransport().warm_locate(
+                mb, "secret", ["<a1@team-a.ru>", "<b2@team-a.ru>", "<lost@x>"]))
+        self.assertEqual(found["<a1@team-a.ru>"]["folder"], "inbox")
+        self.assertEqual(found["<a1@team-a.ru>"]["auth"], {"dkim": "pass", "spf": "pass"})
+        self.assertEqual(found["<b2@team-a.ru>"]["folder"], "spam")   # регистр Message-ID не важен
+        self.assertNotIn("<lost@x>", found)
+        self.assertIn(("Spam", "5", "(\\Seen \\Flagged)"), FakeImap.stored)   # из спама — со звёздочкой
+        self.assertEqual(FakeImap.copied, [("Spam", "5", "INBOX")])
+        self.assertEqual(FakeImap.expunged, ["Spam"])
+
+
 class ApiTests(FlowBase):
     def setUp(self):
         super().setUp()
@@ -216,6 +302,13 @@ class ApiTests(FlowBase):
         self.assertEqual(r.json()["role"], "helper")
         self.assertEqual(r.json()["left_today"], 0)   # помощник не шлёт холодных
         self.assertEqual(self.client.get(f"{base}/mailboxes").json()["items"][0]["left_today"], 0)  # новый: 7 дней только прогрев
+        rf = self.client.post(f"{base}/mailboxes", headers=ORIGIN, json={**common, "email": "A_Sokolova@стептолеад.рф"})
+        self.assertEqual(rf.status_code, 201, rf.text)
+        self.assertEqual(rf.json()["email"], "a_sokolova@стептолеад.рф")          # показываем по-русски
+        self.assertEqual(rf.json()["login"], "a_sokolova@xn--80aiba3argojc.xn--p1ai")  # в SMTP/IMAP — punycode
+        self.assertEqual(self.client.post(f"{base}/mailboxes", headers=ORIGIN,
+                                          json={**common, "email": "анна@стептолеад.рф"}).status_code, 422)
+        self.client.delete(f"{base}/mailboxes/{rf.json()['id']}", headers=ORIGIN)
         data = self.client.get(f"{base}/warmup").json()
         self.assertEqual((data["pool"]["total"], data["pool"]["helpers"], data["running"]), (2, 1, True))
         self.assertTrue(any("меньше 4" in tip for tip in data["tips"]))
