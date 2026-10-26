@@ -256,6 +256,100 @@ class FakeImap:
         pass
 
 
+class OneLoginTransport(WarmTransport):
+    """Как настоящий транспорт: ответы и прогрев — за один вход в ящик."""
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.logins = []
+
+    async def fetch(self, mailbox, password, after_uid):
+        self.logins.append(("fetch", mailbox.email))
+        return await super().fetch(mailbox, password, after_uid)
+
+    async def fetch_and_locate(self, mailbox, password, after_uid, message_ids, flag=frozenset()):
+        self.logins.append(("both", mailbox.email))
+        mails = await super().fetch(mailbox, password, after_uid)
+        return mails, await super().warm_locate(mailbox, password, message_ids, flag)
+
+
+class BrokenImap(WarmTransport):
+    async def fetch(self, mailbox, password, after_uid):
+        raise ConnectionResetError(104, "Connection reset by peer")
+
+
+class ReliabilityTests(FlowBase):
+    def world(self, db):
+        a, b = box("egor@team-a.ru"), box("anna@team-b.ru")
+        db.add_all([a, b])
+        return a, b
+
+    def test_poll_and_warm_check_share_one_login(self):
+        t = OneLoginTransport()
+
+        async def fn(db):
+            a, b = self.world(db)
+            await db.flush()
+            await warmup.send_due(db, t, 7, now=NOW)
+            later = NOW + timedelta(minutes=20)
+            await sequences.poll_mailbox(db, t, b, now=later, warm=True)
+            await sequences.poll_mailbox(db, t, a, now=later)          # обычный опрос — без прогрева
+            to_b = (await db.scalars(select(LgWarmupMail).where(LgWarmupMail.to_mailbox_id == b.id))).all()
+            return [r.status for r in to_b], b.imap_failing_since
+        statuses, failing = self.run_db(fn)
+        self.assertEqual(statuses, ["inbox"])
+        self.assertEqual(t.logins, [("both", "anna@team-b.ru"), ("fetch", "egor@team-a.ru")])
+        self.assertIsNone(failing)
+
+    def test_imap_failure_means_unchecked_not_zero(self):
+        t = BrokenImap()
+
+        async def fn(db):
+            a, b = self.world(db)
+            await db.flush()
+            await warmup.send_due(db, WarmTransport(), 7, now=NOW)
+            # у получателя b IMAP не работает 2 часа: письма от a не проверены
+            for minutes in (10, 70, 130):
+                await sequences.poll_mailbox(db, t, b, now=NOW + timedelta(minutes=minutes), warm=True)
+            for i in range(3):
+                db.add(LgWarmupMail(workspace_id=7, from_mailbox_id=a.id, to_mailbox_id=b.id, message_id=f"<s{i}@x>",
+                                    subject="s", body="b", status="sent", sent_at=NOW))
+            await db.flush()
+            with patch.object(warmup, "dns_checks", new=AsyncMock(return_value=DNS_OK)):
+                await warmup.refresh_health(db, a, now=NOW + timedelta(hours=3))
+                await warmup.refresh_health(db, b, now=NOW + timedelta(hours=3))
+            from app.services import monitor
+            with patch.object(monitor, "now", return_value=NOW + timedelta(hours=3)):
+                problems = await monitor.problems(db)
+            return a, b, problems
+        a, b, problems = self.run_db(fn)
+        self.assertIsNotNone(b.imap_failing_since)
+        self.assertIn("ConnectionResetError", b.warmup_error)
+        self.assertIsNone(a.health)                                    # «нет данных», а не 0
+        self.assertIn("не удалось проверить", a.health_json["unchecked"])
+        self.assertIsNone(b.health)
+        self.assertIn("IMAP", b.health_json["unchecked"])
+        self.assertEqual(warmup.cold_capacity(a, 10), 10)             # наш сбой не урезает холодные
+        self.assertIsNone(a.cold_paused_at)
+        keys = {p["key"]: p for p in problems}
+        self.assertIn(f"lgimap:{b.id}", keys)
+        self.assertIn("anna@team-b.ru", keys[f"lgimap:{b.id}"]["title"])
+
+    def test_monitor_warns_when_warmup_mails_vanish(self):
+        async def fn(db):
+            a, b = self.world(db)
+            await db.flush()
+            for i, st in enumerate(["missing"] * 4 + ["inbox"]):
+                db.add(LgWarmupMail(workspace_id=7, from_mailbox_id=a.id, to_mailbox_id=b.id, message_id=f"<v{i}@x>",
+                                    subject="s", body="b", status=st, sent_at=NOW - timedelta(hours=8)))
+            await db.flush()
+            from app.services import monitor
+            with patch.object(monitor, "now", return_value=NOW):
+                return a, await monitor.problems(db)
+        a, problems = self.run_db(fn)
+        warn = next(p for p in problems if p["key"] == f"lgwarm:{a.id}")
+        self.assertIn("4 из 5", warn["detail"])
+
+
 class ImapLocateTests(unittest.TestCase):
     def test_locate_by_fetched_headers_rescue_and_retry(self):
         import asyncio

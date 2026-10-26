@@ -321,50 +321,75 @@ def reply_rate(sender: LgMailbox | None, today: date) -> float:
     age = age_days(sender, today)
     return 0.55 if sender.role != "helper" and age is not None and age < 14 else 0.4
 
-async def check_due(db: AsyncSession, transport, workspace_id: int, *, now: datetime | None = None) -> dict:
-    now = now or service.utcnow()
-    stats = {"inbox": 0, "spam": 0, "missing": 0, "replies": 0}
-    # «Не дошли» за последние 3 дня тоже перепроверяем: письмо могло найтись позже (или раньше мешал сбой IMAP).
-    rows = (await db.scalars(select(LgWarmupMail).where(
-        LgWarmupMail.workspace_id == workspace_id, LgWarmupMail.sent_at <= now - FIND_AFTER,
+def imap_result(mb: LgMailbox, now: datetime, error: Exception | None = None) -> None:
+    """Запомнить, удался ли вход в ящик по IMAP: сбой дольше часа — тревога в «Мониторинге»."""
+    if error is None:
+        mb.imap_failing_since = None
+        mb.warmup_error = None
+        if (mb.last_error or "").startswith("IMAP:"):
+            mb.last_error = None
+        return
+    text = f"IMAP: {type(error).__name__}: {error}"[:500]
+    mb.warmup_error = text
+    mb.imap_failing_since = mb.imap_failing_since or now
+
+
+async def pending_for(db: AsyncSession, box: LgMailbox, now: datetime) -> list[LgWarmupMail]:
+    """Прогревочные письма, которые надо поискать в этом ящике. «Не дошли» за 3 дня тоже перепроверяем:
+    письмо могло найтись позже (раньше мешал сбой IMAP)."""
+    return list((await db.scalars(select(LgWarmupMail).where(
+        LgWarmupMail.to_mailbox_id == box.id, LgWarmupMail.sent_at <= now - FIND_AFTER,
         or_(LgWarmupMail.status == "sent",
             (LgWarmupMail.status == "missing") & (LgWarmupMail.sent_at >= now - RECHECK_MISSING)))
-        .order_by(LgWarmupMail.id.desc()).limit(300))).all()
-    by_recipient: dict[int, list[LgWarmupMail]] = {}
+        .order_by(LgWarmupMail.id.desc()).limit(200))).all())
+
+
+def flags_for(rows: list[LgWarmupMail]) -> set[str]:
+    return {r.message_id for r in rows if r.message_id and _stable(r.message_id, "flag") < 0.15}
+
+
+async def apply_found(db: AsyncSession, box: LgMailbox, rows: list[LgWarmupMail], found: dict, now: datetime,
+                      stats: dict | None = None) -> dict:
+    stats = stats if stats is not None else {"inbox": 0, "spam": 0, "missing": 0, "replies": 0}
+    today = now.astimezone(ZoneInfo(TZ)).date()
     for row in rows:
-        by_recipient.setdefault(row.to_mailbox_id, []).append(row)
-    for mailbox_id, items in by_recipient.items():
-        box = await db.get(LgMailbox, mailbox_id)
-        if box is None:
+        hit = found.get(row.message_id or "")
+        if hit is None:
+            if row.status == "sent" and service._aware(row.sent_at) <= now - MISSING_AFTER:
+                row.status = "missing"
+                stats["missing"] += 1
             continue
-        flag = {r.message_id for r in items if _stable(r.message_id, "flag") < 0.15}
-        today = now.astimezone(ZoneInfo(TZ)).date()
+        was_missing = row.status == "missing"
+        row.status, row.found_at, row.rescued, row.auth = hit["folder"], now, hit["folder"] == "spam", hit.get("auth")
+        stats[hit["folder"]] += 1
+        sender = await db.get(LgMailbox, row.from_mailbox_id)
+        if not was_missing and row.depth < MAX_DEPTH and _stable(row.message_id, "reply") < reply_rate(sender, today):
+            subject, body = compose_reply(box, f"{row.id}:reply", row.subject)
+            delay = timedelta(minutes=10 + int(110 * _stable(row.message_id, "delay")))
+            db.add(LgWarmupMail(workspace_id=box.workspace_id, from_mailbox_id=box.id, to_mailbox_id=sender.id,
+                                subject=subject, body=body, in_reply_to=row.message_id, depth=row.depth + 1,
+                                status="scheduled", send_after=now + delay))
+            stats["replies"] += 1
+    await db.flush()
+    return stats
+
+
+async def check_due(db: AsyncSession, transport, workspace_id: int, *, now: datetime | None = None) -> dict:
+    """Отдельная проверка прогрева по всем ящикам (в воркере она идёт внутри общего входа — см. poll_mailbox)."""
+    now = now or service.utcnow()
+    stats = {"inbox": 0, "spam": 0, "missing": 0, "replies": 0}
+    for box in await pool(db, workspace_id):
+        rows = await pending_for(db, box, now)
+        if not rows:
+            continue
         try:
             found = await transport.warm_locate(box, decrypt_secret(box.password_encrypted),
-                                                [r.message_id for r in items if r.message_id], flag,
-                                                flag_rescued=True)
+                                                [r.message_id for r in rows if r.message_id], flags_for(rows))
         except Exception as exc:  # noqa: BLE001
-            box.warmup_error = f"IMAP: {type(exc).__name__}: {exc}"[:500]
+            imap_result(box, now, exc)
             continue
-        box.warmup_error = None
-        for row in items:
-            hit = found.get(row.message_id or "")
-            if hit is None:
-                if row.status == "sent" and service._aware(row.sent_at) <= now - MISSING_AFTER:
-                    row.status = "missing"
-                    stats["missing"] += 1
-                continue
-            was_missing = row.status == "missing"
-            row.status, row.found_at, row.rescued, row.auth = hit["folder"], now, hit["folder"] == "spam", hit.get("auth")
-            stats[hit["folder"]] += 1
-            sender = await db.get(LgMailbox, row.from_mailbox_id)
-            if not was_missing and row.depth < MAX_DEPTH and _stable(row.message_id, "reply") < reply_rate(sender, today):
-                subject, body = compose_reply(box, f"{row.id}:reply", row.subject)
-                delay = timedelta(minutes=10 + int(110 * _stable(row.message_id, "delay")))
-                db.add(LgWarmupMail(workspace_id=workspace_id, from_mailbox_id=box.id, to_mailbox_id=sender.id,
-                                    subject=subject, body=body, in_reply_to=row.message_id, depth=row.depth + 1,
-                                    status="scheduled", send_after=now + delay))
-                stats["replies"] += 1
+        imap_result(box, now)
+        await apply_found(db, box, rows, found, now, stats)
     await db.flush()
     return stats
 
@@ -482,19 +507,38 @@ async def compute_health(db: AsyncSession, mb: LgMailbox, now: datetime, dns_res
     return Health(max(0, min(100, score)), measured, inbox_rate, spam_rate, cold_sent, bounces, bounce_rate, checks)
 
 
+IMAP_ALERT_AFTER = timedelta(hours=1)
+STUCK_AFTER = timedelta(hours=1)
+
+
+async def unchecked_reason(db: AsyncSession, mb: LgMailbox, now: datetime) -> str | None:
+    """Почему здоровье сейчас нельзя посчитать честно: нет входа в сам ящик или письма не проверяются у получателей."""
+    if mb.imap_failing_since and service._aware(mb.imap_failing_since) <= now - IMAP_ALERT_AFTER:
+        return "Портал не может зайти в ящик по IMAP — проверьте пароль приложения и что IMAP включён"
+    stuck = await db.scalar(select(func.count(LgWarmupMail.id)).where(
+        LgWarmupMail.from_mailbox_id == mb.id, LgWarmupMail.status == "sent",
+        LgWarmupMail.sent_at <= now - STUCK_AFTER, LgWarmupMail.sent_at >= now - timedelta(days=2)))
+    if (stuck or 0) >= 3:
+        return f"{stuck} прогревочных писем пока не удалось проверить у получателей (сбой IMAP у других ящиков пула)"
+    return None
+
+
 async def refresh_health(db: AsyncSession, mb: LgMailbox, *, now: datetime | None = None, force_dns: bool = False) -> Health:
     now = now or service.utcnow()
     cached = (mb.health_json or {}).get("dns")
     fresh = mb.health_checked_at and service._aware(mb.health_checked_at) > now - timedelta(hours=24)
     dns_result = cached if (cached and fresh and not force_dns) else await dns_checks(_domain(mb))
     health = await compute_health(db, mb, now, dns_result)
-    mb.health = health.score
+    unchecked = await unchecked_reason(db, mb, now)
+    # Не смогли проверить — честно «нет данных», а не 0: наш сбой не должен урезать холодную отправку.
+    mb.health = None if unchecked else health.score
     mb.health_json = {"dns": dns_result, "checks": health.checks, "measured": health.measured,
                       "inbox_rate": health.inbox_rate, "spam_rate": health.spam_rate, "cold_sent": health.cold_sent,
-                      "bounces": health.bounces, "bounce_rate": health.bounce_rate}
+                      "bounces": health.bounces, "bounce_rate": health.bounce_rate, "unchecked": unchecked}
     if not fresh or force_dns:
         mb.health_checked_at = now
-    await guard(db, mb, health, now)
+    if not unchecked:
+        await guard(db, mb, health, now)
     await db.flush()
     return health
 
@@ -561,7 +605,8 @@ async def card(db: AsyncSession, mb: LgMailbox, now: datetime) -> dict:
             "health": {"score": mb.health, "measured": h.get("measured", 0), "inbox_rate": h.get("inbox_rate"),
                        "spam_rate": h.get("spam_rate"), "bounce_rate": h.get("bounce_rate"),
                        "cold_sent": h.get("cold_sent", 0), "checks": h.get("checks", []),
-                       "checked_at": mb.health_checked_at.isoformat() if mb.health_checked_at else None},
+                       "checked_at": mb.health_checked_at.isoformat() if mb.health_checked_at else None,
+                       "unchecked": h.get("unchecked")},
             "cold_paused": {"at": mb.cold_paused_at.isoformat(), "reason": mb.cold_paused_reason} if mb.cold_paused_at else None,
             "error": mb.warmup_error or mb.last_error, "days": list(days.values())}
 
@@ -598,14 +643,13 @@ def _provider(mb: LgMailbox) -> str:
 
 
 async def run_tick(db: AsyncSession, transport, *, now: datetime | None = None, check: bool = False) -> None:
-    """Из воркера цепочек: отправка каждую минуту, проверка получателей и здоровье — раз в 5 минут."""
+    """Из воркера цепочек: отправка каждую минуту, здоровье — после проверки получателей (раз в 15 минут)."""
     now = now or service.utcnow()
     workspaces = (await db.scalars(select(LgMailbox.workspace_id).where(
         LgMailbox.is_active.is_(True), LgMailbox.warmup_enabled.is_(True)).distinct())).all()
     for ws in workspaces:
         await send_due(db, transport, ws, now=now)
-        if check:
-            await check_due(db, transport, ws, now=now)
+        if check:  # поиск прогревочных писем идёт внутри общего входа в ящик (sequences.poll_mailbox)
             for mb in await pool(db, ws):
                 if mb.role != "helper" and (not mb.health_checked_at or
                                             service._aware(mb.health_checked_at) <= now - HEALTH_EVERY or mb.health is None):

@@ -250,6 +250,7 @@ class LgMailbox(Base):
     cold_paused_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     cold_paused_reason: Mapped[str | None] = mapped_column(String(300))
     warmup_error: Mapped[str | None] = mapped_column(String(500))
+    imap_failing_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))   # с какого момента нет входа по IMAP
 
 
 class LgWarmupMail(Base):

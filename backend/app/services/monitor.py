@@ -149,6 +149,7 @@ async def problems(db: AsyncSession) -> list[dict]:
     for t in (await db.scalars(select(TelephonyConnection).where(TelephonyConnection.active.is_(True)))).all():
         if t.project_id in active and t.workspace_id in names and t.status == "error":
             add(f"tel:{t.id}", f"Телефония не работает: «{t.name}»", t.last_error, t.workspace_id)
+    await _outreach_mail(db, add)
     for name, task in _tasks.items():
         if task.done():
             reason = "остановлена"
@@ -184,6 +185,31 @@ async def problems(db: AsyncSession) -> list[dict]:
     except OSError:
         pass
     return found
+
+
+async def _outreach_mail(db: AsyncSession, add) -> None:
+    """Почта аутрича: нет входа в ящик дольше часа; прогревочные письма не находятся у получателей."""
+    from sqlalchemy import func
+    from app.domains.leadgen.models import LgMailbox, LgWarmupMail
+    from app.domains.leadgen.routes import unicode_email
+    boxes = (await db.scalars(select(LgMailbox).where(LgMailbox.is_active.is_(True)))).all()
+    for mb in boxes:
+        email_ = unicode_email(mb.email)
+        if mb.imap_failing_since and aware(mb.imap_failing_since) <= now() - timedelta(hours=1):
+            add(f"lgimap:{mb.id}", f"Аутрич: нет доступа к ящику {email_} больше часа",
+                f"{mb.warmup_error or mb.last_error or ''}\nОтветы лидов и прогрев с этого ящика не проверяются. "
+                "Проверьте пароль приложения и что IMAP включён в настройках почты.", mb.workspace_id)
+        if not mb.warmup_enabled or mb.role == "helper":
+            continue
+        rows = dict((await db.execute(select(LgWarmupMail.status, func.count()).where(
+            LgWarmupMail.from_mailbox_id == mb.id, LgWarmupMail.sent_at >= now() - timedelta(hours=30),
+            LgWarmupMail.sent_at <= now() - timedelta(hours=6),
+            LgWarmupMail.status.in_(("inbox", "spam", "missing"))).group_by(LgWarmupMail.status))).all())
+        total = sum(rows.values())
+        if total >= 4 and rows.get("missing", 0) / total > 0.5:
+            add(f"lgwarm:{mb.id}", f"Аутрич: прогревочные письма с {email_} не доходят",
+                f"За сутки не найдено у получателей {rows.get('missing', 0)} из {total}. Возможно, почтовик "
+                "блокирует отправку с ящика — проверьте папку «Отправленные» и письма о недоставке.", mb.workspace_id)
 
 
 LOG_HINT = ("Полный текст ошибки на сервере:\n<code>cd /opt/steptolead &amp;&amp; docker compose --env-file .env.prod "

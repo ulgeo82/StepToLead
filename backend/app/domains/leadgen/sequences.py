@@ -131,6 +131,70 @@ def _spam_folders(box) -> list[str]:
     return found or named
 
 
+def _imap_fetch_new(box, after_uid) -> list[IncomingMail]:
+    box.select("INBOX", readonly=True)
+    criteria = f"UID {after_uid + 1}:*" if after_uid else "SINCE " + (datetime.utcnow() - timedelta(days=3)).strftime("%d-%b-%Y")
+    typ, data = box.uid("search", None, criteria)
+    out = []
+    for raw_uid in (data[0] or b"").split()[-200:]:
+        uid = int(raw_uid)
+        if after_uid and uid <= after_uid:
+            continue
+        typ, msgdata = box.uid("fetch", raw_uid, "(BODY.PEEK[])")
+        raw = next((part[1] for part in msgdata if isinstance(part, tuple)), b"")
+        msg = email.message_from_bytes(raw)
+        refs = (msg.get("References") or "").split()
+        out.append(IncomingMail(uid=uid, sender=parseaddr(msg.get("From", ""))[1].lower(),
+                                subject=str(email.header.make_header(email.header.decode_header(msg.get("Subject", "")))),
+                                body=_text_of(msg)[:20000], message_id=msg.get("Message-ID"),
+                                in_reply_to=msg.get("In-Reply-To"), references=refs,
+                                headers={k: str(v) for k, v in msg.items() if k.lower() in (
+                                    "auto-submitted", "x-autoreply", "content-type", "precedence")}))
+    return out
+
+
+def _imap_locate(box, message_ids, flag=frozenset(), flag_rescued=True) -> dict:
+    """Поиск SEARCH HEADER Message-ID у Яндекса и Mail.ru ненадёжен, поэтому берём заголовки всех писем за 4 дня
+    одной командой FETCH и сверяем Message-ID сами. Найденное — прочитано (часть — «Важное»), из «Спама» —
+    во «Входящие» со звёздочкой. Возвращает {message_id: {"folder", "auth"}}."""
+    wanted = {_norm_mid(m): m for m in message_ids if m}
+    out: dict = {}
+    since = (datetime.utcnow() - timedelta(days=4)).strftime("%d-%b-%Y")
+    for folder in ["INBOX"] + _spam_folders(box):
+        if len(out) == len(wanted):
+            break
+        typ, _ = box.select(_quote(folder))
+        if typ != "OK":
+            continue
+        typ, data = box.uid("search", None, "SINCE", since)
+        uids = (data[0] or b"").split()[-400:] if typ == "OK" and data else []
+        if not uids:
+            continue
+        typ, rows = box.uid("fetch", b",".join(uids), "(UID BODY.PEEK[HEADER.FIELDS (MESSAGE-ID AUTHENTICATION-RESULTS)])")
+        where = "inbox" if folder == "INBOX" else "spam"
+        moved = False
+        for part in rows or []:
+            if not isinstance(part, tuple):
+                continue
+            m_uid = re.search(r"UID (\d+)", part[0].decode(errors="replace"))
+            headers = email.message_from_bytes(part[1])
+            key = _norm_mid(headers.get("Message-ID", ""))
+            if not m_uid or key not in wanted or wanted[key] in out:
+                continue
+            uid, mid = m_uid.group(1), wanted[key]
+            raw = " ".join(str(v) for v in headers.get_all("Authentication-Results") or [])
+            auth = {k.lower(): v.lower() for k, v in re.findall(r"\b(spf|dkim|dmarc)=(\w+)", raw, re.I)}
+            star = mid in flag or (where == "spam" and flag_rescued)
+            box.uid("store", uid, "+FLAGS", "(\\Seen \\Flagged)" if star else "(\\Seen)")
+            if where == "spam" and box.uid("copy", uid, "INBOX")[0] == "OK":
+                box.uid("store", uid, "+FLAGS", "(\\Deleted)")
+                moved = True
+            out[mid] = {"folder": where, "auth": auth}
+        if moved:
+            box.expunge()
+    return out
+
+
 class SmtpImapTransport:
     """Реальный транспорт: SMTP по SSL (465) или STARTTLS (587), IMAP по SSL. Блокирующие вызовы — в потоке."""
     timeout = 30
@@ -157,99 +221,38 @@ class SmtpImapTransport:
                     pass
         await asyncio.to_thread(go)
 
-    async def fetch(self, mailbox, password, after_uid):
+    # Один вход в ящик на всё: новые письма (ответы лидов) + поиск прогревочных писем. Почтовики рвут
+    # соединения, если заходить слишком часто, поэтому разбор ответов и прогрев делят одно подключение.
+    async def _session(self, mailbox, password, work):
         def go():
             box = imaplib.IMAP4_SSL(mailbox.imap_host, mailbox.imap_port, timeout=self.timeout)
             try:
                 box.login(mailbox.login, password)
-                box.select("INBOX", readonly=True)
-                criteria = f"UID {after_uid + 1}:*" if after_uid else "SINCE " + (datetime.utcnow() - timedelta(days=3)).strftime("%d-%b-%Y")
-                typ, data = box.uid("search", None, criteria)
-                out = []
-                for raw_uid in (data[0] or b"").split()[-200:]:
-                    uid = int(raw_uid)
-                    if after_uid and uid <= after_uid:
-                        continue
-                    typ, msgdata = box.uid("fetch", raw_uid, "(BODY.PEEK[])")
-                    raw = next((part[1] for part in msgdata if isinstance(part, tuple)), b"")
-                    msg = email.message_from_bytes(raw)
-                    refs = (msg.get("References") or "").split()
-                    out.append(IncomingMail(uid=uid, sender=parseaddr(msg.get("From", ""))[1].lower(),
-                                            subject=str(email.header.make_header(email.header.decode_header(msg.get("Subject", "")))),
-                                            body=_text_of(msg)[:20000], message_id=msg.get("Message-ID"),
-                                            in_reply_to=msg.get("In-Reply-To"), references=refs,
-                                            headers={k: str(v) for k, v in msg.items() if k.lower() in (
-                                                "auto-submitted", "x-autoreply", "content-type", "precedence")}))
-                return out
+                return work(box)
             finally:
                 try:
                     box.logout()
                 except Exception:  # noqa: BLE001
                     pass
-        return await asyncio.to_thread(go)
-
-    async def warm_locate(self, mailbox, password, message_ids, flag=frozenset(), flag_rescued=True):
-        """Прогрев: найти письма по Message-ID во «Входящих» и в «Спаме». Из «Спама» — перенести во «Входящие».
-        Найденное отмечается прочитанным (часть — важным). Возвращает {message_id: {"folder", "auth"}}.
-
-        Поиск SEARCH HEADER Message-ID у Яндекса и Mail.ru работает ненадёжно, поэтому берём заголовки всех писем
-        за последние 4 дня одной командой FETCH и сверяем Message-ID сами. Обрыв соединения — одна повторная попытка."""
-        wanted = {_norm_mid(m): m for m in message_ids if m}
-
-        def go():
-            box = imaplib.IMAP4_SSL(mailbox.imap_host, mailbox.imap_port, timeout=self.timeout)
-            out = {}
-            try:
-                box.login(mailbox.login, password)
-                since = (datetime.utcnow() - timedelta(days=4)).strftime("%d-%b-%Y")
-                for folder in ["INBOX"] + _spam_folders(box):
-                    if len(out) == len(wanted):
-                        break
-                    typ, _ = box.select(_quote(folder))
-                    if typ != "OK":
-                        continue
-                    typ, data = box.uid("search", None, "SINCE", since)
-                    uids = (data[0] or b"").split()[-400:] if typ == "OK" and data else []
-                    if not uids:
-                        continue
-                    typ, rows = box.uid("fetch", b",".join(uids),
-                                        "(UID BODY.PEEK[HEADER.FIELDS (MESSAGE-ID AUTHENTICATION-RESULTS)])")
-                    where = "inbox" if folder == "INBOX" else "spam"
-                    moved = False
-                    for part in rows or []:
-                        if not isinstance(part, tuple):
-                            continue
-                        meta = part[0].decode(errors="replace")
-                        m_uid = re.search(r"UID (\d+)", meta)
-                        headers = email.message_from_bytes(part[1])
-                        key = _norm_mid(headers.get("Message-ID", ""))
-                        if not m_uid or key not in wanted or wanted[key] in out:
-                            continue
-                        uid = m_uid.group(1)
-                        mid = wanted[key]
-                        raw = " ".join(str(v) for v in headers.get_all("Authentication-Results") or [])
-                        auth = {k.lower(): v.lower() for k, v in re.findall(r"\b(spf|dkim|dmarc)=(\w+)", raw, re.I)}
-                        # Вытащенное из «Спама» — со звёздочкой «Важное»: сильный сигнал «это не спам».
-                        star = mid in flag or (where == "spam" and flag_rescued)
-                        box.uid("store", uid, "+FLAGS", "(\\Seen \\Flagged)" if star else "(\\Seen)")
-                        if where == "spam" and box.uid("copy", uid, "INBOX")[0] == "OK":
-                            box.uid("store", uid, "+FLAGS", "(\\Deleted)")
-                            moved = True
-                        out[mid] = {"folder": where, "auth": auth}
-                    if moved:
-                        box.expunge()
-                return out
-            finally:
-                try:
-                    box.logout()
-                except Exception:  # noqa: BLE001
-                    pass
-
         try:
             return await asyncio.to_thread(go)
         except (OSError, imaplib.IMAP4.abort):
-            await asyncio.sleep(5)   # сервер оборвал соединение — пробуем ещё раз
+            await asyncio.sleep(5)   # сервер оборвал соединение — одна повторная попытка
             return await asyncio.to_thread(go)
+
+    async def fetch(self, mailbox, password, after_uid):
+        return await self._session(mailbox, password, lambda box: _imap_fetch_new(box, after_uid))
+
+    async def warm_locate(self, mailbox, password, message_ids, flag=frozenset(), flag_rescued=True):
+        """Прогрев: найти письма по Message-ID во «Входящих» и в «Спаме», из «Спама» — перенести во «Входящие»."""
+        return await self._session(mailbox, password,
+                                   lambda box: _imap_locate(box, message_ids, flag, flag_rescued))
+
+    async def fetch_and_locate(self, mailbox, password, after_uid, message_ids, flag=frozenset()):
+        def work(box):
+            mails = _imap_fetch_new(box, after_uid)
+            return mails, (_imap_locate(box, message_ids, flag, True) if message_ids else {})
+        return await self._session(mailbox, password, work)
 
     async def check(self, mailbox, password):
         def reachable(host, port, what):
@@ -631,16 +634,29 @@ async def handle_inbound(db: AsyncSession, mailbox: LgMailbox, mail: IncomingMai
 
 
 async def poll_mailbox(db: AsyncSession, transport: MailTransport, mailbox: LgMailbox, *,
-                       now: datetime | None = None) -> dict:
+                       now: datetime | None = None, warm: bool = False) -> dict:
+    """Один вход в ящик: новые письма (ответы лидов) и, если warm, поиск прогревочных писем."""
+    from app.domains.leadgen import warmup
     now = now or service.utcnow()
     counts: dict[str, int] = {}
+    rows = await warmup.pending_for(db, mailbox, now) if warm and mailbox.warmup_enabled else []
+    ids = [r.message_id for r in rows if r.message_id]
+    password = decrypt_secret(mailbox.password_encrypted)
     try:
-        mails = await transport.fetch(mailbox, decrypt_secret(mailbox.password_encrypted), mailbox.imap_last_uid)
+        if ids and hasattr(transport, "fetch_and_locate"):
+            mails, found = await transport.fetch_and_locate(mailbox, password, mailbox.imap_last_uid, ids,
+                                                            warmup.flags_for(rows))
+        else:
+            mails = await transport.fetch(mailbox, password, mailbox.imap_last_uid)
+            found = await transport.warm_locate(mailbox, password, ids, warmup.flags_for(rows)) if ids else {}
     except Exception as exc:  # noqa: BLE001
-        mailbox.last_error, mailbox.last_checked_at = f"IMAP: {type(exc).__name__}: {exc}"[:500], now
+        warmup.imap_result(mailbox, now, exc)
+        mailbox.last_error, mailbox.last_checked_at = mailbox.warmup_error, now
         await db.flush()
         return {"error": 1}
-    from app.domains.leadgen import warmup
+    warmup.imap_result(mailbox, now)
+    if rows:
+        await warmup.apply_found(db, mailbox, rows, found, now)
     ours = await warmup.pool_addresses(db, mailbox.workspace_id)
     for mail in sorted(mails, key=lambda m: m.uid):
         # Письма между нашими ящиками — прогрев: не ответы лидов, во «Входящие» и аналитику не идут.
@@ -672,24 +688,29 @@ async def run_worker() -> None:
                 from app.domains.leadgen import hot
                 if await hot.remind_due(db):
                     await db.commit()
-            try:
-                async with routes.session_factory() as db:
-                    from app.domains.leadgen import warmup
-                    await warmup.run_tick(db, transport, check=tick % warmup.CHECK_EVERY_TICKS == 7)
-                    await db.commit()
-            except Exception:  # noqa: BLE001 — прогрев не должен останавливать цепочки
-                logger.exception("leadgen warmup tick failed")
+            from app.domains.leadgen import warmup
+            warm_check = tick % warmup.CHECK_EVERY_TICKS == 0   # каждые 15 минут, внутри обычного опроса ящика
             if tick % POLL_EVERY_TICKS == 0:
                 async with routes.session_factory() as db:
                     boxes = (await db.execute(select(LgMailbox).where(LgMailbox.is_active.is_(True)))).scalars().all()
                     for mb in boxes:
-                        await poll_mailbox(db, transport, mb)
-                        await db.commit()
+                        try:
+                            await poll_mailbox(db, transport, mb, warm=warm_check)
+                            await db.commit()
+                        except Exception:  # noqa: BLE001 — один ящик не должен ломать опрос остальных
+                            await db.rollback()
+                            logger.exception("leadgen poll failed for mailbox %s", mb.id)
                 from app.domains.leadgen import inbox
                 if inbox.available():
                     async with routes.session_factory() as db:
                         await inbox.classify_pending(db)
                         await db.commit()
+            try:
+                async with routes.session_factory() as db:
+                    await warmup.run_tick(db, transport, check=warm_check)
+                    await db.commit()
+            except Exception:  # noqa: BLE001 — прогрев не должен останавливать цепочки
+                logger.exception("leadgen warmup tick failed")
         except asyncio.CancelledError:
             raise
         except Exception:

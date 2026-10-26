@@ -89,7 +89,7 @@ def upgrade_existing_schema(connection):
                          "warmup_enabled": "BOOLEAN NOT NULL DEFAULT true", "warmup_target": "INTEGER NOT NULL DEFAULT 70",
                          "health": "INTEGER", "health_json": "JSON", "health_checked_at": "TIMESTAMP WITH TIME ZONE",
                          "cold_paused_at": "TIMESTAMP WITH TIME ZONE", "cold_paused_reason": "VARCHAR(300)",
-                         "warmup_error": "VARCHAR(500)"},
+                         "warmup_error": "VARCHAR(500)", "imap_failing_since": "TIMESTAMP WITH TIME ZONE"},
         "lg_companies": {"last_exported_at": "TIMESTAMP WITH TIME ZONE", "export_count": "INTEGER NOT NULL DEFAULT 0"},
         "lg_touches": {"intent_score": "INTEGER", "intent_signals": "JSON", "hot_at": "TIMESTAMP WITH TIME ZONE",
                        "hot_task_id": "INTEGER", "hot_reminded_at": "TIMESTAMP WITH TIME ZONE",

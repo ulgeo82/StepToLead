@@ -15,7 +15,7 @@ type Card = {
   today: { warm_plan: number; warm_sent: number; cold_plan: number; cold_sent: number };
   peak: { total: number; cold: number };
   health: { score: number | null; measured: number; inbox_rate: number | null; spam_rate: number | null;
-    bounce_rate: number | null; cold_sent: number; checks: Check[]; checked_at: string | null };
+    bounce_rate: number | null; cold_sent: number; checks: Check[]; checked_at: string | null; unchecked?: string | null };
   cold_paused: { at: string; reason: string } | null; error: string | null; days: Day[];
 };
 type Overview = { pool: { total: number; outreach: number; helpers: number; providers: string[] }; running: boolean;
@@ -55,7 +55,7 @@ function MailCard({ card, busy, act }: { card: Card; busy: boolean; act: (path: 
           <p className={styles.muted}>{card.role === "helper" ? "Помощник прогрева — холодные не шлёт" : card.sender_name || "Рабочий ящик"}</p>
         </div>
         <div className={`${styles.warmScore} ${tone(h.score)}`} title="Здоровье ящика: сколько прогревочных писем попадает во «Входящие» с учётом настроек домена">
-          <b>{h.score ?? "—"}</b><small>здоровье</small>
+          <b>{h.score ?? (h.unchecked ? "?" : "—")}</b><small>{h.unchecked ? "нет данных" : "здоровье"}</small>
         </div>
       </header>
 
@@ -64,6 +64,13 @@ function MailCard({ card, busy, act }: { card: Card; busy: boolean; act: (path: 
         {card.stage.phase !== "off" && card.stage.phase !== "helper" && <div className={styles.warmProgress}><i style={{ width: `${progress}%` }} /></div>}
         {card.stage.note && <small className={styles.hint}>{card.stage.note}</small>}
       </div>
+
+      {h.unchecked && (
+        <div className={styles.inboxSummary}>
+          <b>Не удалось проверить</b>
+          <p>{h.unchecked}. Холодную отправку из-за этого не урезаем; «Мониторинг» пришлёт сообщение, если сбой длится дольше часа.</p>
+        </div>
+      )}
 
       {card.cold_paused && (
         <div className={`${styles.inboxSummary} ${styles.inboxSummaryHot}`}>
