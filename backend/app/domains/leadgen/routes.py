@@ -7,7 +7,7 @@ from __future__ import annotations
 import asyncio
 
 from zoneinfo import ZoneInfo
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
@@ -22,7 +22,7 @@ from app.domains.leadgen import (
 )
 from app.domains.leadgen.core import table_import
 from app.domains.leadgen.core import sequence as seq_core
-from app.domains.leadgen.models import LgEnrollment, LgMailbox, LgSequence
+from app.domains.leadgen.models import LgCampaign, LgEnrollment, LgMailbox, LgSequence
 from app.core.crypto import encrypt_secret
 from app.domains.leadgen.core.normalize import display_domain, normalize_domain, normalize_phone
 from app.domains.leadgen.models import (
@@ -939,9 +939,9 @@ class SequenceIn(BaseModel):
     is_active: bool = True
 
 
-def validate_sequence(payload: SequenceIn) -> tuple[list, dict]:
+def validate_sequence(payload: SequenceIn, extra: list | tuple = ()) -> tuple[list, dict]:
     try:
-        steps = seq_core.parse_steps(payload.steps)
+        steps = seq_core.parse_steps(payload.steps, extra=extra)
         window = seq_core.parse_window(payload.window)
     except seq_core.SequenceError as exc:
         raise HTTPException(422, str(exc))
@@ -966,10 +966,18 @@ async def sequence_or_404(db: AsyncSession, sequence_id: int) -> LgSequence:
 
 
 @router.get("/sequences")
-async def list_sequences(db: AsyncSession = Depends(get_db), admin: AdminUser = Depends(require_admin)):
-    rows = (await db.execute(select(LgSequence).where(LgSequence.workspace_id == workspace_id())
-                             .order_by(LgSequence.id.desc()))).scalars().all()
-    return {"items": [await sequence_row(db, s) for s in rows], "variables": list(seq_core.VARIABLES)}
+async def list_sequences(include: int | None = None, db: AsyncSession = Depends(get_db),
+                         admin: AdminUser = Depends(require_admin)):
+    """Шаблоны цепочек. Цепочки кампаний живут в своих кампаниях; include=id — открыть одну такую для правки."""
+    q = select(LgSequence).where(LgSequence.workspace_id == workspace_id())
+    q = q.where(LgSequence.campaign_owned.is_(False) | (LgSequence.id == include)) if include else \
+        q.where(LgSequence.campaign_owned.is_(False))
+    rows = (await db.execute(q.order_by(LgSequence.id.desc()))).scalars().all()
+    variables = list(seq_core.VARIABLES)
+    if include:
+        campaign = await db.scalar(select(LgCampaign).where(LgCampaign.sequence_id == include))
+        variables += [v for v in (campaign.variables if campaign else []) if v not in variables]
+    return {"items": [await sequence_row(db, s) for s in rows], "variables": variables}
 
 
 @router.post("/sequences", status_code=201)
@@ -986,7 +994,8 @@ async def create_sequence(payload: SequenceIn, db: AsyncSession = Depends(get_db
 async def update_sequence(sequence_id: int, payload: SequenceIn, db: AsyncSession = Depends(get_db),
                           admin: AdminUser = Depends(require_admin)):
     seq = await sequence_or_404(db, sequence_id)
-    steps, window = validate_sequence(payload)
+    campaign = await db.scalar(select(LgCampaign).where(LgCampaign.sequence_id == seq.id)) if seq.campaign_owned else None
+    steps, window = validate_sequence(payload, campaign.variables if campaign else ())
     started = await db.scalar(select(func.max(LgEnrollment.current_step)).where(
         LgEnrollment.sequence_id == seq.id, LgEnrollment.status.in_(("active", "paused"))))
     if started and len(steps) < started:
@@ -998,19 +1007,37 @@ async def update_sequence(sequence_id: int, payload: SequenceIn, db: AsyncSessio
 
 class PreviewIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    company_id: int
+    company_id: int | None = None
+    enrollment_id: int | None = None   # лид кампании — со своими переменными из файла
     steps: list[dict] = Field(min_length=1, max_length=seq_core.MAX_STEPS)
+
+
+async def lead_context(db: AsyncSession, enrollment_id: int, mailbox: LgMailbox | None = None) -> tuple[LgCompany, dict]:
+    enr = await db.get(LgEnrollment, enrollment_id)
+    if enr is None or enr.workspace_id != workspace_id():
+        raise HTTPException(404, "Лид не найден")
+    company = await company_or_404(db, enr.workspace_id, enr.company_id)
+    if mailbox is None and enr.mailbox_id:
+        mailbox = await db.get(LgMailbox, enr.mailbox_id)
+    ctx = await sequences._context(db, company, mailbox)
+    ctx.update({k.lower(): v for k, v in (enr.vars or {}).items() if v not in (None, "")})
+    return company, ctx
 
 
 @router.post("/sequences/preview")
 async def preview_sequence(payload: PreviewIn, db: AsyncSession = Depends(get_db), admin: AdminUser = Depends(require_admin)):
-    company = await company_or_404(db, workspace_id(), payload.company_id)
     try:
-        steps = seq_core.parse_steps(payload.steps)
+        steps = seq_core.parse_steps(payload.steps, strict=False)
     except seq_core.SequenceError as exc:
         raise HTTPException(422, str(exc))
-    mailbox = await db.scalar(select(LgMailbox).where(LgMailbox.workspace_id == company.workspace_id).limit(1))
-    ctx = await sequences._context(db, company, mailbox)
+    mailbox = await db.scalar(select(LgMailbox).where(LgMailbox.workspace_id == workspace_id()).limit(1))
+    if payload.enrollment_id:
+        company, ctx = await lead_context(db, payload.enrollment_id, mailbox)
+    elif payload.company_id:
+        company = await company_or_404(db, workspace_id(), payload.company_id)
+        ctx = await sequences._context(db, company, mailbox)
+    else:
+        raise HTTPException(422, "Выберите компанию или лида для предпросмотра")
     return {"context": ctx, "steps": [{"channel": s.channel, "subject": seq_core.render(s.subject or "", ctx) or None,
                                        "body": seq_core.render(s.body, ctx)} for s in steps]}
 
@@ -1020,6 +1047,7 @@ class TestSendIn(BaseModel):
     to: str = Field(pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$", max_length=254)
     steps: list[dict] = Field(min_length=1, max_length=seq_core.MAX_STEPS)
     company_id: int | None = None
+    enrollment_id: int | None = None
     mailbox_id: int | None = None
 
 
@@ -1030,7 +1058,7 @@ async def test_sequence(payload: TestSendIn, db: AsyncSession = Depends(get_db),
     from app.core.crypto import decrypt_secret
     ws = workspace_id()
     try:
-        steps = seq_core.parse_steps(payload.steps)
+        steps = seq_core.parse_steps(payload.steps, strict=False)
     except seq_core.SequenceError as exc:
         raise HTTPException(422, str(exc))
     q = select(LgMailbox).where(LgMailbox.workspace_id == ws, LgMailbox.is_active.is_(True))
@@ -1040,10 +1068,14 @@ async def test_sequence(payload: TestSendIn, db: AsyncSession = Depends(get_db),
     if mailbox is None:
         raise HTTPException(409, "Нет активного почтового ящика — добавьте и проверьте ящик")
     company = await company_or_404(db, ws, payload.company_id) if payload.company_id else None
-    ctx = await sequences._context(db, company, mailbox) if company else {
+    if payload.enrollment_id:
+        company, ctx = await lead_context(db, payload.enrollment_id, mailbox)
+    else:
+        ctx = None
+    ctx = ctx or (await sequences._context(db, company, mailbox) if company else {
         "company": "Ромашка", "domain": "romashka.ru", "city": "Самара", "niche": "Ремонт квартир",
         "ad_title": "Ремонт квартир под ключ", "ad_text": "Фиксированная смета, гарантия 3 года",
-        "director_name": "Иванов Иван Иванович", "director_first_name": "Иван", "sender_name": mailbox.sender_name}
+        "director_name": "Иванов Иван Иванович", "director_first_name": "Иван", "sender_name": mailbox.sender_name})
     transport, sent, thread_id, thread_subject = mail_transport_factory(), 0, None, None
     for i, step in enumerate(steps):
         if step.channel != "email":
@@ -1214,12 +1246,21 @@ async def outreach_analytics(days: int = Query(30, ge=1, le=365), niche: str | N
 async def inbox_list(status: str = Query("unhandled", pattern="^(unhandled|handled|all)$"),
                      label: str | None = Query(None, pattern="^(" + "|".join(inbox.LABELS) + ")$"),
                      mailbox_id: int | None = None, q: str | None = Query(None, max_length=200),
-                     hot: bool = False,
+                     hot: bool = False, campaign_id: int | None = None,
                      limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0),
                      db: AsyncSession = Depends(get_db), admin: AdminUser = Depends(require_admin)):
+    from app.domains.leadgen.models import LgTouch as T
+    camps = (await db.scalars(select(LgCampaign).where(LgCampaign.workspace_id == workspace_id())
+                              .order_by(LgCampaign.id.desc()))).all()
+    sequence_id = next((c.sequence_id for c in camps if c.id == campaign_id), -1) if campaign_id else None
     data = await inbox.listing(db, workspace_id(), status=status, label=label, mailbox_id=mailbox_id, q=q,
-                               limit=limit, offset=offset, hot=hot)
-    return {**data, "ai_available": inbox_available()}
+                               limit=limit, offset=offset, hot=hot, sequence_id=sequence_id)
+    unhandled = dict((await db.execute(select(T.campaign_id, func.count(T.id)).where(
+        T.direction == "in", T.campaign_kind == "sequence", T.handled_at.is_(None),
+        T.campaign_id.in_([c.sequence_id for c in camps] or [-1])).group_by(T.campaign_id))).all())
+    campaigns_out = [{"id": c.id, "name": c.name, "status": c.status, "unhandled": int(unhandled.get(c.sequence_id, 0))}
+                     for c in camps]
+    return {**data, "ai_available": inbox_available(), "campaigns": campaigns_out}
 
 
 @router.get("/inbox-counter")
@@ -1283,6 +1324,7 @@ async def inbox_classify(touch_id: int, db: AsyncSession = Depends(get_db), admi
 class InboxReply(BaseModel):
     model_config = ConfigDict(extra="forbid")
     body: str = Field(min_length=1, max_length=10000)
+    cc: str | None = Field(default=None, pattern=r"^[^@\s,;]+@[^@\s,;]+\.[^@\s,;]+$", max_length=254)
 
 
 @router.post("/inbox/{touch_id}/reply")
@@ -1291,12 +1333,34 @@ async def inbox_reply(touch_id: int, payload: InboxReply, db: AsyncSession = Dep
     touch, company = await inbox_touch_or_404(db, touch_id)
     try:
         out = await inbox.send_reply(db, mail_transport_factory(), touch, company, payload.body.strip(),
-                                     user_id=admin.id)
+                                     user_id=admin.id, cc=(payload.cc or "").strip().lower() or None)
     except inbox.ReplyError as exc:
         await db.commit()  # сохранить last_error ящика
         raise HTTPException(exc.status, str(exc))
     await db.commit()
     return {"ok": True, "touch_id": out.id, "item": await inbox.row_out(db, touch, company, full=True)}
+
+
+@router.post("/inbox/{touch_id}/to-crm")
+async def inbox_to_crm(touch_id: int, db: AsyncSession = Depends(get_db), admin: AdminUser = Depends(require_admin)):
+    """Вручную завести ответившего лида в CRM (воронка «Аутрич»): сделка сразу на «Ответил» или «Интерес»."""
+    from app.models.crm import CrmDeal
+    touch, company = await inbox_touch_or_404(db, touch_id)
+    if not company.crm_deal_id:
+        handed = await outreach.hand_off(db, company, check=False)
+        if not handed.ok:
+            raise HTTPException(409, f"Не удалось завести в CRM: {REASONS.get(handed.reason or '', handed.reason)}")
+    stage = "Интерес" if touch.hot_at or touch.label == "interested" else "Ответил"
+    note = f"Ответ на аутрич ({touch.address}):\n{(touch.body or '')[:1500]}"
+    await sequences._move_deal(db, company, "Ответил", note=note)
+    if stage == "Интерес":
+        from app.domains.leadgen import hot
+        deal = await db.get(CrmDeal, company.crm_deal_id)
+        target = await hot.ensure_interest_stage(db, deal.pipeline_id) if deal else None
+        if deal and target:
+            deal.stage_id, deal.stage_entered_at = target.id, service.utcnow()
+    await db.commit()
+    return await inbox.row_out(db, touch, company, full=True)
 
 
 # ---------------------------------------------------------------- импорт базы из файла
@@ -1597,3 +1661,222 @@ async def assess_list(list_id: int, payload: AssessListIn, tasks: BackgroundTask
            LgCompany.id.in_(select(LgListItem.company_id).where(LgListItem.list_id == row.id))))).all()
     tasks.add_task(_assess, list(ids), payload.force)
     return {"queued": len(ids)}
+
+
+# ---------------------------------------------------------------- кампании (как в Instantly)
+
+class CampaignIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=2, max_length=180)
+    template_sequence_id: int | None = None
+    mailbox_ids: list[int] = Field(default_factory=list, max_length=50)
+
+
+class CampaignPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str | None = Field(default=None, min_length=2, max_length=180)
+    mailbox_ids: list[int] | None = Field(default=None, max_length=50)
+    start_at: datetime | None = None
+    clear_start: bool = False
+    status: str | None = Field(default=None, pattern="^(active|paused|done)$")
+
+
+class CampaignCompaniesIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    company_ids: list[int] = Field(min_length=1, max_length=2000)
+
+
+async def campaign_or_404(db: AsyncSession, campaign_id: int) -> LgCampaign:
+    row = await db.get(LgCampaign, campaign_id)
+    if row is None or row.workspace_id != workspace_id():
+        raise HTTPException(404, "Кампания не найдена")
+    return row
+
+
+@router.get("/campaigns")
+async def list_campaigns(db: AsyncSession = Depends(get_db), admin: AdminUser = Depends(require_admin)):
+    from app.domains.leadgen import campaigns
+    rows = (await db.scalars(select(LgCampaign).where(LgCampaign.workspace_id == workspace_id())
+                             .order_by(LgCampaign.id.desc()))).all()
+    return {"items": [await campaigns.row(db, c) for c in rows]}
+
+
+@router.post("/campaigns", status_code=201)
+async def create_campaign(payload: CampaignIn, db: AsyncSession = Depends(get_db), admin: AdminUser = Depends(require_admin)):
+    from app.domains.leadgen import campaigns
+    template = await sequence_or_404(db, payload.template_sequence_id) if payload.template_sequence_id else None
+    row = await campaigns.create(db, workspace_id(), name=payload.name.strip(), template=template,
+                                 mailbox_ids=payload.mailbox_ids, user_id=admin.id)
+    await db.commit()
+    return await campaigns.row(db, row)
+
+
+@router.get("/campaigns/{campaign_id}")
+async def get_campaign(campaign_id: int, db: AsyncSession = Depends(get_db), admin: AdminUser = Depends(require_admin)):
+    from app.domains.leadgen import campaigns
+    return await campaigns.row(db, await campaign_or_404(db, campaign_id))
+
+
+@router.patch("/campaigns/{campaign_id}")
+async def patch_campaign(campaign_id: int, payload: CampaignPatch, db: AsyncSession = Depends(get_db),
+                         admin: AdminUser = Depends(require_admin)):
+    from app.domains.leadgen import campaigns
+    row = await campaign_or_404(db, campaign_id)
+    if payload.name:
+        row.name = payload.name.strip()
+    if payload.mailbox_ids is not None:
+        row.mailbox_ids = await campaigns.valid_mailboxes(db, row.workspace_id, payload.mailbox_ids)
+    if payload.clear_start:
+        row.start_at = None
+    elif payload.start_at is not None:
+        row.start_at = payload.start_at if payload.start_at.tzinfo else payload.start_at.replace(tzinfo=timezone.utc)
+    if payload.status:
+        if row.status == "done":
+            raise HTTPException(409, "Кампания завершена — создайте новую")
+        if payload.status == "active":
+            if not row.mailbox_ids:
+                raise HTTPException(409, "Выберите хотя бы один ящик, с которого пойдёт рассылка")
+            waiting = await db.scalar(select(func.count(LgEnrollment.id)).where(
+                LgEnrollment.campaign_id == row.id, LgEnrollment.status == "active"))
+            if not waiting:
+                raise HTTPException(409, "В кампании нет лидов — загрузите файл или добавьте компании из базы")
+            seq = await db.get(LgSequence, row.sequence_id)
+            try:
+                seq_core.parse_steps(seq.steps, extra=row.variables or [])
+            except seq_core.SequenceError as exc:
+                raise HTTPException(409, f"Проверьте письма кампании: {exc}")
+        if payload.status == "done":
+            for enr in (await db.scalars(select(LgEnrollment).where(
+                    LgEnrollment.campaign_id == row.id, LgEnrollment.status.in_(("active", "paused"))))).all():
+                sequences._finish(enr, "stopped", "campaign_done", service.utcnow())
+        row.status = payload.status
+    await db.commit()
+    return await campaigns.row(db, row)
+
+
+@router.delete("/campaigns/{campaign_id}", status_code=204)
+async def delete_campaign(campaign_id: int, db: AsyncSession = Depends(get_db), admin: AdminUser = Depends(require_admin)):
+    row = await campaign_or_404(db, campaign_id)
+    sent = await db.scalar(select(func.count(LgTouch.id)).where(LgTouch.campaign_kind == "sequence",
+                                                                LgTouch.campaign_id == row.sequence_id))
+    if sent:
+        raise HTTPException(409, "По кампании уже были письма — её можно только завершить, чтобы сохранить историю")
+    seq = await db.get(LgSequence, row.sequence_id)
+    for enr in (await db.scalars(select(LgEnrollment).where(LgEnrollment.campaign_id == row.id))).all():
+        await db.delete(enr)
+    await db.delete(row)
+    if seq is not None and seq.campaign_owned:
+        await db.delete(seq)
+    await db.commit()
+
+
+async def _upload(file: UploadFile) -> tuple[bytes, str]:
+    if file is None or not file.filename:
+        raise HTTPException(422, "Выберите файл CSV или Excel")
+    data = await file.read(IMPORT_MAX_BYTES + 1)
+    if len(data) > IMPORT_MAX_BYTES:
+        raise HTTPException(413, "Файл больше 5 МБ — разбейте его на части")
+    return data, file.filename[:200]
+
+
+@router.post("/campaigns/{campaign_id}/leads/preview")
+async def campaign_leads_preview(campaign_id: int, file: UploadFile = File(...), db: AsyncSession = Depends(get_db),
+                                 admin: AdminUser = Depends(require_admin)):
+    """Шаг 1 загрузки: какие столбцы что значат. Файл не сохраняется."""
+    from app.domains.leadgen import campaigns
+    await campaign_or_404(db, campaign_id)
+    data, name = await _upload(file)
+    try:
+        cells = await asyncio.to_thread(campaigns.read_cells, data, name)
+        return campaigns.preview(cells)
+    except campaigns.CampaignError as exc:
+        raise HTTPException(422, str(exc))
+
+
+@router.post("/campaigns/{campaign_id}/leads/import")
+async def campaign_leads_import(campaign_id: int, file: UploadFile = File(...), mapping: str = Form(...),
+                                db: AsyncSession = Depends(get_db), admin: AdminUser = Depends(require_admin)):
+    """Шаг 2: строки -> компании базы -> лиды кампании. Возвращает отчёт: сколько добавлено и почему пропущены."""
+    import json
+    from app.domains.leadgen import campaigns
+    row = await campaign_or_404(db, campaign_id)
+    if row.status == "done":
+        raise HTTPException(409, "Кампания завершена")
+    try:
+        parsed_mapping = json.loads(mapping)
+        assert isinstance(parsed_mapping, list)
+    except (ValueError, AssertionError):
+        raise HTTPException(422, "Неверное сопоставление столбцов")
+    data, name = await _upload(file)
+    try:
+        cells = await asyncio.to_thread(campaigns.read_cells, data, name)
+        report = await campaigns.import_leads(db, row, cells, parsed_mapping)
+    except campaigns.CampaignError as exc:
+        raise HTTPException(422, str(exc))
+    await db.commit()
+    return {**report, "campaign": await campaigns.row(db, row)}
+
+
+@router.post("/campaigns/{campaign_id}/leads/companies")
+async def campaign_add_companies(campaign_id: int, payload: CampaignCompaniesIn, db: AsyncSession = Depends(get_db),
+                                 admin: AdminUser = Depends(require_admin)):
+    from app.domains.leadgen import campaigns
+    row = await campaign_or_404(db, campaign_id)
+    if row.status == "done":
+        raise HTTPException(409, "Кампания завершена")
+    report = await campaigns.add_companies(db, row, payload.company_ids)
+    await db.commit()
+    return {**report, "campaign": await campaigns.row(db, row)}
+
+
+@router.get("/campaigns/{campaign_id}/leads")
+async def campaign_leads(campaign_id: int, status: str | None = Query(None, pattern="^(active|paused|finished|replied|bounced|stopped)$"),
+                         q: str | None = Query(None, max_length=200), limit: int = Query(100, ge=1, le=500),
+                         offset: int = Query(0, ge=0), db: AsyncSession = Depends(get_db),
+                         admin: AdminUser = Depends(require_admin)):
+    from app.domains.leadgen import campaigns
+    return await campaigns.leads(db, await campaign_or_404(db, campaign_id), status=status, q=q, limit=limit, offset=offset)
+
+
+@router.post("/campaigns/{campaign_id}/leads/{enrollment_id}/stop")
+async def campaign_stop_lead(campaign_id: int, enrollment_id: int, db: AsyncSession = Depends(get_db),
+                             admin: AdminUser = Depends(require_admin)):
+    row = await campaign_or_404(db, campaign_id)
+    enr = await db.get(LgEnrollment, enrollment_id)
+    if enr is None or enr.campaign_id != row.id:
+        raise HTTPException(404, "Лид не найден")
+    if enr.status in ("active", "paused"):
+        sequences._finish(enr, "stopped", "manual", service.utcnow())
+    await db.commit()
+    return {"ok": True}
+
+
+@router.get("/campaigns/{campaign_id}/check")
+async def campaign_check(campaign_id: int, db: AsyncSession = Depends(get_db), admin: AdminUser = Depends(require_admin)):
+    """Перед запуском: у скольких лидов пусто в переменных, которые стоят в письмах без значения по умолчанию."""
+    row = await campaign_or_404(db, campaign_id)
+    seq = await db.get(LgSequence, row.sequence_id)
+    used = {}
+    for step in seq.steps or []:
+        for text in (step.get("subject") or "", step.get("body") or ""):
+            for name, default in seq_core._VAR.findall(text):
+                if not default:
+                    used[name.lower()] = True
+    enrollments = (await db.scalars(select(LgEnrollment).where(LgEnrollment.campaign_id == row.id,
+                                                               LgEnrollment.status == "active"))).all()
+    missing: dict[str, int] = {}
+    for enr in enrollments[:2000]:
+        company, ctx = await lead_context(db, enr.id)
+        for name in used:
+            if ctx.get(name) in (None, ""):
+                missing[name] = missing.get(name, 0) + 1
+    problems = []
+    if not row.mailbox_ids:
+        problems.append("Не выбраны ящики для рассылки")
+    from app.domains.leadgen import warmup
+    today = service.utcnow().date()
+    boxes = (await db.scalars(select(LgMailbox).where(LgMailbox.id.in_(row.mailbox_ids or [-1])))).all()
+    capacity = sum(warmup.cold_limit(mb, today) for mb in boxes if mb.is_active)
+    return {"leads": len(enrollments), "missing": [{"variable": k, "leads": v} for k, v in sorted(missing.items())],
+            "problems": problems, "daily_capacity": capacity,
+            "days_estimate": (-(-len(enrollments) // capacity)) if capacity else None}

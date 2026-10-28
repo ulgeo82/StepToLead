@@ -168,12 +168,15 @@ async def touch_or_none(db: AsyncSession, workspace_id: int, touch_id: int) -> t
 
 async def row_out(db: AsyncSession, touch: LgTouch, company: LgCompany, *, full: bool = False) -> dict:
     mailbox = await db.get(LgMailbox, touch.mailbox_id) if touch.mailbox_id else None
-    sequence = await db.get(LgSequence, touch.campaign_id) if touch.campaign_kind == "sequence" and touch.campaign_id else None
+    sequence = await db.get(LgSequence, touch.campaign_id) if touch.campaign_kind in ("sequence", "manual_reply") and touch.campaign_id else None
+    from app.domains.leadgen.models import LgCampaign
+    campaign = await db.scalar(select(LgCampaign).where(LgCampaign.sequence_id == sequence.id)) if sequence else None
     body = touch.body or ""
     out = {"id": touch.id, "company_id": company.id, "company": company.display_name or company.domain,
            "domain": company.domain, "stage": company.stage, "score": company.score, "fit_label": company.fit_label,
            "crm_deal_id": company.crm_deal_id, "address": touch.address, "mailbox_id": touch.mailbox_id,
-           "mailbox": mailbox.email if mailbox else None, "sequence": sequence.name if sequence else None,
+           "mailbox": mailbox.email if mailbox else None, "sequence": sequence.name if sequence and not campaign else None,
+           "campaign": {"id": campaign.id, "name": campaign.name} if campaign else None,
            "subject": touch.subject, "snippet": re.sub(r"\s+", " ", body)[:240], "label": touch.label,
            "label_name": LABEL_NAMES.get(touch.label or "", None), "label_source": touch.label_source,
            "summary": touch.summary, "handled": touch.handled_at is not None,
@@ -187,7 +190,7 @@ async def row_out(db: AsyncSession, touch: LgTouch, company: LgCompany, *, full:
         thread = (await db.execute(q.order_by(LgTouch.happened_at, LgTouch.id).limit(50))).scalars().all()
         out["thread"] = [{"id": t.id, "direction": t.direction, "channel": t.channel, "status": t.status,
                           "subject": t.subject, "body": t.body, "address": t.address, "label": t.label,
-                          "manual": t.campaign_kind == "manual_reply", "happened_at": _iso(t.happened_at)}
+                          "manual": t.campaign_kind == "manual_reply", "cc": t.cc, "happened_at": _iso(t.happened_at)}
                          for t in thread]
         out["can_reply"] = (await reply_blocker(db, touch, company)) is None
     return out
@@ -199,8 +202,10 @@ def _iso(dt: datetime | None) -> str | None:
 
 async def listing(db: AsyncSession, workspace_id: int, *, status: str = "unhandled", label: str | None = None,
                   mailbox_id: int | None = None, q: str | None = None, limit: int = 50, offset: int = 0,
-                  hot: bool = False) -> dict:
+                  hot: bool = False, sequence_id: int | None = None) -> dict:
     base = _inbound(workspace_id)
+    if sequence_id:   # кампания = её цепочка
+        base = base.where(LgTouch.campaign_kind == "sequence", LgTouch.campaign_id == sequence_id)
     if status == "unhandled":
         base = base.where(LgTouch.handled_at.is_(None))
     elif status == "handled":
@@ -341,7 +346,9 @@ class ReplyError(Exception):
 
 
 async def send_reply(db: AsyncSession, transport, touch: LgTouch, company: LgCompany, body: str, *,
-                     user_id: int | None = None, now: datetime | None = None) -> LgTouch:
+                     user_id: int | None = None, now: datetime | None = None, cc: str | None = None) -> LgTouch:
+    """Ответ лиду из «Входящих». cc — передать переписку на другой адрес (например, основную рабочую почту):
+    лид видит его в копии, дальше общение идёт там; цепочка по компании уже остановлена ответом лида."""
     from email.utils import make_msgid
     from app.domains.leadgen.sequences import OutgoingMail, RecipientRefused
     now = now or service.utcnow()
@@ -353,7 +360,7 @@ async def send_reply(db: AsyncSession, transport, touch: LgTouch, company: LgCom
     subject = subject if re.match(r"^\s*re\s*:", subject, re.I) else f"Re: {subject}".strip()
     message_id = make_msgid(domain=mailbox.email.split("@")[-1])
     mail = OutgoingMail(mailbox.email, mailbox.sender_name, touch.address, subject[:300], body, message_id,
-                        touch.external_id)
+                        touch.external_id, cc=cc or None)
     try:
         await transport.send(mailbox, decrypt_secret(mailbox.password_encrypted), mail)
     except RecipientRefused as exc:
@@ -366,7 +373,7 @@ async def send_reply(db: AsyncSession, transport, touch: LgTouch, company: LgCom
     out = LgTouch(company_id=company.id, contact_id=contact.id if contact else None, channel="email", direction="out",
                   sequence_id=touch.sequence_id, campaign_kind="manual_reply", campaign_id=touch.campaign_id,
                   mailbox_id=mailbox.id, status="sent", subject=subject[:300], body=body, external_id=message_id,
-                  address=touch.address, user_id=user_id, happened_at=now)
+                  address=touch.address, user_id=user_id, happened_at=now, cc=cc or None)
     db.add(out)
     touch.handled_at = touch.handled_at or now
     await db.flush()

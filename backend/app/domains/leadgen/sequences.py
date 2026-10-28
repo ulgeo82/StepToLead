@@ -25,7 +25,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.crypto import decrypt_secret
 from app.domains.leadgen import outreach, service
 from app.domains.leadgen.core import sequence as core
-from app.domains.leadgen.models import (
+from app.domains.leadgen.models import (  # noqa: I001
+    LgCampaign,
     LgAd, LgCompany, LgContact, LgDnc, LgEnrollment, LgMailbox, LgSequence, LgTouch,
 )
 from app.models.crm import CrmActivity, CrmDeal, CrmStage, CrmTask
@@ -33,6 +34,7 @@ from app.models.crm import CrmActivity, CrmDeal, CrmStage, CrmTask
 logger = logging.getLogger(__name__)
 BATCH = 100
 NO_CAPACITY_RETRY = timedelta(hours=1)
+CAMPAIGN_IDLE_RETRY = timedelta(minutes=30)   # кампания на паузе/в черновике — проверяем снова через полчаса
 STAGE_WRITTEN, STAGE_REPLIED, STAGE_LOST = "Написали", "Ответил", "Отказ"
 
 
@@ -51,6 +53,7 @@ class OutgoingMail:
     body: str
     message_id: str
     in_reply_to: str | None = None
+    cc: str | None = None
 
 
 @dataclass
@@ -79,6 +82,8 @@ def build_message(mail: OutgoingMail) -> EmailMessage:
     msg = EmailMessage()
     msg["From"] = formataddr((mail.sender_name or "", mail.sender))
     msg["To"] = mail.to
+    if mail.cc:
+        msg["Cc"] = mail.cc   # send_message отправит и на копию
     msg["Subject"] = mail.subject
     msg["Message-ID"] = mail.message_id
     if mail.in_reply_to:
@@ -154,7 +159,7 @@ def _imap_fetch_new(box, after_uid) -> list[IncomingMail]:
 
 
 def _imap_locate(box, message_ids, flag=frozenset(), flag_rescued=True) -> dict:
-    """Поиск SEARCH HEADER Message-ID у Яндекса и Mail.ru ненадёжен, поэтому берём заголовки всех писем за 4 дня
+    """Поиск SEARCH HEADER Message-ID у Яндекса и Mail.ru ненадёжен, поэтому берём заголовки всех писем за 8 дней
     одной командой FETCH и сверяем Message-ID сами. Найденное — прочитано (часть — «Важное»), из «Спама» —
     во «Входящие» со звёздочкой. Возвращает {message_id: {"folder", "auth"}}."""
     wanted = {_norm_mid(m): m for m in message_ids if m}
@@ -309,32 +314,33 @@ async def _email_contact(db: AsyncSession, company_id: int) -> LgContact | None:
 
 
 async def enroll(db: AsyncSession, sequence: LgSequence, company: LgCompany, *,
-                 now: datetime | None = None) -> EnrollResult:
-    """Компания -> цепочка. Если её ещё нет в CRM — сначала «В аутрич» (сделка нужна для задач и ответов)."""
+                 now: datetime | None = None, campaign=None, contact: LgContact | None = None,
+                 vars: dict | None = None) -> EnrollResult:
+    """Компания -> цепочка (или кампания). Сделку в CRM не создаём: её заводят вручную из «Входящих»,
+    чтобы CRM не засорялась сотнями холодных компаний. contact — конкретный адрес из файла кампании."""
     now = now or service.utcnow()
     if not sequence.is_active:
         return EnrollResult(company.id, False, "sequence_inactive")
-    steps = core.parse_steps(sequence.steps)
+    steps = core.parse_steps(sequence.steps, strict=False)
     window = core.parse_window(sequence.window)
     active = await db.scalar(select(LgEnrollment.id).where(LgEnrollment.company_id == company.id,
                                                            LgEnrollment.status.in_(("active", "paused"))))
     if active:
         return EnrollResult(company.id, False, "already_in_sequence")
-    contact = await _email_contact(db, company.id)
+    contact = contact or await _email_contact(db, company.id)
     if _uses(steps, "email") and contact is None:
         return EnrollResult(company.id, False, "no_email")
-    if not company.crm_deal_id:
-        handed = await outreach.hand_off(db, company, now=now)
-        if not handed.ok:
-            return EnrollResult(company.id, False, handed.reason)
-    else:
-        decision = await service.check_can_contact(db, company.id, contact.id if contact else None,
-                                                   "email" if contact else "call", now=now)
-        if not decision.ok and decision.reason != "crm:open_deal":
-            return EnrollResult(company.id, False, decision.reason)
+    decision = await service.check_can_contact(db, company.id, contact.id if contact else None,
+                                               "email" if contact else "call", now=now)
+    if not decision.ok and decision.reason != "crm:open_deal":
+        return EnrollResult(company.id, False, decision.reason)
+    start = now
+    if campaign is not None and campaign.start_at and service._aware(campaign.start_at) > now:
+        start = service._aware(campaign.start_at)
     row = LgEnrollment(workspace_id=company.workspace_id, sequence_id=sequence.id, company_id=company.id,
                        contact_id=contact.id if contact else None, status="active", current_step=0,
-                       next_at=core.step_due(now, steps[0], window), started_at=now)
+                       next_at=core.step_due(start, steps[0], window), started_at=now,
+                       campaign_id=campaign.id if campaign is not None else None, vars=vars or None)
     db.add(row)
     company.stage = "in_outreach"
     await db.flush()
@@ -370,8 +376,32 @@ async def _ready_at(db: AsyncSession, mailbox_id: int, gap_minutes: int) -> date
     return service._aware(last[1]) + core.gap_for(gap_minutes, last[0])
 
 
+async def _campaign_share(db: AsyncSession, mb: LgMailbox, campaign, now: datetime, tz: str, limit: int) -> int:
+    """Сколько ещё может отправить с ящика эта кампания сегодня: лимит ящика делится поровну между активными
+    кампаниями, у которых есть кому писать. Пока другим нечего слать, кампания берёт весь остаток ящика."""
+    from math import ceil
+    campaigns = (await db.scalars(select(LgCampaign).where(LgCampaign.workspace_id == mb.workspace_id,
+                                                           LgCampaign.status == "active"))).all()
+    sharing = []
+    for c in campaigns:
+        if mb.id not in (c.mailbox_ids or []):
+            continue
+        waiting = await db.scalar(select(LgEnrollment.id).where(
+            LgEnrollment.campaign_id == c.id, LgEnrollment.status == "active", LgEnrollment.mailbox_id.is_(None)
+            | (LgEnrollment.mailbox_id == mb.id), LgEnrollment.next_at <= now).limit(1))
+        if waiting or c.id == campaign.id:
+            sharing.append(c)
+    share = ceil(limit / max(1, len(sharing)))
+    local = now.astimezone(ZoneInfo(tz)).replace(hour=0, minute=0, second=0, microsecond=0)
+    mine = await db.scalar(select(func.count(LgTouch.id)).where(
+        LgTouch.mailbox_id == mb.id, LgTouch.campaign_kind == "sequence", LgTouch.campaign_id == campaign.sequence_id,
+        LgTouch.channel == "email", LgTouch.direction == "out", LgTouch.status.in_(("sent", "delivered", "replied", "bounced")),
+        LgTouch.happened_at >= local)) or 0
+    return max(0, share - mine)
+
+
 async def _choose_mailbox(db: AsyncSession, enrollment: LgEnrollment, now: datetime, tz: str,
-                          gap_minutes: int = 10) -> tuple[LgMailbox | None, datetime | None]:
+                          gap_minutes: int = 10, campaign=None) -> tuple[LgMailbox | None, datetime | None]:
     """Ящик закрепляется за компанией: вся ветка писем идёт от одного отправителя.
     Возвращает (ящик, None) или (None, когда попробовать снова, если мешает только пауза между письмами)."""
     from app.domains.leadgen import warmup
@@ -379,12 +409,18 @@ async def _choose_mailbox(db: AsyncSession, enrollment: LgEnrollment, now: datet
     async def capacity(mb: LgMailbox) -> int:
         local_today = now.astimezone(ZoneInfo(tz)).date()
         limit = warmup.cold_limit(mb, local_today)   # первые 7 дней прогрева — 0
-        return warmup.cold_capacity(mb, max(0, limit - await _sent_today(db, mb.id, now, tz)))
-    if enrollment.mailbox_id:
+        left = warmup.cold_capacity(mb, max(0, limit - await _sent_today(db, mb.id, now, tz)))
+        if campaign is not None and left > 0:
+            left = min(left, await _campaign_share(db, mb, campaign, now, tz, warmup.cold_capacity(mb, limit)))
+        return left
+    if enrollment.mailbox_id:   # продолжение ветки — только с того же ящика
         boxes = [mb for mb in [await db.get(LgMailbox, enrollment.mailbox_id)] if mb and mb.is_active]
     else:
-        boxes = (await db.execute(select(LgMailbox).where(LgMailbox.workspace_id == enrollment.workspace_id,
-                                                          LgMailbox.is_active.is_(True)))).scalars().all()
+        query = select(LgMailbox).where(LgMailbox.workspace_id == enrollment.workspace_id, LgMailbox.is_active.is_(True),
+                                        LgMailbox.role != "helper")
+        if campaign is not None:
+            query = query.where(LgMailbox.id.in_(campaign.mailbox_ids or [-1]))
+        boxes = (await db.execute(query)).scalars().all()
     candidates, soonest = [], None
     for mb in boxes:
         left = await capacity(mb)
@@ -450,7 +486,18 @@ async def process_due(db: AsyncSession, transport: MailTransport, *, now: dateti
         if sequence is None or company is None or not sequence.is_active:
             _finish(enr, "stopped", "sequence_inactive", now); stats["stopped"] += 1
             continue
-        steps, window = core.parse_steps(sequence.steps), core.parse_window(sequence.window)
+        steps, window = core.parse_steps(sequence.steps, strict=False), core.parse_window(sequence.window)
+        if enr.campaign_id:
+            campaign = await db.get(LgCampaign, enr.campaign_id)
+            if campaign is None or campaign.status in ("done",):
+                _finish(enr, "stopped", "campaign_done", now); stats["stopped"] += 1
+                continue
+            if campaign.status != "active":       # черновик или пауза — ждём, ничего не теряем
+                enr.next_at = now + CAMPAIGN_IDLE_RETRY; stats["postponed"] += 1
+                continue
+            if campaign.start_at and service._aware(campaign.start_at) > now:
+                enr.next_at = core.in_window(service._aware(campaign.start_at), window); stats["postponed"] += 1
+                continue
         if enr.current_step >= len(steps):
             _finish(enr, "finished", None, now); stats["finished"] += 1
             continue
@@ -460,7 +507,7 @@ async def process_due(db: AsyncSession, transport: MailTransport, *, now: dateti
         else:
             outcome = await _task_step(db, enr, company, step, now)
         stats[outcome] = stats.get(outcome, 0) + 1
-        if outcome in ("emails", "tasks"):
+        if outcome in ("emails", "tasks", "skipped"):
             enr.current_step += 1
             if enr.current_step >= len(steps):
                 _finish(enr, "finished", None, now); stats["finished"] += 1
@@ -483,12 +530,13 @@ async def _send_email_step(db, transport, enr, company, step, window, now) -> st
         tomorrow = now.astimezone(ZoneInfo(window.tz)).replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
         enr.next_at = core.in_window(tomorrow, window)  # лимит новых на сегодня — первое письмо завтра
         return "postponed"
-    mailbox, retry_at = await _choose_mailbox(db, enr, now, window.tz, window.gap_minutes)
+    campaign = await db.get(LgCampaign, enr.campaign_id) if enr.campaign_id else None
+    mailbox, retry_at = await _choose_mailbox(db, enr, now, window.tz, window.gap_minutes, campaign=campaign)
     if mailbox is None:
         # Пауза между письмами — пробуем, когда ящик освободится; дневной лимит — через час/в следующее окно.
         enr.next_at = core.in_window(retry_at if retry_at else now + NO_CAPACITY_RETRY, window)
         return "postponed"
-    ctx = await _context(db, company, mailbox)
+    ctx = {**await _context(db, company, mailbox), **{k.lower(): v for k, v in (enr.vars or {}).items() if v not in (None, "")}}
     seed = f"{enr.id}:{enr.current_step}"
     first_in_thread = step.new_thread or not enr.thread_message_id
     subject = core.render(step.subject or "", ctx, seed) if (first_in_thread or step.subject) else ""
@@ -529,8 +577,7 @@ async def _send_email_step(db, transport, enr, company, step, window, now) -> st
 async def _task_step(db, enr, company, step, now) -> str:
     deal = await db.get(CrmDeal, company.crm_deal_id) if company.crm_deal_id else None
     if deal is None:
-        _finish(enr, "stopped", "no_deal", now)
-        return "stopped"
+        return "skipped"   # задача «позвонить/написать» — только для компаний, которых завели в CRM; цепочка идёт дальше
     type_code, label = core.TASK_CHANNELS[step.channel]
     ctx = await _context(db, company, None)
     db.add(CrmTask(workspace_id=deal.workspace_id, project_id=deal.project_id, deal_id=deal.id,
@@ -615,6 +662,11 @@ async def handle_inbound(db: AsyncSession, mailbox: LgMailbox, mail: IncomingMai
         return kind
     if enr.status in ("active", "paused"):
         _finish(enr, "replied" if kind == "reply" else "stopped", "unsubscribed" if kind == "unsubscribe" else "reply", now)
+    # Ответил кто угодно из компании — останавливаем и остальные её цепочки и кампании.
+    for other in (await db.scalars(select(LgEnrollment).where(LgEnrollment.company_id == enr.company_id,
+                                                              LgEnrollment.id != enr.id,
+                                                              LgEnrollment.status.in_(("active", "paused"))))).all():
+        _finish(other, "stopped", "company_replied", now)
     if kind == "unsubscribe":
         if contact is not None:
             await _dnc(db, company.workspace_id, "email", contact.value_norm, "unsubscribed")

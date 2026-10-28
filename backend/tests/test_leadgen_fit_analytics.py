@@ -159,7 +159,9 @@ class AnalyticsTests(Base_):
             a, b = await self.company(db, "a.ru"), await self.company(db, "b.ru")
             await self.company(db, "c.ru", niche="Окна", email=False)
             t = T()
+            from app.domains.leadgen import outreach
             for c in (a, b):
+                await outreach.hand_off(db, c, now=NOW)   # сделку заводят вручную — в тесте заранее
                 await sequences.enroll(db, seq, c, now=NOW)
             await sequences.process_due(db, t, now=NOW)
             await sequences.handle_inbound(db, mb, sequences.IncomingMail(

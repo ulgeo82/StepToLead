@@ -100,14 +100,17 @@ def _context_note(company: LgCompany, ad: LgAd | None, contacts: list[LgContact]
     return "\n".join(lines)
 
 
-async def hand_off(db: AsyncSession, company: LgCompany, *, now: datetime | None = None) -> Handoff:
-    """Одна компания -> сделка. Не коммитит. Проверка стоп-листа и повторного контакта — через can_contact."""
+async def hand_off(db: AsyncSession, company: LgCompany, *, now: datetime | None = None,
+                   check: bool = True) -> Handoff:
+    """Одна компания -> сделка. Не коммитит. Проверка стоп-листа и повторного контакта — через can_contact.
+    check=False — лид сам ответил, и его заводят в CRM вручную: «писали недавно» тут не помеха."""
     now = now or service.utcnow()
     if company.crm_deal_id:
         return Handoff(company.id, False, "already_in_crm", company.crm_deal_id)
-    decision = await service.check_can_contact(db, company.id, None, "call", now=now)
-    if not decision.ok:
-        return Handoff(company.id, False, decision.reason)
+    if check:
+        decision = await service.check_can_contact(db, company.id, None, "call", now=now)
+        if not decision.ok:
+            return Handoff(company.id, False, decision.reason)
 
     contacts = (await db.execute(select(LgContact).where(
         LgContact.company_id == company.id, LgContact.is_personal.is_(False), LgContact.bounced.is_(False),

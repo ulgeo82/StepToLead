@@ -90,12 +90,14 @@ def upgrade_existing_schema(connection):
                          "health": "INTEGER", "health_json": "JSON", "health_checked_at": "TIMESTAMP WITH TIME ZONE",
                          "cold_paused_at": "TIMESTAMP WITH TIME ZONE", "cold_paused_reason": "VARCHAR(300)",
                          "warmup_error": "VARCHAR(500)", "imap_failing_since": "TIMESTAMP WITH TIME ZONE"},
+        "lg_sequences": {"campaign_owned": "BOOLEAN NOT NULL DEFAULT false"},
+        "lg_enrollments": {"campaign_id": "INTEGER REFERENCES lg_campaigns(id) ON DELETE CASCADE", "vars": "JSON"},
         "lg_companies": {"last_exported_at": "TIMESTAMP WITH TIME ZONE", "export_count": "INTEGER NOT NULL DEFAULT 0"},
         "lg_touches": {"intent_score": "INTEGER", "intent_signals": "JSON", "hot_at": "TIMESTAMP WITH TIME ZONE",
                        "hot_task_id": "INTEGER", "hot_reminded_at": "TIMESTAMP WITH TIME ZONE",
                        "mailbox_id": "INTEGER REFERENCES lg_mailboxes(id)", "address": "VARCHAR(254)",
                        "label": "VARCHAR(16)", "label_source": "VARCHAR(10)", "summary": "VARCHAR(300)",
-                       "handled_at": "TIMESTAMP WITH TIME ZONE"},
+                       "handled_at": "TIMESTAMP WITH TIME ZONE", "cc": "VARCHAR(254)"},
     }
     for table, additions in columns.items():
         existing = {column["name"] for column in inspector.get_columns(table)}

@@ -24,6 +24,10 @@ function EmailPage() {
   const params = useSearchParams(),
     router = useRouter();
   const tab = params.get("tab") === "sequences" ? "sequences" : "mailboxes";
+  // Письма кампании: ?sequence=ID&campaign=ID — открываем её цепочку в этом же редакторе.
+  const campaignSequence = Number(params.get("sequence")) || null;
+  const campaignId = Number(params.get("campaign")) || null;
+  const openedCampaign = useRef(false);
   const [mailboxes, setMailboxes] = useState<Mailbox[]>([]),
     [sequences, setSequences] = useState<Sequence[]>([]),
     [variables, setVariables] = useState<string[]>([]);
@@ -52,7 +56,7 @@ function EmailPage() {
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
-    const path = tab === "mailboxes" ? "mailboxes" : "sequences";
+    const path = tab === "mailboxes" ? "mailboxes" : campaignSequence ? `sequences?include=${campaignSequence}` : "sequences";
     api<{ items: Mailbox[] | Sequence[]; variables?: string[] }>(`${base}/${path}`, {
       signal: controller.signal,
     })
@@ -60,8 +64,14 @@ function EmailPage() {
         if (controller.signal.aborted) return;
         if (tab === "mailboxes") setMailboxes(data.items as Mailbox[]);
         else {
-          setSequences(data.items as Sequence[]);
+          const list = data.items as Sequence[];
+          setSequences(list.filter((s) => s.id !== campaignSequence));
           setVariables(data.variables || []);
+          const own = campaignSequence ? list.find((s) => s.id === campaignSequence) : undefined;
+          if (own && !openedCampaign.current) {
+            openedCampaign.current = true;
+            loadSequence(own);
+          }
         }
       })
       .catch((e) => {
@@ -519,6 +529,9 @@ function EmailPage() {
             ))}
           </section>
           <form className={styles.card} onSubmit={save}>
+            {campaignId && id === campaignSequence && (
+              <p className={styles.notice}>Письма кампании. После сохранения вернитесь в <a href={`/admin/outreach/campaigns/${campaignId}`}>кампанию</a>. Здесь доступны и ваши переменные из файла лидов.</p>
+            )}
             <h2>{id ? "Редактор цепочки" : "Новая цепочка"}</h2>
             <label className={styles.field}>
               Название

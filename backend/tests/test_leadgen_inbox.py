@@ -111,6 +111,8 @@ class Base_(unittest.TestCase):
                 c = (await service.upsert_company(db, 7, service.FindingIn(
                     source="site", name=name.upper(), domain=f"{name}.ru", niche="Кухни", city=f"Город {name}",
                     contacts=[{"kind": "email", "value": f"info@{name}.ru"}]), now=NOW)).company
+                from app.domains.leadgen import outreach
+                await outreach.hand_off(db, c, now=NOW)   # сделку заводят вручную — в тесте заранее
                 await sequences.enroll(db, seq, c, now=NOW)
                 ids[name] = c.id
             await sequences.process_due(db, self.transport, now=NOW)

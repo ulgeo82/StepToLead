@@ -13,14 +13,16 @@ type Item = {
   sequence: string | null; subject: string | null; snippet: string; label: string | null; label_name: string | null;
   label_source: string | null; summary: string | null; handled: boolean; happened_at: string | null;
   hot: boolean; hot_at: string | null; intent_score: number | null; intent_signals: string[];
+  campaign: { id: number; name: string } | null;
 };
 type Full = Item & {
   body: string; can_reply: boolean;
   thread: { id: number; direction: "in" | "out"; subject: string | null; body: string | null; address: string | null;
-    manual: boolean; happened_at: string | null; label: string | null }[];
+    manual: boolean; happened_at: string | null; label: string | null; cc?: string | null }[];
 };
 type Listing = { total: number; unhandled: number; hot: number; counts: Record<string, number>;
-  labels: { key: string; name: string }[]; items: Item[]; ai_available: boolean };
+  labels: { key: string; name: string }[]; items: Item[]; ai_available: boolean;
+  campaigns: { id: number; name: string; status: string; unhandled: number }[] };
 
 const SIGNALS: Record<string, string> = { phone: "телефон", call: "созвон", price: "цена", trial: "тест", meeting: "время встречи", details: "подробности" };
 const TONE: Record<string, string> = { interested: styles.fitYes, question: styles.fitMaybe, later: styles.fitMaybe, not_interested: styles.fitNo, unsubscribe: styles.fitNo };
@@ -43,6 +45,9 @@ function Inbox() {
   const [tab, setTab] = useState<string>(search.get("tab") || "hot");
   const [status, setStatus] = useState<"unhandled" | "all">("unhandled");
   const [q, setQ] = useState("");
+  const [campaign, setCampaign] = useState<string>(search.get("campaign") || "");
+  const [handoff, setHandoff] = useState(false);
+  const [cc, setCc] = useState("");
   const [data, setData] = useState<Listing | null>(null);
   const [selected, setSelected] = useState<number | null>(Number(search.get("touch")) || null);
   const [full, setFull] = useState<Full | null>(null);
@@ -59,8 +64,9 @@ function Inbox() {
     if (tab === "hot") p.set("hot", "true");
     else if (tab !== "all") p.set("label", tab);
     if (q.trim()) p.set("q", q.trim());
+    if (campaign) p.set("campaign_id", campaign);
     return p.toString();
-  }, [tab, status, q]);
+  }, [tab, status, q, campaign]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -84,7 +90,7 @@ function Inbox() {
     const p = new URLSearchParams(search.toString());
     p.set("touch", String(selected));
     router.replace(`/admin/outreach/inbox?${p}`, { scroll: false });
-    setReply("");
+    setReply(""); setHandoff(false); setCc("");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected]);
 
@@ -110,9 +116,19 @@ function Inbox() {
     if (!full || !reply.trim() || busy) return;
     setBusy(true); setError(""); setNotice("");
     try {
-      const r = await post<{ item: Full }>(`/inbox/${full.id}/reply`, { body: reply.trim() });
-      setFull(r.item); setReply(""); setNotice(`Ответ отправлен с ${full.mailbox}`); refresh();
+      const copy = handoff ? cc.trim() : "";
+      if (handoff && !/^[^@\s,;]+@[^@\s,;]+\.[^@\s,;]+$/.test(copy)) { setError("Укажите адрес для копии"); setBusy(false); return; }
+      const r = await post<{ item: Full }>(`/inbox/${full.id}/reply`, { body: reply.trim(), cc: copy || null });
+      setFull(r.item); setReply(""); setHandoff(false); setCc("");
+      setNotice(copy ? `Ответ отправлен с ${full.mailbox}, копия — на ${copy}. Дальше общение идёт с этого адреса.` : `Ответ отправлен с ${full.mailbox}`);
+      refresh();
     } catch (e) { setError(message(e)); } finally { setBusy(false); }
+  }
+  async function toCrm() {
+    if (!full || busy) return;
+    setBusy(true); setError("");
+    try { const r = await post<Full>(`/inbox/${full.id}/to-crm`, {}); setFull({ ...full, ...r }); setNotice("Сделка создана в CRM, воронка «Аутрич»"); refresh(); }
+    catch (e) { setError(message(e)); } finally { setBusy(false); }
   }
   async function aiLabel() {
     if (!full || busy) return;
@@ -170,6 +186,10 @@ function Inbox() {
         <section className={`${styles.card} ${styles.inboxList}`} aria-label="Ответы">
           <div className={styles.inboxTools}>
             <input type="search" placeholder="Компания, тема, текст" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Поиск" />
+            <select value={campaign} onChange={(e) => { setCampaign(e.target.value); setSelected(null); }} aria-label="Кампания">
+              <option value="">Все кампании</option>
+              {(data?.campaigns || []).map((c) => <option key={c.id} value={c.id}>{c.name}{c.unhandled ? ` (${c.unhandled})` : ""}</option>)}
+            </select>
             <select value={status} onChange={(e) => setStatus(e.target.value as "unhandled" | "all")} aria-label="Статус">
               <option value="unhandled">Не разобрано</option>
               <option value="all">Все</option>
@@ -194,7 +214,7 @@ function Inbox() {
                     <span className={styles.inboxMeta}>
                       {item.label_name && <span className={`${styles.badge} ${TONE[item.label || ""] || ""}`}>{item.label_name}{item.label_source === "user" ? "" : " · авто"}</span>}
                       {item.intent_score != null && <span className={styles.muted}>интерес {item.intent_score}</span>}
-                      {item.sequence && <span className={styles.muted}>{item.sequence}</span>}
+                      {item.campaign ? <span className={styles.muted}>{item.campaign.name}</span> : item.sequence && <span className={styles.muted}>{item.sequence}</span>}
                     </span>
                   </button>
                 </li>
@@ -209,13 +229,14 @@ function Inbox() {
               <div>
                 <h2>{full.hot ? "🔥 " : ""}{full.company}</h2>
                 <p className={styles.muted}>
-                  {full.address} → {full.mailbox}{full.sequence ? ` · цепочка «${full.sequence}»` : ""}
+                  {full.address} → {full.mailbox}{full.campaign ? ` · кампания «${full.campaign.name}»` : full.sequence ? ` · цепочка «${full.sequence}»` : ""}
                   {full.domain && <> · <a href={`https://${full.domain}`} target="_blank" rel="noopener noreferrer">{full.domain}</a></>}
                 </p>
               </div>
               <div className={styles.actions}>
                 <Link className={styles.secondary} href={`/admin/leadgen/companies?company=${full.company_id}`}>Карточка</Link>
-                {full.crm_deal_id && <Link className={styles.secondary} href={`/crm?deal=${full.crm_deal_id}`}>Сделка в CRM</Link>}
+                {full.crm_deal_id ? <Link className={styles.secondary} href={`/crm?deal=${full.crm_deal_id}`}>Сделка в CRM</Link>
+                  : <button type="button" className={styles.primary} disabled={busy} onClick={toCrm} title="Создать сделку в воронке «Аутрич»">＋ В CRM</button>}
               </div>
             </header>
             {(full.summary || full.hot) && (
@@ -244,6 +265,7 @@ function Inbox() {
                 <article key={m.id} className={m.direction === "in" ? styles.msgIn : styles.msgOut}>
                   <header><b>{m.direction === "in" ? full.company : m.manual ? "Вы" : "Цепочка"}</b><small>{date(m.happened_at)}</small></header>
                   {m.subject && <strong>{m.subject}</strong>}
+                  {m.cc && <small className={styles.muted}>копия: {m.cc}</small>}
                   <p>{m.body}</p>
                 </article>
               ))}
@@ -253,8 +275,18 @@ function Inbox() {
                 <textarea ref={replyRef} rows={5} value={reply} onChange={(e) => setReply(e.target.value)}
                   placeholder={`Ответ уйдёт с ${full.mailbox} в эту же ветку`}
                   onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void send(); } }} />
+                <label className={styles.check}>
+                  <input type="checkbox" checked={handoff} onChange={(e) => setHandoff(e.target.checked)} />
+                  Передать переписку на другую почту (поставить в копию)
+                </label>
+                {handoff && (
+                  <label className={styles.field}>Адрес для копии
+                    <input type="email" placeholder="например, ваш рабочий адрес" value={cc} onChange={(e) => setCc(e.target.value)} />
+                    <small>Лид увидит этот адрес в копии и дальше сможет писать туда. Текст о передаче напишите в ответе сами.</small>
+                  </label>
+                )}
                 <div className={styles.actions}>
-                  <button type="submit" className={styles.primary} disabled={busy || !reply.trim()}>{busy ? "Отправляем…" : "Отправить"}</button>
+                  <button type="submit" className={styles.primary} disabled={busy || !reply.trim()}>{busy ? "Отправляем…" : handoff ? "Отправить с копией" : "Отправить"}</button>
                   <span className={styles.muted}>⌘+Enter</span>
                 </div>
               </form>

@@ -130,7 +130,7 @@ class FlowBase(unittest.TestCase):
                 return result
         return asyncio.run(go())
 
-    async def setup_world(self, db, n=1, warmup=None, steps=STEPS):
+    async def setup_world(self, db, n=1, warmup=None, steps=STEPS, crm=True):
         mb = LgMailbox(workspace_id=7, email="egor@steptolead-team.ru", sender_name="Егор", smtp_host="smtp.x",
                        imap_host="imap.x", login="egor@steptolead-team.ru", password_encrypted=encrypt_secret("secret"),
                        daily_limit=30, warmup_started_on=warmup)
@@ -146,6 +146,11 @@ class FlowBase(unittest.TestCase):
             db.add(LgAd(company_id=c.id, content_hash=f"h{i}", title="Кухни за 14 дней", text="Замер"))
             companies.append(c)
         await db.flush()
+        if crm:   # сделку в CRM теперь заводят вручную («В CRM» во «Входящих») — в тестах заводим заранее
+            from app.domains.leadgen import outreach
+            for c in companies:
+                await outreach.hand_off(db, c, now=NOW)
+            await db.flush()
         return mb, seq, companies
 
 

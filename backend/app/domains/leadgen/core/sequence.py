@@ -13,7 +13,13 @@ TASK_CHANNELS = {"call": ("CALL", "Позвонить"), "whatsapp": ("MESSAGE",
 VARIABLES = ("company", "domain", "city", "niche", "ad_title", "ad_text", "director_name", "director_first_name",
              "sender_name")
 MAX_STEPS = 10
-_VAR = re.compile(r"\{\{\s*([a-z_]+)\s*(?:\|([^}]*))?\}\}")
+# Переменные: стандартные (латиница) и свои из столбцов файла кампании — можно по-русски: {{боль}}, {{имя}}.
+_VAR = re.compile(r"\{\{\s*([0-9a-zа-яё_]+)\s*(?:\|([^}]*))?\}\}", re.I)
+
+
+def var_name(header: str) -> str:
+    """Заголовок столбца -> имя переменной: «Боль клиента» -> боль_клиента."""
+    return re.sub(r"[^0-9a-zа-яё]+", "_", (header or "").strip().lower().replace("ё", "е")).strip("_")[:40]
 # Спинтакс как в Instantly: {Добрый день|Здравствуйте} — у каждого получателя свой вариант (стабильно).
 _SPIN = re.compile(r"(?<!\{)\{([^{}]*\|[^{}]*)\}(?!\})")
 
@@ -41,7 +47,9 @@ class Window:
     daily_new: int = 0           # сколько новых компаний в день получают первое письмо; 0 — без ограничения
 
 
-def parse_steps(raw: list[dict]) -> list[Step]:
+def parse_steps(raw: list[dict], extra: tuple | list | set = (), strict: bool = True) -> list[Step]:
+    """strict=False — при отправке (переменные уже проверены при сохранении, у кампании есть свои)."""
+    allowed = set(VARIABLES) | {v.lower() for v in extra}
     if not raw or len(raw) > MAX_STEPS:
         raise SequenceError(f"В цепочке должно быть от 1 до {MAX_STEPS} шагов")
     steps = []
@@ -61,8 +69,8 @@ def parse_steps(raw: list[dict]) -> list[Step]:
             if not subject and (not steps or new_thread or not any(s.channel == "email" for s in steps)):
                 raise SequenceError(f"Шаг {i}: у первого письма в ветке нужна тема")
         for text in (subject or "", body):
-            for name, _ in _VAR.findall(text):
-                if name not in VARIABLES:
+            for name, _ in _VAR.findall(text) if strict else ():
+                if name.lower() not in allowed:
                     raise SequenceError(f"Шаг {i}: неизвестная переменная {{{{{name}}}}}")
         steps.append(Step(channel, delay, subject, body, new_thread))
     return steps
@@ -103,7 +111,7 @@ def render(template: str, ctx: dict, seed: str | int | None = None) -> str:
     template = spin(template, seed)
 
     def sub(m: re.Match) -> str:
-        value = ctx.get(m.group(1))
+        value = ctx.get(m.group(1).lower())
         return str(value).strip() if value not in (None, "") else (m.group(2) or "").strip()
     return re.sub(r"[ \t]{2,}", " ", _VAR.sub(sub, template)).strip()
 

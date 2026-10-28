@@ -30,6 +30,7 @@ import {
 } from "../shared";
 import styles from "../leadgen.module.css";
 import EnrollDialog from "../../outreach/email/EnrollDialog";
+import AddToCampaignDialog from "../../outreach/campaigns/AddToCampaignDialog";
 import ExportDialog from "../ExportDialog";
 import ImportDialog from "../ImportDialog";
 
@@ -347,7 +348,7 @@ function CompanyCard({
                 disabled={busy || blocked(company.stage)}
                 onClick={() => act("outreach", [id])}
               >
-                В аутрич
+                В CRM
               </button>
               <button
                 type="button"
@@ -579,6 +580,7 @@ function CompaniesPage() {
   const [segmentDialog, setSegmentDialog] = useState(false);
   const [segmentBusy, setSegmentBusy] = useState(false);
   const [enrollIds, setEnrollIds] = useState<number[] | null>(null);
+  const [campaignIds, setCampaignIds] = useState<number[] | null>(null);
   const closeEnroll = useCallback(() => setEnrollIds(null), []);
   const [importOpen, setImportOpen] = useState(false);
   const [deleteIds, setDeleteIds] = useState<number[] | null>(null);
@@ -796,7 +798,9 @@ function CompaniesPage() {
     <div className={`page ${styles.page}`}>
       <PageHeader
         title="База компаний"
-        subtitle="Компании, рекламные сигналы и публичные контакты — от поиска до аутрича."
+        subtitle={search.get("campaign")
+          ? "Отметьте компании галочками и нажмите «В кампанию…» внизу таблицы — они станут лидами кампании."
+          : "Компании, рекламные сигналы и публичные контакты — от поиска до аутрича."}
       >
         <div className={styles.actions}>
           <button type="button" className={styles.secondary} onClick={() => setImportOpen(true)}>
@@ -1080,17 +1084,19 @@ function CompaniesPage() {
             type="button"
             className={styles.primary}
             disabled={busy || loading || !selected.length}
-            onClick={() => act("outreach", selected)}
+            onClick={() => setCampaignIds([...selected])}
+            title="Сделать выбранные компании лидами кампании"
           >
-            {busy ? "Выполняем…" : "В аутрич"}
+            В кампанию…
           </button>
           <button
             type="button"
             className={styles.secondary}
             disabled={busy || loading || !selected.length}
-            onClick={() => setEnrollIds([...selected])}
+            onClick={() => act("outreach", selected)}
+            title="Создать сделки в CRM, воронка «Аутрич». Писем это не отправляет"
           >
-            Запустить цепочку
+            {busy ? "Выполняем…" : "В CRM"}
           </button>
           <button
             type="button"
@@ -1341,6 +1347,14 @@ function CompaniesPage() {
             setAddToList(null);
             setRevision((n) => n + 1);
           }}
+        />
+      )}
+      {campaignIds && (
+        <AddToCampaignDialog
+          ids={campaignIds}
+          initial={Number(search.get("campaign")) || null}
+          close={() => setCampaignIds(null)}
+          done={(text) => { setNotice(text); setSelected([]); setRevision((n) => n + 1); }}
         />
       )}
       {enrollIds && (

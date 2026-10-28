@@ -192,6 +192,7 @@ class LgTouch(Base):
     label_source: Mapped[str | None] = mapped_column(String(10))
     summary: Mapped[str | None] = mapped_column(String(300))
     handled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    cc: Mapped[str | None] = mapped_column(String(254))   # ручной ответ с копией: переписку передали на этот адрес
     # Триггер «Явный интерес»: сила интереса 0–100 (ИИ), признаки (телефон, созвон, цена…), когда стал горячим,
     # задача «Связаться» в CRM и когда напомнили, что горячий ответ ждёт.
     intent_score: Mapped[int | None] = mapped_column(Integer)
@@ -288,6 +289,25 @@ class LgSequence(Base):
     created_by_id: Mapped[int | None] = mapped_column(ForeignKey("admin_users.id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    campaign_owned: Mapped[bool] = mapped_column(Boolean, default=False)   # своя копия цепочки у кампании
+
+
+class LgCampaign(Base):
+    """Кампания как в Instantly: свои лиды (CSV или база), своя цепочка (копия шаблона), выбранные ящики.
+    status: draft -> active <-> paused -> done. Лимит ящика, стоящего в нескольких кампаниях, делится поровну."""
+    __tablename__ = "lg_campaigns"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    workspace_id: Mapped[int] = mapped_column(ForeignKey("client_workspaces.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(180))
+    status: Mapped[str] = mapped_column(String(10), default="draft", index=True)
+    sequence_id: Mapped[int] = mapped_column(ForeignKey("lg_sequences.id", ondelete="CASCADE"))
+    mailbox_ids: Mapped[list] = mapped_column(JSON, default=list)
+    variables: Mapped[list] = mapped_column(JSON, default=list)   # свои переменные из столбцов файла
+    start_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("admin_users.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
 class LgEnrollment(Base):
@@ -309,6 +329,8 @@ class LgEnrollment(Base):
     stop_reason: Mapped[str | None] = mapped_column(String(40))
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    campaign_id: Mapped[int | None] = mapped_column(ForeignKey("lg_campaigns.id", ondelete="CASCADE"), index=True)
+    vars: Mapped[dict | None] = mapped_column(JSON)   # переменные лида из файла: {"company": ..., "боль": ...}
 
 
 
