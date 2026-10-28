@@ -161,6 +161,33 @@ def _inbound(workspace_id: int):
             .where(LgCompany.workspace_id == workspace_id, LgTouch.direction == "in", LgTouch.channel == "email"))
 
 
+def _latest_ids(workspace_id: int):
+    """Одна строка во «Входящих» на компанию — её последний ответ; остальные письма видны в переписке."""
+    return (select(func.max(LgTouch.id)).join(LgCompany, LgCompany.id == LgTouch.company_id)
+            .where(LgCompany.workspace_id == workspace_id, LgTouch.direction == "in", LgTouch.channel == "email")
+            .group_by(LgTouch.company_id))
+
+
+def clean_body(body: str | None) -> str:
+    """Старые ответы, сохранённые как HTML с цитатой, показываем читаемо."""
+    from app.domains.leadgen.core import sequence as core
+    text = body or ""
+    return core.reply_text(text) if core.looks_html(text) else text
+
+
+async def merge_earlier(db: AsyncSession, touch: LgTouch, now: datetime) -> None:
+    """Лид ответил ещё раз: прежние его ответы — часть той же переписки. Неразобранное и «горячесть» переносим
+    на последнее письмо, чтобы во «Входящих» была одна строка, а не несколько «лидов»."""
+    earlier = (await db.scalars(select(LgTouch).where(
+        LgTouch.company_id == touch.company_id, LgTouch.direction == "in", LgTouch.channel == "email",
+        LgTouch.id != touch.id, LgTouch.handled_at.is_(None)))).all()
+    for old in earlier:
+        if old.hot_at and not touch.hot_at and touch.label not in ("not_interested", "unsubscribe"):
+            touch.hot_at, touch.hot_task_id = old.hot_at, old.hot_task_id
+            touch.intent_score = max(touch.intent_score or 0, old.intent_score or 0) or None
+        old.handled_at = now
+
+
 async def touch_or_none(db: AsyncSession, workspace_id: int, touch_id: int) -> tuple[LgTouch, LgCompany] | None:
     row = (await db.execute(_inbound(workspace_id).where(LgTouch.id == touch_id))).first()
     return (row[0], row[1]) if row else None
@@ -171,8 +198,11 @@ async def row_out(db: AsyncSession, touch: LgTouch, company: LgCompany, *, full:
     sequence = await db.get(LgSequence, touch.campaign_id) if touch.campaign_kind in ("sequence", "manual_reply") and touch.campaign_id else None
     from app.domains.leadgen.models import LgCampaign
     campaign = await db.scalar(select(LgCampaign).where(LgCampaign.sequence_id == sequence.id)) if sequence else None
-    body = touch.body or ""
+    body = clean_body(touch.body)
+    messages = await db.scalar(select(func.count(LgTouch.id)).where(
+        LgTouch.company_id == company.id, LgTouch.direction == "in", LgTouch.channel == "email")) or 1
     out = {"id": touch.id, "company_id": company.id, "company": company.display_name or company.domain,
+           "messages": messages,
            "domain": company.domain, "stage": company.stage, "score": company.score, "fit_label": company.fit_label,
            "crm_deal_id": company.crm_deal_id, "address": touch.address, "mailbox_id": touch.mailbox_id,
            "mailbox": mailbox.email if mailbox else None, "sequence": sequence.name if sequence and not campaign else None,
@@ -189,7 +219,7 @@ async def row_out(db: AsyncSession, touch: LgTouch, company: LgCompany, *, full:
         q = q.where(LgTouch.sequence_id == touch.sequence_id) if touch.sequence_id else q
         thread = (await db.execute(q.order_by(LgTouch.happened_at, LgTouch.id).limit(50))).scalars().all()
         out["thread"] = [{"id": t.id, "direction": t.direction, "channel": t.channel, "status": t.status,
-                          "subject": t.subject, "body": t.body, "address": t.address, "label": t.label,
+                          "subject": t.subject, "body": clean_body(t.body), "address": t.address, "label": t.label,
                           "manual": t.campaign_kind == "manual_reply", "cc": t.cc, "happened_at": _iso(t.happened_at)}
                          for t in thread]
         out["can_reply"] = (await reply_blocker(db, touch, company)) is None
@@ -203,7 +233,7 @@ def _iso(dt: datetime | None) -> str | None:
 async def listing(db: AsyncSession, workspace_id: int, *, status: str = "unhandled", label: str | None = None,
                   mailbox_id: int | None = None, q: str | None = None, limit: int = 50, offset: int = 0,
                   hot: bool = False, sequence_id: int | None = None) -> dict:
-    base = _inbound(workspace_id)
+    base = _inbound(workspace_id).where(LgTouch.id.in_(_latest_ids(workspace_id)))
     if sequence_id:   # кампания = её цепочка
         base = base.where(LgTouch.campaign_kind == "sequence", LgTouch.campaign_id == sequence_id)
     if status == "unhandled":
@@ -233,7 +263,8 @@ async def listing(db: AsyncSession, workspace_id: int, *, status: str = "unhandl
                                            LgTouch.happened_at.desc(), LgTouch.id.desc())
                              .limit(limit).offset(offset))).all()
     unhandled = await db.scalar(select(func.count()).select_from(
-        _inbound(workspace_id).where(LgTouch.handled_at.is_(None)).with_only_columns(LgTouch.id).subquery())) or 0
+        _inbound(workspace_id).where(LgTouch.handled_at.is_(None), LgTouch.id.in_(_latest_ids(workspace_id)))
+        .with_only_columns(LgTouch.id).subquery())) or 0
     return {"total": total, "unhandled": unhandled, "counts": counts, "hot": hot_count,
             "labels": [{"key": k, "name": LABEL_NAMES[k]} for k in LABELS],
             "items": [await row_out(db, t, c) for t, c in rows]}

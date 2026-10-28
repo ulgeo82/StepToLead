@@ -5,6 +5,7 @@ import { Suspense, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { base, date, message, post } from "../../leadgen/shared";
 import styles from "../../leadgen/leadgen.module.css";
+import { applyTool, Formatted, hasMarkup, TOOLS } from "./format";
 import {
   channelNames,
   emptyStep,
@@ -211,6 +212,19 @@ function EmailPage() {
     target.current = null;
     setPreview(null);
     setFields({});
+  }
+  function format(index: number, key: string) {
+    const text = steps[index]?.body || "";
+    const pos = target.current && target.current.index === index && target.current.field === "body"
+      ? target.current : { index, field: "body" as const, start: text.length, end: text.length };
+    const next = applyTool(text, pos.start, pos.end, key);
+    updateStep(index, "body", next.text);
+    target.current = { index, field: "body", start: next.start, end: next.end };
+    requestAnimationFrame(() => {
+      const input = editorRef.current?.querySelector<HTMLTextAreaElement>(`[data-step="${index}"][data-field="body"]`);
+      input?.focus();
+      input?.setSelectionRange(next.start, next.end);
+    });
   }
   function insert(variable: string) {
     const position = target.current;
@@ -773,6 +787,16 @@ function EmailPage() {
                     )}
                     <label className={`${styles.field} ${styles.wide}`}>
                       {step.channel === "email" ? "Текст письма" : "Текст действия"}
+                      {step.channel === "email" && (
+                        <span className={styles.formatBar} role="toolbar" aria-label="Форматирование">
+                          {TOOLS.map((tool) => (
+                            <button key={tool.key} type="button" title={tool.title} className={styles[`fmt_${tool.key}`] || ""}
+                              onMouseDown={(e) => e.preventDefault()} onClick={() => format(index, tool.key)}>
+                              {tool.label}
+                            </button>
+                          ))}
+                        </span>
+                      )}
                       <textarea
                         data-step={index}
                         data-field="body"
@@ -808,6 +832,15 @@ function EmailPage() {
                         aria-invalid={!!fields[`steps.${index}.body`]}
                       />
                       {fieldError(`steps.${index}.body`)}
+                      {step.channel === "email" && hasMarkup(step.body) && (
+                        <span className={styles.formatPreview}>
+                          <small className={styles.muted}>Так увидит получатель (переменные подставятся при отправке):</small>
+                          <Formatted text={step.body} />
+                          {index === 0 && /\]\(https?:/.test(step.body) && (
+                            <small className={styles.hint}>⚠️ Ссылки в первом холодном письме заметно снижают доставляемость. Лучше добавить ссылку во второе письмо или после ответа.</small>
+                          )}
+                        </span>
+                      )}
                     </label>
                   </div>
                   {step.channel === "email" && index > 0 && (

@@ -179,13 +179,41 @@ _AUTO_SUBJ = ("автоответ", "auto-reply", "autoreply", "automatic reply"
 # цепочка по нему тоже останавливается, а закрыть сделку решает человек во «Входящих».
 _UNSUB = ("отпиш", "не пишите", "больше не пиш", "удалите", "unsubscribe", "не присылайте", "прекратите")
 _FINAL_RCPT = re.compile(r"(?:Final|Original)-Recipient:\s*rfc822;\s*<?([^\s>;]+@[^\s>;]+)", re.I)
-_QUOTE_START = re.compile(r"^(>|-{2,}|_{3,}|On .+ wrote:|.*пишет:$|.*написал\(а\):$|От:|From:)", re.I | re.M)
+_QUOTE_START = re.compile(
+    r"^(>|-{2,}|_{3,}|On .+ wrote:|.*пишет:$|.*написал\(а\):$|От:|From:"
+    r"|Отправлено из|Sent from my"                               # подписи мобильных почт
+    r"|\d{1,2}\.\d{1,2}\.\d{2,4},? \d{1,2}:\d{2}.*:\s*$"           # Яндекс: «28.10.2026, 23:10, "Егор" <e@x.ru>:»
+    r"|.*<[^<>\s]+@[^<>\s]+>\s*:\s*$)",                           # Gmail: «… Егор <e@x.ru>:»
+    re.I | re.M)
+_HTML_HINT = re.compile(r"<(br|p|div|blockquote|html|body|span|b|i)\b[^>]*>", re.I)
+
+
+def html_to_text(html: str) -> str:
+    """HTML письма -> читаемый текст. Цитату (<blockquote>) отрезаем: это наше же письмо."""
+    import html as _html
+    text = html or ""
+    cut = re.search(r"<blockquote", text, re.I)
+    if cut:
+        text = text[: cut.start()]
+    text = re.sub(r"(?is)<(style|script|head)[^>]*>.*?</\1>", "", text)
+    text = re.sub(r"(?i)<br\s*/?>", "\n", text)
+    text = re.sub(r"(?i)</(p|div|li|tr|h\d)>", "\n", text)
+    text = re.sub(r"(?i)<li[^>]*>", "• ", text)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = _html.unescape(text).replace("\xa0", " ")
+    text = re.sub(r"[ \t]+\n", "\n", text)
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
+
+
+def looks_html(text: str) -> bool:
+    return bool(_HTML_HINT.search(text or ""))
 
 
 def reply_text(body: str) -> str:
-    """Свежая часть ответа без цитаты исходного письма."""
-    m = _QUOTE_START.search(body or "")
-    return (body[: m.start()] if m else body or "").strip()
+    """Свежая часть ответа без цитаты исходного письма (и без HTML, если письмо пришло в HTML)."""
+    body = html_to_text(body) if looks_html(body) else (body or "")
+    m = _QUOTE_START.search(body)
+    return (body[: m.start()] if m else body).strip()
 
 
 def classify_inbound(sender: str, subject: str, body: str, headers: dict | None = None) -> str:
@@ -207,3 +235,78 @@ def classify_inbound(sender: str, subject: str, body: str, headers: dict | None 
 def bounced_address(body: str) -> str | None:
     m = _FINAL_RCPT.search(body or "")
     return m.group(1).lower() if m else None
+
+
+# ---------------------------------------------------------------- форматирование писем
+# Простая разметка в редакторе (кнопки Ж / К / Ч / ссылка / список): **жирный**, *курсив*, __подчёркнутый__,
+# [текст](https://…), строки «- …» / «1. …» — списки. Есть разметка — письмо уходит HTML + простой текст;
+# нет — только простой текст (так лучше доставляемость холодных писем).
+_LINK = re.compile(r"\[([^\]\n]+)\]\(((?:https?://|mailto:|tel:)[^\s)]+)\)")
+_BOLD = re.compile(r"\*\*(?=\S)(.+?)(?<=\S)\*\*")
+_UNDER = re.compile(r"__(?=\S)(.+?)(?<=\S)__")
+_ITALIC = re.compile(r"(?<![*\w])\*(?=[^\s*])(.+?)(?<=[^\s*])\*(?![*\w])")
+_BULLET = re.compile(r"^\s*[-•]\s+(.*)$")
+_NUMBER = re.compile(r"^\s*\d{1,2}[.)]\s+(.*)$")
+
+
+def has_markup(text: str) -> bool:
+    t = text or ""
+    return bool(_LINK.search(t) or _BOLD.search(t) or _UNDER.search(t) or _ITALIC.search(t))
+
+
+def _inline_html(line: str) -> str:
+    import html as _html
+    out, last = [], 0
+    for m in _LINK.finditer(line):   # ссылки — до экранирования, чтобы не испортить адрес
+        out.append(_html.escape(line[last:m.start()]))
+        out.append(f'<a href="{_html.escape(m.group(2), quote=True)}">{_html.escape(m.group(1))}</a>')
+        last = m.end()
+    out.append(_html.escape(line[last:]))
+    text = "".join(out)
+    text = _BOLD.sub(r"<b>\1</b>", text)
+    text = _UNDER.sub(r"<u>\1</u>", text)
+    return _ITALIC.sub(r"<i>\1</i>", text)
+
+
+def to_html(text: str) -> str:
+    blocks: list[str] = []
+    para: list[str] = []
+    lst: tuple[str, list[str]] | None = None
+
+    def flush_para():
+        if para:
+            blocks.append("<p style=\"margin:0 0 12px\">" + "<br>".join(para) + "</p>")
+            para.clear()
+
+    def flush_list():
+        nonlocal lst
+        if lst:
+            tag, items = lst
+            blocks.append(f"<{tag} style=\"margin:0 0 12px;padding-left:22px\">" + "".join(f"<li>{i}</li>" for i in items) + f"</{tag}>")
+            lst = None
+
+    for raw in (text or "").splitlines():
+        bullet, number = _BULLET.match(raw), _NUMBER.match(raw)
+        if bullet or number:
+            flush_para()
+            tag = "ul" if bullet else "ol"
+            if lst is None or lst[0] != tag:
+                flush_list()
+                lst = (tag, [])
+            lst[1].append(_inline_html((bullet or number).group(1)))
+        elif not raw.strip():
+            flush_para(); flush_list()
+        else:
+            flush_list()
+            para.append(_inline_html(raw))
+    flush_para(); flush_list()
+    return ('<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;color:#1f2937">'
+            + "".join(blocks) + "</div>")
+
+
+def to_plain(text: str) -> str:
+    t = _LINK.sub(lambda m: f"{m.group(1)} ({m.group(2)})" if m.group(1) != m.group(2) else m.group(2), text or "")
+    t = _BOLD.sub(r"\1", t)
+    t = _UNDER.sub(r"\1", t)
+    t = _ITALIC.sub(r"\1", t)
+    return re.sub(r"(?m)^[ \t]*[-•][ \t]+", "— ", t)

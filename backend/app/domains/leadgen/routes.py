@@ -1043,8 +1043,13 @@ async def preview_sequence(payload: PreviewIn, db: AsyncSession = Depends(get_db
         ctx = await sequences._context(db, company, mailbox)
     else:
         raise HTTPException(422, "Выберите компанию или лида для предпросмотра")
-    return {"context": ctx, "steps": [{"channel": s.channel, "subject": seq_core.render(s.subject or "", ctx) or None,
-                                       "body": seq_core.render(s.body, ctx)} for s in steps]}
+    out = []
+    for s in steps:
+        body = seq_core.render(s.body, ctx)
+        out.append({"channel": s.channel, "subject": seq_core.render(s.subject or "", ctx) or None,
+                    "body": seq_core.to_plain(body) if seq_core.has_markup(body) else body,
+                    "html": seq_core.to_html(body) if seq_core.has_markup(body) else None})
+    return {"context": ctx, "steps": out}
 
 
 class TestSendIn(BaseModel):
@@ -1262,6 +1267,7 @@ async def inbox_list(status: str = Query("unhandled", pattern="^(unhandled|handl
                                limit=limit, offset=offset, hot=hot, sequence_id=sequence_id)
     unhandled = dict((await db.execute(select(T.campaign_id, func.count(T.id)).where(
         T.direction == "in", T.campaign_kind == "sequence", T.handled_at.is_(None),
+        T.id.in_(inbox._latest_ids(workspace_id())),
         T.campaign_id.in_([c.sequence_id for c in camps] or [-1])).group_by(T.campaign_id))).all())
     campaigns_out = [{"id": c.id, "name": c.name, "status": c.status, "unhandled": int(unhandled.get(c.sequence_id, 0))}
                      for c in camps]
@@ -1274,7 +1280,7 @@ async def inbox_counter(db: AsyncSession = Depends(get_db), admin: AdminUser = D
     from app.domains.leadgen.models import LgTouch as T
     base = (select(func.count(T.id)).join(LgCompany, LgCompany.id == T.company_id)
             .where(LgCompany.workspace_id == workspace_id(), T.direction == "in", T.channel == "email",
-                   T.handled_at.is_(None)))
+                   T.handled_at.is_(None), T.id.in_(inbox._latest_ids(workspace_id()))))
     return {"unhandled": await db.scalar(base) or 0, "hot": await db.scalar(base.where(T.hot_at.is_not(None))) or 0}
 
 
@@ -1307,6 +1313,8 @@ async def inbox_update(touch_id: int, payload: InboxPatch, db: AsyncSession = De
         applied = await inbox.apply_label(db, touch, company, payload.label, remind_days=payload.remind_days)
     if payload.handled is not None:
         touch.handled_at = (touch.handled_at or service.utcnow()) if payload.handled else None
+    if payload.label or payload.handled:
+        await inbox.merge_earlier(db, touch, service.utcnow())   # вся переписка с компанией — разобрана вместе
     await db.commit()
     return {**await inbox.row_out(db, touch, company), "task_id": applied.task_id, "effect": applied.effect}
 

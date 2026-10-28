@@ -6,6 +6,7 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { api } from "@/lib/api";
 import { base, date, message, PageHeader, post } from "../../leadgen/shared";
 import styles from "../../leadgen/leadgen.module.css";
+import { Formatted, hasMarkup } from "../email/format";
 
 type Item = {
   id: number; company_id: number; company: string; domain: string | null; stage: string; score: number;
@@ -14,6 +15,7 @@ type Item = {
   label_source: string | null; summary: string | null; handled: boolean; happened_at: string | null;
   hot: boolean; hot_at: string | null; intent_score: number | null; intent_signals: string[];
   campaign: { id: number; name: string } | null;
+  messages?: number;
 };
 type Full = Item & {
   body: string; can_reply: boolean;
@@ -207,7 +209,7 @@ function Inbox() {
                   <button type="button" className={`${styles.inboxItem} ${item.id === selected ? styles.inboxActive : ""} ${item.hot && !item.handled ? styles.inboxHot : ""} ${item.handled ? styles.inboxDone : ""}`}
                     onClick={() => setSelected(item.id)}>
                     <span className={styles.inboxTop}>
-                      <b>{item.hot ? "🔥 " : ""}{item.company}</b>
+                      <b>{item.hot ? "🔥 " : ""}{item.company}{item.messages && item.messages > 1 ? <small className={styles.muted}> · {item.messages} письма</small> : null}</b>
                       <small>{when(item.happened_at)}</small>
                     </span>
                     <span className={styles.inboxSnippet}>{item.summary || item.snippet}</span>
@@ -266,7 +268,7 @@ function Inbox() {
                   <header><b>{m.direction === "in" ? full.company : m.manual ? "Вы" : "Цепочка"}</b><small>{date(m.happened_at)}</small></header>
                   {m.subject && <strong>{m.subject}</strong>}
                   {m.cc && <small className={styles.muted}>копия: {m.cc}</small>}
-                  <p>{m.body}</p>
+                  {m.direction === "out" && m.body && hasMarkup(m.body) ? <Formatted text={m.body} /> : <p>{m.body}</p>}
                 </article>
               ))}
             </div>

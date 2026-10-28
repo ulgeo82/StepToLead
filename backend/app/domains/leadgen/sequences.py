@@ -91,21 +91,34 @@ def build_message(mail: OutgoingMail) -> EmailMessage:
         msg["References"] = mail.in_reply_to
     # Простая строка отказа — и в теле письма, и в заголовке для почтовиков.
     msg["List-Unsubscribe"] = f"<mailto:{mail.sender}?subject=unsubscribe>"
-    msg.set_content(mail.body)
+    if core.has_markup(mail.body):   # жирный/курсив/ссылки — HTML-версия + простой текст для старых почтовиков
+        msg.set_content(core.to_plain(mail.body))
+        msg.add_alternative(core.to_html(mail.body), subtype="html")
+    else:
+        msg.set_content(mail.body)
     return msg
 
 
+def _decoded(part) -> str:
+    return (part.get_payload(decode=True) or b"").decode(part.get_content_charset() or "utf-8", errors="replace")
+
+
 def _text_of(msg: email.message.Message) -> str:
+    """Текст письма: text/plain, а если его нет (мобильная Яндекс Почта шлёт только HTML) — HTML в текст."""
     if msg.is_multipart():
         for part in msg.walk():
             if part.get_content_type() == "text/plain" and "attachment" not in str(part.get("Content-Disposition", "")):
-                return part.get_payload(decode=True).decode(part.get_content_charset() or "utf-8", errors="replace")
+                text = _decoded(part)
+                return core.html_to_text(text) if core.looks_html(text) else text
+        for part in msg.walk():
+            if part.get_content_type() == "text/html" and "attachment" not in str(part.get("Content-Disposition", "")):
+                return core.html_to_text(_decoded(part))
         for part in msg.walk():
             if part.get_content_type() == "message/delivery-status":
                 return str(part.get_payload())
         return ""
-    payload = msg.get_payload(decode=True) or b""
-    return payload.decode(msg.get_content_charset() or "utf-8", errors="replace")
+    text = _decoded(msg)
+    return core.html_to_text(text) if msg.get_content_type() == "text/html" or core.looks_html(text) else text
 
 
 _SPAM_NAMES = {"spam", "junk", "junk e-mail", "junk email", "[gmail]/spam", "&bceepwqwbdw-", "bulk mail"}
@@ -657,6 +670,9 @@ async def handle_inbound(db: AsyncSession, mailbox: LgMailbox, mail: IncomingMai
                     label=label, label_source=source, handled_at=now if label in inbox.SELF_HANDLED else None,
                     happened_at=now)
     db.add(touch)
+    await db.flush()
+    if kind != "auto_reply":
+        await inbox.merge_earlier(db, touch, now)
     if kind == "auto_reply":
         await db.flush()
         return kind

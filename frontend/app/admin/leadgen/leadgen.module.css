@@ -1229,3 +1229,64 @@
     grid-template-columns: 1fr 1fr;
   }
 }
+
+/* ── Форматирование писем ─────────────────────────────────── */
+.formatBar {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin: 2px 0 4px;
+}
+.formatBar button {
+  background: #141f36;
+  color: #c9d2e3;
+  border: 1px solid #26324d;
+  border-radius: 6px;
+  padding: 4px 9px;
+  font-size: 13px;
+  cursor: pointer;
+  min-width: 32px;
+}
+.formatBar button:hover {
+  background: #1d3366;
+  color: #fff;
+}
+.fmt_bold {
+  font-weight: 800;
+}
+.fmt_italic {
+  font-style: italic;
+}
+.fmt_under {
+  text-decoration: underline;
+}
+.formatPreview {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+.formatted {
+  background: #fff;
+  color: #1f2937;
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  font-weight: 400;
+}
+.formatted p {
+  margin: 0 0 10px;
+}
+.formatted p:last-child {
+  margin-bottom: 0;
+}
+.formatted ul,
+.formatted ol {
+  margin: 0 0 10px;
+  padding-left: 22px;
+}
+.formatted a {
+  color: #1a56db;
+}

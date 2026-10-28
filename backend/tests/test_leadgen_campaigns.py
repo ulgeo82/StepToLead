@@ -1,6 +1,7 @@
 """Кампании как в Instantly: загрузка CSV со своими переменными, проверка адресов, ящики кампании, деление лимита,
 пауза, остановка по компании при ответе, шаг «позвонить» без сделки не ломает цепочку."""
 import json
+import unittest
 from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI
@@ -277,3 +278,62 @@ class CampaignWindowTests(CampaignApiTests):
         local = self.run_db(enroll)
         # NOW = среда 15:00 МСК = 08:00 в Нью-Йорке -> первое письмо в 09:00 по Нью-Йорку, не ночью
         self.assertEqual((local.hour, local.minute), (9, 0))
+
+
+class InboxConversationTests(CampaignApiTests):
+    YANDEX_HTML = ('Интересуюсь <br /><br />--<br />Отправлено из мобильной Яндекс Почты<br /><br /><b>Кому</b> x &lt;x@y.ru&gt;;'
+                   '<br />28.10.2026, 23:10, "Егор StepToLead" &lt;e_dementev@steptolead.site&gt;:<br /><blockquote><p>Здравствуйте!'
+                   ' Если неактуально — ответьте «нет», больше не напишу.</p></blockquote>')
+
+    def test_two_replies_are_one_conversation_and_html_is_readable(self):
+        b = self.base
+        t = FakeTransport()
+
+        async def seed(db):
+            from datetime import timedelta
+            a = box("egor@team-a.ru")
+            db.add(a)
+            await db.flush()
+            await CampaignSendingTests.campaign(self, db, "Тест", [a.id], 1)
+            await sequences.process_due(db, t, now=NOW)
+            for uid, text in ((1, self.YANDEX_HTML), (2, "Позвоните мне завтра в 11, +7 900 123-45-67")):
+                await sequences.handle_inbound(db, a, sequences.IncomingMail(
+                    uid=uid, sender="info@c0.ru", subject="Re: Вопрос", body=text, message_id=f"<r{uid}@c0.ru>",
+                    in_reply_to=t.sent[0].message_id), now=NOW + timedelta(minutes=uid))
+        self.run_db(seed)
+        data = self.client.get(f"{b}/inbox?status=unhandled").json()
+        self.assertEqual(data["total"], 1)                     # один лид — одна строка
+        self.assertEqual(data["unhandled"], 1)
+        item = data["items"][0]
+        self.assertEqual(item["messages"], 2)
+        self.assertTrue(item["hot"])
+        full = self.client.get(f"{b}/inbox/{item['id']}").json()
+        bodies = [m["body"] for m in full["thread"] if m["direction"] == "in"]
+        self.assertEqual(bodies[0], "Интересуюсь")             # без HTML, подписи и цитаты
+        self.assertNotIn("<br", " ".join(bodies))
+        # разобрали переписку — разобраны оба письма
+        self.client.patch(f"{b}/inbox/{item['id']}", headers=ORIGIN, json={"handled": True})
+        self.assertEqual(self.client.get(f"{b}/inbox?status=unhandled").json()["total"], 0)
+        self.assertEqual(self.client.get(f"{b}/inbox-counter").json()["unhandled"], 0)
+
+
+class FormattingTests(unittest.TestCase):
+    def test_markup_goes_as_html_with_plain_fallback(self):
+        from app.domains.leadgen.core import sequence as core
+        body = "Здравствуйте, **Иван**!\n\n- цена заявки\n- потери\n\n[Сайт](https://steptolead.ru) и *курсив*, 5*3"
+        msg = sequences.build_message(sequences.OutgoingMail("a@x.ru", "Егор", "b@y.ru", "Тема", body, "<1@x>"))
+        self.assertEqual(msg.get_content_type(), "multipart/alternative")
+        plain, html = [p.get_content() for p in msg.iter_parts()]
+        self.assertIn("Здравствуйте, Иван!", plain)
+        self.assertIn("Сайт (https://steptolead.ru)", plain)
+        self.assertIn("<b>Иван</b>", html)
+        self.assertIn('<a href="https://steptolead.ru">Сайт</a>', html)
+        self.assertIn("<ul", html)
+        self.assertIn("5*3", html)                       # звёздочка в числах — не курсив
+        self.assertIn("<i>курсив</i>", html)
+        # без разметки — как раньше, только простой текст
+        simple = sequences.build_message(sequences.OutgoingMail("a@x.ru", "Егор", "b@y.ru", "Т", "Просто текст", "<2@x>"))
+        self.assertEqual(simple.get_content_type(), "text/plain")
+        # опасная ссылка не превращается в <a>, HTML экранируется
+        self.assertNotIn("<script", core.to_html("<script>x</script> [клик](javascript:alert(1))"))
+        self.assertNotIn("href=\"javascript", core.to_html("[клик](javascript:alert(1))"))

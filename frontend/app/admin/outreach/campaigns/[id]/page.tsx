@@ -242,7 +242,7 @@ function LettersTab({ c }: { c: Campaign }) {
   const [seq, setSeq] = useState<Sequence | null>(null);
   const [leads, setLeads] = useState<Lead[]>([]);
   const [lead, setLead] = useState("");
-  const [preview, setPreview] = useState<{ subject: string | null; body: string; channel: string }[] | null>(null);
+  const [preview, setPreview] = useState<{ subject: string | null; body: string; channel: string; html?: string | null }[] | null>(null);
   const [to, setTo] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -257,7 +257,7 @@ function LettersTab({ c }: { c: Campaign }) {
   async function showPreview() {
     if (!seq || !lead) return;
     setError("");
-    try { setPreview((await post<{ steps: { subject: string | null; body: string; channel: string }[] }>("/sequences/preview", { enrollment_id: Number(lead), steps: seq.steps })).steps); }
+    try { setPreview((await post<{ steps: { subject: string | null; body: string; channel: string; html?: string | null }[] }>("/sequences/preview", { enrollment_id: Number(lead), steps: seq.steps })).steps); }
     catch (e) { setError(message(e)); }
   }
   async function test() {
@@ -314,7 +314,8 @@ function LettersTab({ c }: { c: Campaign }) {
       </div>
       {preview && preview.filter((p) => p.channel === "email").map((p, i) => (
         <article key={i} className={styles.msgOut} style={{ maxWidth: "100%", marginBottom: 10 }}>
-          {p.subject && <strong>{p.subject}</strong>}<p>{p.body}</p>
+          {p.subject && <strong>{p.subject}</strong>}
+          {p.html ? <div className={styles.formatted} dangerouslySetInnerHTML={{ __html: p.html }} /> : <p>{p.body}</p>}
         </article>
       ))}
       <div className={styles.actions}>
