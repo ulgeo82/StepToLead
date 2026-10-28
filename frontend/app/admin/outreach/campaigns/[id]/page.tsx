@@ -6,8 +6,15 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { base, date, message, post } from "../../../leadgen/shared";
 import styles from "../../../leadgen/leadgen.module.css";
+import { timezoneGroups, timezones } from "../../email/types";
 import type { Mailbox, Sequence } from "../../email/types";
-import { Campaign, Check, Column, ImportReport, Lead, STATUS, STOP_REASONS, UploadPreview } from "../types";
+import { Campaign, Check, Column, ImportReport, Lead, scheduleText, STATUS, STOP_REASONS, UploadPreview, WEEKDAYS } from "../types";
+
+const zoneName = (tz: string) => timezones.find(([z]) => z === tz)?.[1] || tz;
+const nowIn = (tz: string) => {
+  try { return new Date().toLocaleString("ru-RU", { timeZone: tz, weekday: "short", hour: "2-digit", minute: "2-digit" }); }
+  catch { return ""; }
+};
 
 type Tab = "leads" | "letters" | "settings";
 const LEAD_FILTERS: [string, string][] = [["", "Все"], ["active", "В работе"], ["replied", "Ответили"], ["finished", "Цепочка пройдена"],
@@ -51,7 +58,8 @@ export default function CampaignPage() {
         <div>
           <p className="eyebrow">Кампания · <span className={`${styles.badge} ${STATUS[c.status].tone ? styles[STATUS[c.status].tone] : ""}`}>{STATUS[c.status].name}</span></p>
           <h1>{c.name}</h1>
-          <p className="subtitle">{c.start_at && c.status !== "done" ? `Старт ${date(c.start_at)} · ` : ""}{c.mailbox_ids.length} ящ. · {c.steps} шаг. в цепочке</p>
+          <p className="subtitle">Письма уходят: {scheduleText(c.window, zoneName(c.window.tz))} · сейчас там {nowIn(c.window.tz)}
+            <br />{c.start_at && c.status !== "done" ? `Старт ${date(c.start_at)} · ` : ""}{c.mailbox_ids.length} ящ. · {c.steps} шаг. в цепочке</p>
         </div>
         <div className={styles.actions}>
           {(c.status === "draft" || c.status === "paused") && <button type="button" className={styles.primary} disabled={busy} onClick={() => status("active")}>▶ Запустить</button>}
@@ -81,7 +89,7 @@ export default function CampaignPage() {
       )}
 
       <div className={styles.tabs}>
-        {([["leads", "Лиды"], ["letters", "Письма"], ["settings", "Ящики и старт"]] as [Tab, string][]).map(([k, n]) => (
+        {([["leads", "Лиды"], ["letters", "Письма"], ["settings", "Расписание и ящики"]] as [Tab, string][]).map(([k, n]) => (
           <button key={k} type="button" className={styles.tab} aria-pressed={tab === k} onClick={() => setTab(k)}>{n}</button>
         ))}
       </div>
@@ -321,18 +329,21 @@ function SettingsTab({ c, onSaved }: { c: Campaign; onSaved: (c: Campaign) => vo
   const [boxes, setBoxes] = useState<Mailbox[]>([]);
   const [chosen, setChosen] = useState<number[]>(c.mailbox_ids);
   const [start, setStart] = useState(c.start_at ? c.start_at.slice(0, 16) : "");
+  const [win, setWin] = useState(c.window);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   useEffect(() => {
     api<{ items: Mailbox[] }>(`${base}/mailboxes`).then((d) => setBoxes(d.items.filter((m) => m.role !== "helper"))).catch((e) => setError(message(e)));
   }, []);
   const changed = useMemo(() => JSON.stringify([...chosen].sort()) !== JSON.stringify([...c.mailbox_ids].sort())
-    || start !== (c.start_at ? c.start_at.slice(0, 16) : ""), [chosen, start, c]);
+    || start !== (c.start_at ? c.start_at.slice(0, 16) : "") || JSON.stringify(win) !== JSON.stringify(c.window), [chosen, start, win, c]);
 
   async function save() {
     setError(""); setNotice("");
     try {
-      const body: Record<string, unknown> = { mailbox_ids: chosen };
+      if (win.start_hour >= win.end_hour) { setError("Час начала должен быть раньше часа окончания"); return; }
+      if (!win.weekdays.length) { setError("Выберите хотя бы один день"); return; }
+      const body: Record<string, unknown> = { mailbox_ids: chosen, window: win };
       if (start) body.start_at = new Date(start).toISOString(); else body.clear_start = true;
       onSaved(await send<Campaign>(`/campaigns/${c.id}`, body));
       setNotice("Сохранено");
@@ -343,6 +354,42 @@ function SettingsTab({ c, onSaved }: { c: Campaign; onSaved: (c: Campaign) => vo
     <section className={styles.card}>
       {error && <p className={styles.error} role="alert">{error}</p>}
       {notice && <p className={styles.notice} role="status">{notice}</p>}
+      <h2>Когда отправлять</h2>
+      <p className={styles.muted}>Время — по часовому поясу <b>получателей</b>: для США выберите их пояс, и письма придут в их рабочие часы, а не ночью.</p>
+      <div className={styles.fields}>
+        <label className={styles.field}>Часовой пояс получателей
+          <select value={win.tz} onChange={(e) => setWin({ ...win, tz: e.target.value })}>
+            {!timezones.some(([z]) => z === win.tz) && <option value={win.tz}>{win.tz}</option>}
+            {timezoneGroups.map(([group, zones]) => (
+              <optgroup key={group} label={group}>{zones.map(([z, n]) => <option key={z} value={z}>{n}</option>)}</optgroup>
+            ))}
+          </select>
+          <small>Сейчас там: {nowIn(win.tz)}</small>
+        </label>
+        <div className={styles.field}>Дни
+          <div className={styles.actions} style={{ margin: 0 }}>
+            {WEEKDAYS.map((d, i) => (
+              <button key={d} type="button" className={styles.tab} aria-pressed={win.weekdays.includes(i)}
+                onClick={() => setWin({ ...win, weekdays: win.weekdays.includes(i) ? win.weekdays.filter((x) => x !== i) : [...win.weekdays, i].sort() })}>{d}</button>
+            ))}
+          </div>
+        </div>
+        <div className={styles.inlineForm}>
+          <label className={styles.field}>С часа
+            <input type="number" min={0} max={23} value={win.start_hour} onChange={(e) => setWin({ ...win, start_hour: Number(e.target.value) })} />
+          </label>
+          <label className={styles.field}>До часа
+            <input type="number" min={1} max={24} value={win.end_hour} onChange={(e) => setWin({ ...win, end_hour: Number(e.target.value) })} />
+          </label>
+          <label className={styles.field}>Пауза между письмами с ящика, мин
+            <input type="number" min={0} max={240} value={win.gap_minutes} onChange={(e) => setWin({ ...win, gap_minutes: Number(e.target.value) })} />
+          </label>
+          <label className={styles.field}>Новых лидов в день
+            <input type="number" min={0} max={2000} value={win.daily_new} onChange={(e) => setWin({ ...win, daily_new: Number(e.target.value) })} />
+            <small>0 — без ограничения (лимиты ящиков всё равно действуют)</small>
+          </label>
+        </div>
+      </div>
       <h2>С каких ящиков слать</h2>
       {boxes.map((m) => (
         <label key={m.id} className={styles.check}>
@@ -353,9 +400,9 @@ function SettingsTab({ c, onSaved }: { c: Campaign; onSaved: (c: Campaign) => vo
       ))}
       <p className={styles.hint}>Продолжение переписки с лидом всегда идёт с того же ящика, что и первое письмо. Лимит ящика в нескольких кампаниях делится поровну. Подробнее о лимитах — в <Link href="/admin/outreach/warmup">«Прогреве»</Link>.</p>
       <h2>Когда начать</h2>
-      <label className={styles.field}>Дата и время старта (пусто — сразу после «Запустить»)
+      <label className={styles.field}>Дата и время старта — по вашему времени (пусто — сразу после «Запустить»)
         <input type="datetime-local" value={start} onChange={(e) => setStart(e.target.value)} />
-        <small>Письма уходят только в окно отправки цепочки (по умолчанию будни 10:00–18:00).</small>
+        <small>Дальше письма уходят только в окно «Когда отправлять» выше — по времени получателей.</small>
       </label>
       <div className={styles.actions}><button type="button" className={styles.primary} disabled={!changed} onClick={save}>Сохранить</button></div>
     </section>

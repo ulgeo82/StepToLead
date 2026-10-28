@@ -6,6 +6,7 @@ export type CampaignStats = {
 export type Campaign = {
   id: number; name: string; status: "draft" | "active" | "paused" | "done"; sequence_id: number; steps: number;
   mailbox_ids: number[]; variables: string[]; start_at: string | null; created_at: string | null;
+  window: { tz: string; start_hour: number; end_hour: number; weekdays: number[]; gap_minutes: number; daily_new: number };
   stats: CampaignStats | null;
 };
 export type Column = { index: number; header: string; sample: string[]; filled: number; field: string; var?: string };
@@ -25,6 +26,12 @@ export type Check = {
   daily_capacity: number; days_estimate: number | null;
 };
 
+export const WEEKDAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+export function scheduleText(w: Campaign["window"], zoneName?: string): string {
+  const days = [...w.weekdays].sort().join(",") === "0,1,2,3,4" ? "Пн–Пт" : w.weekdays.length === 7 ? "каждый день"
+    : [...w.weekdays].sort().map((d) => WEEKDAYS[d]).join(", ");
+  return `${days}, ${w.start_hour}:00–${w.end_hour}:00 · ${zoneName || w.tz}`;
+}
 export const STATUS: Record<Campaign["status"], { name: string; tone: "fitYes" | "fitMaybe" | "fitNo" | "" }> = {
   draft: { name: "Черновик", tone: "" },
   active: { name: "Идёт", tone: "fitYes" },

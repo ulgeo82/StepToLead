@@ -248,3 +248,32 @@ class InboxCampaignTests(CampaignApiTests):
             deal = await db.get(CrmDeal, crm["crm_deal_id"])
             return (await db.get(CrmStage, deal.stage_id)).name
         self.assertIn(self.run_db(stage), ("Ответил", "Интерес"))
+
+
+class CampaignWindowTests(CampaignApiTests):
+    def test_schedule_in_recipients_timezone(self):
+        b = self.base
+        mb = self.run_db(lambda db: _add(db, box("egor@team-a.ru")))
+        c = self.client.post(f"{b}/campaigns", headers=ORIGIN, json={"name": "США", "mailbox_ids": [mb.id]}).json()
+        self.assertEqual(c["window"]["tz"], "Europe/Moscow")
+        r = self.client.patch(f"{b}/campaigns/{c['id']}", headers=ORIGIN, json={"window": {
+            "tz": "America/New_York", "start_hour": 9, "end_hour": 17, "weekdays": [0, 1, 2, 3, 4], "gap_minutes": 5}})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual((r.json()["window"]["tz"], r.json()["window"]["start_hour"]), ("America/New_York", 9))
+        bad = self.client.patch(f"{b}/campaigns/{c['id']}", headers=ORIGIN, json={"window": {"tz": "Mars/Olympus"}})
+        self.assertEqual(bad.status_code, 422)
+
+        async def enroll(db):
+            from datetime import datetime, timezone
+            from zoneinfo import ZoneInfo
+            camp = await db.get(LgCampaign, c["id"])
+            seq = await db.get(LgSequence, camp.sequence_id)
+            comp = (await service.upsert_company(db, 7, service.FindingIn(
+                source="import", name="NY", domain="ny-test.com", contacts=[{"kind": "email", "value": "info@ny-test.com"}]),
+                now=NOW)).company
+            await sequences.enroll(db, seq, comp, now=NOW, campaign=camp)
+            enr = await db.scalar(select(LgEnrollment).where(LgEnrollment.campaign_id == camp.id))
+            return service._aware(enr.next_at).astimezone(ZoneInfo("America/New_York"))
+        local = self.run_db(enroll)
+        # NOW = среда 15:00 МСК = 08:00 в Нью-Йорке -> первое письмо в 09:00 по Нью-Йорку, не ночью
+        self.assertEqual((local.hour, local.minute), (9, 0))

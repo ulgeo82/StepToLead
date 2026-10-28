@@ -939,6 +939,11 @@ class SequenceIn(BaseModel):
     is_active: bool = True
 
 
+def window_out(window) -> dict:
+    return {"tz": window.tz, "start_hour": window.start_hour, "end_hour": window.end_hour, "weekdays": list(window.weekdays),
+            "gap_minutes": window.gap_minutes, "daily_new": window.daily_new}
+
+
 def validate_sequence(payload: SequenceIn, extra: list | tuple = ()) -> tuple[list, dict]:
     try:
         steps = seq_core.parse_steps(payload.steps, extra=extra)
@@ -1679,6 +1684,7 @@ class CampaignPatch(BaseModel):
     start_at: datetime | None = None
     clear_start: bool = False
     status: str | None = Field(default=None, pattern="^(active|paused|done)$")
+    window: dict | None = None   # расписание: часовой пояс получателей, дни, часы, пауза, новых в день
 
 
 class CampaignCompaniesIn(BaseModel):
@@ -1726,6 +1732,21 @@ async def patch_campaign(campaign_id: int, payload: CampaignPatch, db: AsyncSess
         row.name = payload.name.strip()
     if payload.mailbox_ids is not None:
         row.mailbox_ids = await campaigns.valid_mailboxes(db, row.workspace_id, payload.mailbox_ids)
+    if payload.window is not None:
+        seq = await db.get(LgSequence, row.sequence_id)
+        try:
+            window = seq_core.parse_window({**(seq.window or {}), **payload.window})
+        except seq_core.SequenceError as exc:
+            raise HTTPException(422, str(exc))
+        seq.window = window_out(window)
+        # Ждущие письма пересчитываем под новое окно: иначе они уйдут по старому расписанию.
+        for enr in (await db.scalars(select(LgEnrollment).where(LgEnrollment.campaign_id == row.id,
+                                                                 LgEnrollment.status == "active"))).all():
+            if enr.current_step == 0:   # первое письмо ещё не ушло — ставим в ближайшее окно по новому времени
+                start = max(service.utcnow(), service._aware(row.start_at)) if row.start_at else service.utcnow()
+                enr.next_at = seq_core.in_window(start, window)
+            elif enr.next_at:
+                enr.next_at = seq_core.in_window(service._aware(enr.next_at), window)
     if payload.clear_start:
         row.start_at = None
     elif payload.start_at is not None:

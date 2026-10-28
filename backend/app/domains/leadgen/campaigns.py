@@ -366,6 +366,7 @@ def iso(value: datetime | None) -> str | None:
 async def row(db: AsyncSession, campaign: LgCampaign, with_stats: bool = True) -> dict:
     seq = await db.get(LgSequence, campaign.sequence_id)
     return {"id": campaign.id, "name": campaign.name, "status": campaign.status, "sequence_id": campaign.sequence_id,
+            "window": {**DEFAULT_WINDOW, **(seq.window or {})} if seq else DEFAULT_WINDOW,
             "steps": len(seq.steps or []) if seq else 0, "mailbox_ids": campaign.mailbox_ids or [],
             "variables": campaign.variables or [], "start_at": iso(campaign.start_at), "created_at": iso(campaign.created_at),
             "stats": await stats(db, campaign) if with_stats else None}

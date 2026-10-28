@@ -16,6 +16,7 @@ import {
   statusNames,
   Step,
   stopReasons,
+  timezoneGroups,
   timezones,
   Window,
 } from "./types";
@@ -551,15 +552,19 @@ function EmailPage() {
             <h3>Окно отправки</h3>
             <div className={styles.fields}>
               <label className={styles.field}>
-                Часовой пояс
+                Часовой пояс получателей
                 <select value={window.tz} onChange={(e) => setWindow({ ...window, tz: e.target.value })}>
                   {!timezones.some(([tz]) => tz === window.tz) && (
                     <option value={window.tz}>{window.tz}</option>
                   )}
-                  {timezones.map(([tz, label]) => (
-                    <option key={tz} value={tz}>
-                      {label}
-                    </option>
+                  {timezoneGroups.map(([group, zones]) => (
+                    <optgroup key={group} label={group}>
+                      {zones.map(([tz, label]) => (
+                        <option key={tz} value={tz}>
+                          {label}
+                        </option>
+                      ))}
+                    </optgroup>
                   ))}
                 </select>
                 {fieldError("window")}
