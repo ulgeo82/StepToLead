@@ -99,9 +99,12 @@ class CampaignApiTests(FlowBase):
         seq_payload = {"name": "x", "steps": STEPS, "window": {"tz": "Europe/Moscow", "gap_minutes": 0}}
         self.assertEqual(self.client.put(f"{b}/sequences/{c['sequence_id']}", headers=ORIGIN, json=seq_payload).status_code, 200)
         self.assertEqual(self.client.put(f"{b}/sequences/{tpl['id']}", headers=ORIGIN, json=seq_payload).status_code, 422)
+        seq_payload["steps"][0]["body"] += "\n{{sender_name}}"
+        self.client.put(f"{b}/sequences/{c['sequence_id']}", headers=ORIGIN, json=seq_payload)
         check = self.client.get(f"{b}/campaigns/{c['id']}/check").json()
         self.assertEqual(check["leads"], 2)
-        self.assertEqual(check["missing"], [])   # у всех переменных есть значение по умолчанию
+        self.assertEqual(check["missing"], [])   # sender_name берётся из ящика — не ложная тревога
+        self.assertEqual(check["problems"], [])
         self.assertEqual(self.client.patch(f"{b}/campaigns/{c['id']}", headers=ORIGIN, json={"status": "active"}).json()["status"], "active")
 
         leads = self.client.get(f"{b}/campaigns/{c['id']}/leads").json()

@@ -1864,6 +1864,9 @@ async def campaign_check(campaign_id: int, db: AsyncSession = Depends(get_db), a
                     used[name.lower()] = True
     enrollments = (await db.scalars(select(LgEnrollment).where(LgEnrollment.campaign_id == row.id,
                                                                LgEnrollment.status == "active"))).all()
+    boxes = (await db.scalars(select(LgMailbox).where(LgMailbox.id.in_(row.mailbox_ids or [-1])))).all()
+    # Имя отправителя берётся из ящика, который закрепится за лидом при первом письме — проверяем по ящикам.
+    sender_used = used.pop("sender_name", False)
     missing: dict[str, int] = {}
     for enr in enrollments[:2000]:
         company, ctx = await lead_context(db, enr.id)
@@ -1873,9 +1876,12 @@ async def campaign_check(campaign_id: int, db: AsyncSession = Depends(get_db), a
     problems = []
     if not row.mailbox_ids:
         problems.append("Не выбраны ящики для рассылки")
+    if sender_used:
+        unnamed = [unicode_email(b.email) for b in boxes if not (b.sender_name or "").strip()]
+        if unnamed:
+            problems.append("В письмах есть {{sender_name}}, но у ящиков не указано имя отправителя: " + ", ".join(unnamed))
     from app.domains.leadgen import warmup
     today = service.utcnow().date()
-    boxes = (await db.scalars(select(LgMailbox).where(LgMailbox.id.in_(row.mailbox_ids or [-1])))).all()
     capacity = sum(warmup.cold_limit(mb, today) for mb in boxes if mb.is_active)
     return {"leads": len(enrollments), "missing": [{"variable": k, "leads": v} for k, v in sorted(missing.items())],
             "problems": problems, "daily_capacity": capacity,
