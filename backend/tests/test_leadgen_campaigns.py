@@ -239,8 +239,16 @@ class InboxCampaignTests(CampaignApiTests):
         r = self.client.post(f"{b}/inbox/{item['id']}/reply", headers=ORIGIN,
                              json={"body": "Спасибо! Подключаю рабочую почту.", "cc": "Egor@SteptoLead.ru"}).json()
         self.assertEqual(t.sent[-1].cc, "egor@steptolead.ru")
+        handed = t.sent[-1].body
+        self.assertTrue(handed.startswith("Спасибо! Подключаю рабочую почту."))
+        self.assertIn("Предыдущая переписка", handed)
+        self.assertIn("> Интересно, пришлите условия", handed)              # ответ лида
+        self.assertIn("> Здравствуйте, коллеги! Про боль 0.", handed)        # наше первое письмо
+        self.assertLess(handed.index("пришлите условия"), handed.index("Про боль 0"))   # новые сверху
+        self.assertIn("info@c0.ru", handed)
         self.assertIn("Cc", str(sequences.build_message(t.sent[-1])))
         self.assertEqual(r["item"]["thread"][-1]["cc"], "egor@steptolead.ru")
+        self.assertEqual(r["item"]["thread"][-1]["body"], "Спасибо! Подключаю рабочую почту.")   # в портале — без цитаты
         crm = self.client.post(f"{b}/inbox/{item['id']}/to-crm", headers=ORIGIN).json()
         self.assertIsNotNone(crm["crm_deal_id"])
         from app.models.crm import CrmDeal, CrmStage

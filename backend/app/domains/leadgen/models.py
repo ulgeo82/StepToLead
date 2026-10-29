@@ -213,6 +213,8 @@ class LgDnc(Base):
     kind: Mapped[str] = mapped_column(String(16))  # company / domain / email / phone / telegram
     value_norm: Mapped[str] = mapped_column(String(300))
     reason: Mapped[str] = mapped_column(String(16))  # unsubscribed / refused / client / competitor / bounced / legal
+    # Стоп-лист клиента: отписались от писем этого клиента. NULL — агентства. bounced / legal действуют для всех.
+    client_project_id: Mapped[int | None] = mapped_column(Integer, index=True)
     note: Mapped[str | None] = mapped_column(Text)
     until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_by_id: Mapped[int | None] = mapped_column(ForeignKey("admin_users.id", ondelete="SET NULL"))
@@ -252,6 +254,8 @@ class LgMailbox(Base):
     cold_paused_reason: Mapped[str | None] = mapped_column(String(300))
     warmup_error: Mapped[str | None] = mapped_column(String(500))
     imap_failing_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))   # с какого момента нет входа по IMAP
+    # Ящик клиента (аутрич как услуга): свои домены клиента, в кампаниях других клиентов и агентства не используется.
+    client_project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id", ondelete="SET NULL"), index=True)
 
 
 class LgWarmupMail(Base):
@@ -305,6 +309,11 @@ class LgCampaign(Base):
     mailbox_ids: Mapped[list] = mapped_column(JSON, default=list)
     variables: Mapped[list] = mapped_column(JSON, default=list)   # свои переменные из столбцов файла
     start_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Для клиента: лиды с интересом уходят в CRM его проекта (воронка «Аутрич») с задачей на ответственного.
+    client_project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id", ondelete="SET NULL"), index=True)
+    responsible_user_id: Mapped[int | None] = mapped_column(ForeignKey("portal_users.id", ondelete="SET NULL"))
+    handoff_cc: Mapped[str | None] = mapped_column(String(254))   # почта менеджера клиента для передачи переписки
+    auto_handoff: Mapped[bool] = mapped_column(Boolean, default=True)
     created_by_id: Mapped[int | None] = mapped_column(ForeignKey("admin_users.id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -331,6 +340,8 @@ class LgEnrollment(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     campaign_id: Mapped[int | None] = mapped_column(ForeignKey("lg_campaigns.id", ondelete="CASCADE"), index=True)
     vars: Mapped[dict | None] = mapped_column(JSON)   # переменные лида из файла: {"company": ..., "боль": ...}
+    client_deal_id: Mapped[int | None] = mapped_column(ForeignKey("crm_deals.id", ondelete="SET NULL"))   # сделка у клиента
+    client_handed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 

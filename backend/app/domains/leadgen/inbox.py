@@ -136,6 +136,9 @@ async def classify(db: AsyncSession, touch: LgTouch, *, complete=None) -> dict:
     if company is not None and result["label"] in ("interested", "question"):
         from app.domains.leadgen import hot
         await hot.mark(db, touch, company, score=result["score"], signals=result["signals"])
+    if company is not None:
+        from app.domains.leadgen import client_outreach
+        await client_outreach.after_reply(db, touch, company, append=False)
     return {"status": "done", **result}
 
 
@@ -193,6 +196,20 @@ async def touch_or_none(db: AsyncSession, workspace_id: int, touch_id: int) -> t
     return (row[0], row[1]) if row else None
 
 
+async def _client_name(db: AsyncSession, project_id: int | None) -> str | None:
+    if not project_id:
+        return None
+    from app.domains.leadgen.campaigns import client_info
+    info = await client_info(db, project_id)
+    return info["name"] if info else None
+
+
+async def _client_deal(db: AsyncSession, campaign: LgCampaign, company: LgCompany) -> int | None:
+    return await db.scalar(select(LgEnrollment.client_deal_id).where(
+        LgEnrollment.campaign_id == campaign.id, LgEnrollment.company_id == company.id,
+        LgEnrollment.client_deal_id.is_not(None)).limit(1))
+
+
 async def row_out(db: AsyncSession, touch: LgTouch, company: LgCompany, *, full: bool = False) -> dict:
     mailbox = await db.get(LgMailbox, touch.mailbox_id) if touch.mailbox_id else None
     sequence = await db.get(LgSequence, touch.campaign_id) if touch.campaign_kind in ("sequence", "manual_reply") and touch.campaign_id else None
@@ -206,7 +223,9 @@ async def row_out(db: AsyncSession, touch: LgTouch, company: LgCompany, *, full:
            "domain": company.domain, "stage": company.stage, "score": company.score, "fit_label": company.fit_label,
            "crm_deal_id": company.crm_deal_id, "address": touch.address, "mailbox_id": touch.mailbox_id,
            "mailbox": mailbox.email if mailbox else None, "sequence": sequence.name if sequence and not campaign else None,
-           "campaign": {"id": campaign.id, "name": campaign.name} if campaign else None,
+           "campaign": {"id": campaign.id, "name": campaign.name, "handoff_cc": campaign.handoff_cc,
+                        "client": await _client_name(db, campaign.client_project_id)} if campaign else None,
+           "client_deal_id": await _client_deal(db, campaign, company) if campaign and campaign.client_project_id else None,
            "subject": touch.subject, "snippet": re.sub(r"\s+", " ", body)[:240], "label": touch.label,
            "label_name": LABEL_NAMES.get(touch.label or "", None), "label_source": touch.label_source,
            "summary": touch.summary, "handled": touch.handled_at is not None,
@@ -286,11 +305,13 @@ async def _task(db: AsyncSession, company: LgCompany, type_code: str, title: str
 
 
 async def _add_dnc(db: AsyncSession, workspace_id: int, kind: str, value: str, reason: str,
-                   until: datetime | None, note: str) -> None:
+                   until: datetime | None, note: str, client_project_id: int | None = None) -> None:
+    scope = LgDnc.client_project_id == client_project_id if client_project_id else LgDnc.client_project_id.is_(None)
     row = await db.scalar(select(LgDnc).where(LgDnc.workspace_id == workspace_id, LgDnc.kind == kind,
-                                              LgDnc.value_norm == value))
+                                              LgDnc.value_norm == value, scope))
     if row is None:
-        db.add(LgDnc(workspace_id=workspace_id, kind=kind, value_norm=value, reason=reason, until=until, note=note))
+        db.add(LgDnc(workspace_id=workspace_id, kind=kind, value_norm=value, reason=reason, until=until, note=note,
+                     client_project_id=client_project_id))
 
 
 async def _stop_enrollments(db: AsyncSession, company: LgCompany, reason: str, now: datetime) -> None:
@@ -321,6 +342,11 @@ async def apply_label(db: AsyncSession, touch: LgTouch, company: LgCompany, labe
     if touch.hot_at and label != "interested":
         from app.domains.leadgen import hot
         await hot.cool(db, touch, company, now)  # ИИ ошибся: снимаем задачу «Связаться» и этап «Интерес»
+    from app.domains.leadgen import client_outreach
+    campaign = await client_outreach.campaign_of(db, touch)
+    client = campaign.client_project_id if campaign is not None else None
+    if client:
+        return await _apply_client(db, touch, company, label, client, excerpt, remind_days, now)
     if label == "interested" and touch.hot_task_id:
         await db.flush()
         return Applied(touch.hot_task_id, "task:call")  # задача уже создана триггером — не дублируем
@@ -355,6 +381,38 @@ async def apply_label(db: AsyncSession, touch: LgTouch, company: LgCompany, labe
     return Applied()
 
 
+async def _apply_client(db: AsyncSession, touch: LgTouch, company: LgCompany, label: str, client: int,
+                        excerpt: str, remind_days: int | None, now: datetime) -> Applied:
+    """Метка в кампании клиента: задачи и сделка — в CRM клиента, стоп-лист — клиентский, этапы базы не трогаем."""
+    from app.domains.leadgen import client_outreach
+    if label == "interested":
+        done = await client_outreach.hand_to_client(db, touch, company, manual=True, now=now)
+        await db.flush()
+        return Applied(None, "client:handed" if done.ok else f"client:{done.reason}")
+    if label == "later":
+        await _stop_enrollments(db, company, "later", now)
+        await db.flush()
+        return Applied(None, f"later:{remind_days or LATER_DEFAULT_DAYS}")
+    if label in ("not_interested", "unsubscribe"):
+        await _stop_enrollments(db, company, "unsubscribed" if label == "unsubscribe" else "refused", now)
+        if label == "unsubscribe":
+            if touch.address:
+                await _add_dnc(db, company.workspace_id, "email", touch.address.lower(), "unsubscribed", None,
+                               "Входящие: просили не писать", client)
+            await _add_dnc(db, company.workspace_id, "company", str(company.id), "unsubscribed", None,
+                           "Входящие: просили не писать", client)
+        else:
+            await _add_dnc(db, company.workspace_id, "company", str(company.id), "refused",
+                           now + timedelta(days=outreach.REFUSAL_DNC_DAYS), "Входящие: отказ", client)
+        enr = await client_outreach.enrollment_of(db, touch, company)
+        if enr is not None:
+            await client_outreach.close_deal(db, enr, f"Отказ по почте: «{excerpt}»", now)
+        await db.flush()
+        return Applied(None, "closed")
+    await db.flush()
+    return Applied()
+
+
 # ---------------------------------------------------------------- ответ из портала
 
 async def reply_blocker(db: AsyncSession, touch: LgTouch, company: LgCompany) -> str | None:
@@ -376,6 +434,37 @@ class ReplyError(Exception):
         self.status = status
 
 
+async def thread_quote(db: AsyncSession, touch: LgTouch, company: LgCompany) -> str:
+    """Вся предыдущая переписка с лидом в виде цитаты (новые письма сверху) — для передачи на другую почту:
+    тот, кого ставим в копию, видит историю целиком, а не одно последнее письмо."""
+    from zoneinfo import ZoneInfo
+    from app.domains.leadgen.routes import unicode_email
+    q = select(LgTouch).where(LgTouch.company_id == company.id, LgTouch.channel == "email",
+                              LgTouch.status.in_(("sent", "delivered", "replied", "received", "auto", "unsubscribed")) |
+                              (LgTouch.direction == "in"))
+    q = q.where(LgTouch.sequence_id == touch.sequence_id) if touch.sequence_id else q
+    rows = (await db.scalars(q.order_by(LgTouch.happened_at.desc(), LgTouch.id.desc()).limit(30))).all()
+    boxes: dict[int, LgMailbox] = {}
+    parts = []
+    for t in rows:
+        if t.direction == "out" and t.status not in ("sent", "delivered", "replied"):
+            continue
+        if t.direction == "out":
+            mb = boxes.get(t.mailbox_id) or (await db.get(LgMailbox, t.mailbox_id) if t.mailbox_id else None)
+            if mb:
+                boxes[mb.id] = mb
+            who = f"{mb.sender_name or ''} <{unicode_email(mb.email)}>".strip() if mb else "StepToLead"
+        else:
+            who = t.address or (company.display_name or "")
+        when = service._aware(t.happened_at).astimezone(ZoneInfo("Europe/Moscow")).strftime("%d.%m.%Y, %H:%M") if t.happened_at else ""
+        from app.domains.leadgen.core import sequence as core
+        text = clean_body(t.body)
+        text = core.to_plain(text) if core.has_markup(text) else text
+        head = f"{when}, {who}:" + (f"\nТема: {t.subject}" if t.subject else "")
+        parts.append(head + "\n" + "\n".join("> " + line if line else ">" for line in text.splitlines()))
+    return ("\n\n-------- Предыдущая переписка --------\n\n" + "\n\n".join(parts)) if parts else ""
+
+
 async def send_reply(db: AsyncSession, transport, touch: LgTouch, company: LgCompany, body: str, *,
                      user_id: int | None = None, now: datetime | None = None, cc: str | None = None) -> LgTouch:
     """Ответ лиду из «Входящих». cc — передать переписку на другой адрес (например, основную рабочую почту):
@@ -390,7 +479,10 @@ async def send_reply(db: AsyncSession, transport, touch: LgTouch, company: LgCom
     subject = touch.subject or ""
     subject = subject if re.match(r"^\s*re\s*:", subject, re.I) else f"Re: {subject}".strip()
     message_id = make_msgid(domain=mailbox.email.split("@")[-1])
-    mail = OutgoingMail(mailbox.email, mailbox.sender_name, touch.address, subject[:300], body, message_id,
+    # Передача на другую почту: под ответом — вся ветка, чтобы адресат в копии видел историю. В портале
+    # (в переписке) сохраняем только сам ответ — история там и так видна.
+    outgoing = body + (await thread_quote(db, touch, company) if cc else "")
+    mail = OutgoingMail(mailbox.email, mailbox.sender_name, touch.address, subject[:300], outgoing, message_id,
                         touch.external_id, cc=cc or None)
     try:
         await transport.send(mailbox, decrypt_secret(mailbox.password_encrypted), mail)

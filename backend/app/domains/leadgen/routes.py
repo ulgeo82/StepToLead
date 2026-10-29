@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 
 from zoneinfo import ZoneInfo
 from datetime import datetime, timezone
@@ -23,6 +24,7 @@ from app.domains.leadgen import (
 from app.domains.leadgen.core import table_import
 from app.domains.leadgen.core import sequence as seq_core
 from app.domains.leadgen.models import LgCampaign, LgEnrollment, LgMailbox, LgSequence
+from app.domains.leadgen import campaigns as campaigns_mod
 from app.core.crypto import encrypt_secret
 from app.domains.leadgen.core.normalize import display_domain, normalize_domain, normalize_phone
 from app.domains.leadgen.models import (
@@ -784,6 +786,7 @@ class MailboxIn(BaseModel):
     daily_limit: int = Field(default=45, ge=1, le=200)   # холодных в день на пике (после 28 дней прогрева)
     warmup: bool = True  # новый ящик: 5 → 10 → 20 писем в день первые три недели
     role: str = Field(default="outreach", pattern="^(outreach|helper)$")  # helper — только для прогрева
+    client_project_id: int | None = None   # ящик на домене клиента — пишет только в его кампаниях
 
 
 class MailboxPatch(BaseModel):
@@ -795,6 +798,8 @@ class MailboxPatch(BaseModel):
     role: str | None = Field(default=None, pattern="^(outreach|helper)$")
     warmup_enabled: bool | None = None
     warmup_target: int | None = Field(default=None, ge=20, le=120)   # всего писем в день на пике
+    client_project_id: int | None = None
+    clear_client: bool = False
 
 
 def ascii_email(value: str) -> str:
@@ -828,7 +833,16 @@ async def mailbox_row(db: AsyncSession, mb: LgMailbox) -> dict:
             "daily_limit": mb.daily_limit, "warmup_started_on": mb.warmup_started_on.isoformat() if mb.warmup_started_on else None,
             "is_active": mb.is_active, "sent_today": sent, "left_today": left, "last_error": mb.last_error,
             "last_checked_at": iso(mb.last_checked_at), "role": mb.role, "warmup_enabled": mb.warmup_enabled,
-            "health": mb.health, "cold_paused": bool(mb.cold_paused_at)}
+            "health": mb.health, "cold_paused": bool(mb.cold_paused_at),
+            "client": await campaigns_mod.client_info(db, mb.client_project_id)}
+
+
+async def client_project_or_422(db: AsyncSession, project_id: int):
+    from app.models.marketing import Project
+    project = await db.get(Project, project_id)
+    if project is None or project.workspace_id == workspace_id():
+        raise HTTPException(422, "Клиент не найден")
+    return project
 
 
 async def mailbox_or_404(db: AsyncSession, mailbox_id: int) -> LgMailbox:
@@ -859,6 +873,10 @@ async def create_mailbox(payload: MailboxIn, db: AsyncSession = Depends(get_db),
                    login=ascii_email(payload.login) if payload.login and "@" in payload.login else (payload.login or email_).strip(), password_encrypted=encrypt_secret(payload.password),
                    daily_limit=payload.daily_limit, warmup_started_on=service.utcnow().astimezone(ZoneInfo("Europe/Moscow")).date() if payload.warmup or helper else None,
                    is_active=True, role=payload.role, warmup_enabled=True, warmup_target=70)
+    if payload.client_project_id:
+        if helper:
+            raise HTTPException(422, "Ящик-помощник не привязывают к клиенту")
+        mb.client_project_id = (await client_project_or_422(db, payload.client_project_id)).id
     db.add(mb)
     await db.commit()
     return await mailbox_row(db, mb)
@@ -872,6 +890,17 @@ async def patch_mailbox(mailbox_id: int, payload: MailboxPatch, db: AsyncSession
     if "password" in data:
         mb.password_encrypted = encrypt_secret(data.pop("password"))
         mb.last_error = None
+    new_owner = mb.client_project_id
+    if data.pop("clear_client", False):
+        new_owner = None
+    if "client_project_id" in data:
+        new_owner = (await client_project_or_422(db, data.pop("client_project_id"))).id
+    if new_owner != mb.client_project_id:
+        # Ящик меняет владельца — убираем его из кампаний прежнего владельца.
+        for camp in (await db.scalars(select(LgCampaign).where(LgCampaign.workspace_id == mb.workspace_id))).all():
+            if mb.id in (camp.mailbox_ids or []):
+                camp.mailbox_ids = [i for i in camp.mailbox_ids if i != mb.id]
+        mb.client_project_id = new_owner
     for key, value in data.items():
         setattr(mb, key, value)
     await db.commit()
@@ -1354,6 +1383,40 @@ async def inbox_reply(touch_id: int, payload: InboxReply, db: AsyncSession = Dep
     return {"ok": True, "touch_id": out.id, "item": await inbox.row_out(db, touch, company, full=True)}
 
 
+@router.post("/inbox/{touch_id}/to-client")
+async def inbox_to_client(touch_id: int, db: AsyncSession = Depends(get_db), admin: AdminUser = Depends(require_admin)):
+    """«Передать клиенту»: лид из кампании клиента -> сделка и задача «Связаться» в CRM клиента."""
+    from app.domains.leadgen import client_outreach
+    touch, company = await inbox_touch_or_404(db, touch_id)
+    handed = await client_outreach.hand_to_client(db, touch, company, manual=True)
+    if not handed.ok:
+        raise HTTPException(409, {"not_client_campaign": "Это не кампания клиента",
+                                  "no_enrollment": "Не нашли лида в кампании",
+                                  "no_project": "Проект клиента не найден"}.get(handed.reason or "", "Не удалось передать"))
+    touch.handled_at = touch.handled_at or service.utcnow()
+    await db.commit()
+    return await inbox.row_out(db, touch, company, full=True)
+
+
+@router.get("/clients")
+async def outreach_clients(db: AsyncSession = Depends(get_db), admin: AdminUser = Depends(require_admin)):
+    """Клиенты агентства (проекты) — для кого можно вести рассылку, и их команда — кому ставить задачи."""
+    from app.models.marketing import ClientWorkspace, PortalUser, Project
+    rows = (await db.execute(select(Project, ClientWorkspace.name).join(
+        ClientWorkspace, ClientWorkspace.id == Project.workspace_id).where(
+        Project.workspace_id != workspace_id(), Project.status == "active",
+        ClientWorkspace.status == "active").order_by(ClientWorkspace.name, Project.name))).all()
+    ws_ids = sorted({p.workspace_id for p, _ in rows})
+    users = (await db.scalars(select(PortalUser).where(PortalUser.workspace_id.in_(ws_ids or [-1]),
+                                                       PortalUser.is_agency.is_(False))
+                              .order_by(PortalUser.display_name))).all() if ws_ids else []
+    team: dict[int, list] = {}
+    for u in users:
+        team.setdefault(u.workspace_id, []).append({"id": u.id, "name": u.display_name, "role": u.role})
+    return {"items": [{"project_id": p.id, "project": p.name, "workspace_id": p.workspace_id, "name": name,
+                       "team": team.get(p.workspace_id, [])} for p, name in rows]}
+
+
 @router.post("/inbox/{touch_id}/to-crm")
 async def inbox_to_crm(touch_id: int, db: AsyncSession = Depends(get_db), admin: AdminUser = Depends(require_admin)):
     """Вручную завести ответившего лида в CRM (воронка «Аутрич»): сделка сразу на «Ответил» или «Интерес»."""
@@ -1683,6 +1746,7 @@ class CampaignIn(BaseModel):
     name: str = Field(min_length=2, max_length=180)
     template_sequence_id: int | None = None
     mailbox_ids: list[int] = Field(default_factory=list, max_length=50)
+    client_project_id: int | None = None   # None — рассылка агентства
 
 
 class CampaignPatch(BaseModel):
@@ -1693,6 +1757,10 @@ class CampaignPatch(BaseModel):
     clear_start: bool = False
     status: str | None = Field(default=None, pattern="^(active|paused|done)$")
     window: dict | None = None   # расписание: часовой пояс получателей, дни, часы, пауза, новых в день
+    responsible_user_id: int | None = None
+    clear_responsible: bool = False
+    handoff_cc: str | None = Field(default=None, max_length=254)   # "" — убрать
+    auto_handoff: bool | None = None
 
 
 class CampaignCompaniesIn(BaseModel):
@@ -1719,8 +1787,9 @@ async def list_campaigns(db: AsyncSession = Depends(get_db), admin: AdminUser = 
 async def create_campaign(payload: CampaignIn, db: AsyncSession = Depends(get_db), admin: AdminUser = Depends(require_admin)):
     from app.domains.leadgen import campaigns
     template = await sequence_or_404(db, payload.template_sequence_id) if payload.template_sequence_id else None
+    client = (await client_project_or_422(db, payload.client_project_id)).id if payload.client_project_id else None
     row = await campaigns.create(db, workspace_id(), name=payload.name.strip(), template=template,
-                                 mailbox_ids=payload.mailbox_ids, user_id=admin.id)
+                                 mailbox_ids=payload.mailbox_ids, user_id=admin.id, client_project_id=client)
     await db.commit()
     return await campaigns.row(db, row)
 
@@ -1739,7 +1808,23 @@ async def patch_campaign(campaign_id: int, payload: CampaignPatch, db: AsyncSess
     if payload.name:
         row.name = payload.name.strip()
     if payload.mailbox_ids is not None:
-        row.mailbox_ids = await campaigns.valid_mailboxes(db, row.workspace_id, payload.mailbox_ids)
+        row.mailbox_ids = await campaigns.valid_mailboxes(db, row.workspace_id, payload.mailbox_ids, row.client_project_id)
+    if payload.clear_responsible:
+        row.responsible_user_id = None
+    elif payload.responsible_user_id is not None:
+        from app.models.marketing import PortalUser, Project
+        user = await db.get(PortalUser, payload.responsible_user_id)
+        project = await db.get(Project, row.client_project_id) if row.client_project_id else None
+        if user is None or project is None or user.workspace_id != project.workspace_id:
+            raise HTTPException(422, "Ответственный должен быть из команды клиента")
+        row.responsible_user_id = user.id
+    if payload.handoff_cc is not None:
+        cc = payload.handoff_cc.strip().lower()
+        if cc and not re.fullmatch(r"[^@\s,;]+@[^@\s,;]+\.[^@\s,;]+", cc):
+            raise HTTPException(422, "Почта для копии указана неверно")
+        row.handoff_cc = cc or None
+    if payload.auto_handoff is not None:
+        row.auto_handoff = payload.auto_handoff
     if payload.window is not None:
         seq = await db.get(LgSequence, row.sequence_id)
         try:

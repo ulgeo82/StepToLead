@@ -234,8 +234,11 @@ async def add_signal(db: AsyncSession, company: LgCompany, kind: str, *, key: st
     return signal
 
 
-async def _active_dnc(db: AsyncSession, workspace_id: int, now: datetime) -> list[DncEntry]:
-    rows = (await db.execute(select(LgDnc).where(LgDnc.workspace_id == workspace_id))).scalars().all()
+async def _active_dnc(db: AsyncSession, workspace_id: int, now: datetime,
+                      client_project_id: int | None = None) -> list[DncEntry]:
+    scope = (LgDnc.client_project_id == client_project_id) if client_project_id else LgDnc.client_project_id.is_(None)
+    rows = (await db.execute(select(LgDnc).where(LgDnc.workspace_id == workspace_id,
+                                                 scope | LgDnc.reason.in_(GLOBAL_DNC_REASONS)))).scalars().all()
     entries = [DncEntry(r.kind, r.value_norm, _aware(r.until)) for r in rows]
     return [e for e in entries if e.active(now)]
 
@@ -332,8 +335,14 @@ async def merge_companies(db: AsyncSession, keep_id: int, drop_id: int, *, reaso
 
 # ---------------------------------------------------------------- можно ли писать
 
+GLOBAL_DNC_REASONS = ("bounced", "legal")   # недействительный адрес и юридический запрет — для всех отправителей
+
+
 async def check_can_contact(db: AsyncSession, company_id: int, contact_id: int | None, channel: str, *,
-                            sequence_id: str | None = None, now: datetime | None = None) -> Decision:
+                            sequence_id: str | None = None, now: datetime | None = None,
+                            client_project_id: int | None = None) -> Decision:
+    """client_project_id — пишем от имени клиента: действует его стоп-лист (+ общие запреты), а решения агентства
+    по компании (скрыта, отказала агентству, наш клиент, сделка в нашей CRM) письмам клиента не мешают."""
     now = now or utcnow()
     settings = await get_settings(db)
     company = await db.get(LgCompany, company_id)
@@ -360,8 +369,9 @@ async def check_can_contact(db: AsyncSession, company_id: int, contact_id: int |
     last_touch_at = _aware(last_out[0]) if last_out else None
     active_sequence = last_out[1] if last_out and company.stage == "in_outreach" else None
 
-    state = CompanyState(id=str(company.id), stage=company.stage, domain=company.domain,
-                         has_open_sales_deal=has_open_sales_deal, is_client=company.stage == "converted",
+    state = CompanyState(id=str(company.id), stage="ready" if client_project_id else company.stage, domain=company.domain,
+                         has_open_sales_deal=False if client_project_id else has_open_sales_deal,
+                         is_client=False if client_project_id else company.stage == "converted",
                          last_touch_at=last_touch_at, active_sequence_id=active_sequence)
     contact_state = None
     has_shared = True
@@ -374,7 +384,7 @@ async def check_can_contact(db: AsyncSession, company_id: int, contact_id: int |
             LgContact.company_id == company.id, LgContact.kind.in_(kinds),
             LgContact.is_personal.is_(False), LgContact.verify_status != "invalid",
             LgContact.bounced.is_(False))))
-    dnc = await _active_dnc(db, company.workspace_id, now)
+    dnc = await _active_dnc(db, company.workspace_id, now, client_project_id=client_project_id)
     return can_contact(state, contact_state, channel, dnc=dnc, now=now,
                        recontact_days=int(settings["recontact_days"]),
                        has_shared_channel=has_shared, sequence_id=sequence_id)

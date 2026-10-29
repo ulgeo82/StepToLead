@@ -138,7 +138,10 @@ async def mark(db: AsyncSession, touch: LgTouch, company: LgCompany, *, score: i
     touch.hot_at = now
     name = company.display_name or company.domain or "компания"
     due = await due_at(db, touch, now, cfg["sla_minutes"])
-    deal = await _deal(db, company)
+    from app.domains.leadgen import client_outreach
+    client_campaign = await client_outreach.campaign_of(db, touch)
+    # Рассылка клиента: задачу и сделку создаёт передача клиенту, сделку агентства не трогаем.
+    deal = None if client_campaign is not None and client_campaign.client_project_id else await _deal(db, company)
     if deal is not None:
         task = CrmTask(workspace_id=deal.workspace_id, project_id=deal.project_id, deal_id=deal.id,
                        contact_id=deal.contact_id, type_code="CALL", title=f"🔥 Связаться: {name} — горячий ответ"[:220],

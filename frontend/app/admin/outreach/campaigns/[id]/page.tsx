@@ -8,7 +8,7 @@ import { base, date, message, post } from "../../../leadgen/shared";
 import styles from "../../../leadgen/leadgen.module.css";
 import { timezoneGroups, timezones } from "../../email/types";
 import type { Mailbox, Sequence } from "../../email/types";
-import { Campaign, Check, Column, ImportReport, Lead, scheduleText, STATUS, STOP_REASONS, UploadPreview, WEEKDAYS } from "../types";
+import { Campaign, Check, clientLabel, Column, ImportReport, Lead, OutreachClient, scheduleText, STATUS, STOP_REASONS, UploadPreview, WEEKDAYS } from "../types";
 
 const zoneName = (tz: string) => timezones.find(([z]) => z === tz)?.[1] || tz;
 const nowIn = (tz: string) => {
@@ -56,7 +56,7 @@ export default function CampaignPage() {
       <header className="topbar"><div className="crumbs"><Link href="/admin/outreach/campaigns">Кампании</Link><b>/</b><strong>{c.name}</strong></div><span className="userAvatar">ЕД</span></header>
       <section className="pageHeader">
         <div>
-          <p className="eyebrow">Кампания · <span className={`${styles.badge} ${STATUS[c.status].tone ? styles[STATUS[c.status].tone] : ""}`}>{STATUS[c.status].name}</span></p>
+          <p className="eyebrow">{c.client ? <>Для клиента <b>{clientLabel(c.client)}</b> · </> : "Кампания · "}<span className={`${styles.badge} ${STATUS[c.status].tone ? styles[STATUS[c.status].tone] : ""}`}>{STATUS[c.status].name}</span></p>
           <h1>{c.name}</h1>
           <p className="subtitle">Письма уходят: {scheduleText(c.window, zoneName(c.window.tz))} · сейчас там {nowIn(c.window.tz)}
             <br />{c.start_at && c.status !== "done" ? `Старт ${date(c.start_at)} · ` : ""}{c.mailbox_ids.length} ящ. · {c.steps} шаг. в цепочке</p>
@@ -333,11 +333,20 @@ function SettingsTab({ c, onSaved }: { c: Campaign; onSaved: (c: Campaign) => vo
   const [win, setWin] = useState(c.window);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [client, setClient] = useState<OutreachClient | null>(null);
+  const [responsible, setResponsible] = useState(c.responsible_user_id ? String(c.responsible_user_id) : "");
+  const [cc, setCc] = useState(c.handoff_cc || "");
+  const [auto, setAuto] = useState(c.auto_handoff);
   useEffect(() => {
-    api<{ items: Mailbox[] }>(`${base}/mailboxes`).then((d) => setBoxes(d.items.filter((m) => m.role !== "helper"))).catch((e) => setError(message(e)));
-  }, []);
+    const owner = c.client?.project_id || null;
+    api<{ items: Mailbox[] }>(`${base}/mailboxes`).then((d) => setBoxes(d.items.filter((m) => m.role !== "helper"
+      && (m.client?.project_id || null) === owner))).catch((e) => setError(message(e)));
+    if (owner) api<{ items: OutreachClient[] }>(`${base}/clients`).then((d) => setClient(d.items.find((x) => x.project_id === owner) || null)).catch(() => {});
+  }, [c.client?.project_id]);
+  const handoffChanged = !!c.client && (responsible !== (c.responsible_user_id ? String(c.responsible_user_id) : "")
+    || cc.trim().toLowerCase() !== (c.handoff_cc || "") || auto !== c.auto_handoff);
   const changed = useMemo(() => JSON.stringify([...chosen].sort()) !== JSON.stringify([...c.mailbox_ids].sort())
-    || start !== (c.start_at ? c.start_at.slice(0, 16) : "") || JSON.stringify(win) !== JSON.stringify(c.window), [chosen, start, win, c]);
+    || start !== (c.start_at ? c.start_at.slice(0, 16) : "") || JSON.stringify(win) !== JSON.stringify(c.window), [chosen, start, win, c]) || handoffChanged;
 
   async function save() {
     setError(""); setNotice("");
@@ -345,6 +354,11 @@ function SettingsTab({ c, onSaved }: { c: Campaign; onSaved: (c: Campaign) => vo
       if (win.start_hour >= win.end_hour) { setError("Час начала должен быть раньше часа окончания"); return; }
       if (!win.weekdays.length) { setError("Выберите хотя бы один день"); return; }
       const body: Record<string, unknown> = { mailbox_ids: chosen, window: win };
+      if (c.client) {
+        if (responsible) body.responsible_user_id = Number(responsible); else body.clear_responsible = true;
+        body.handoff_cc = cc.trim();
+        body.auto_handoff = auto;
+      }
       if (start) body.start_at = new Date(start).toISOString(); else body.clear_start = true;
       onSaved(await send<Campaign>(`/campaigns/${c.id}`, body));
       setNotice("Сохранено");
@@ -355,6 +369,27 @@ function SettingsTab({ c, onSaved }: { c: Campaign; onSaved: (c: Campaign) => vo
     <section className={styles.card}>
       {error && <p className={styles.error} role="alert">{error}</p>}
       {notice && <p className={styles.notice} role="status">{notice}</p>}
+      {c.client && <>
+        <h2>Передача лидов клиенту</h2>
+        <p className={styles.muted}>Ответившие попадают в CRM «{clientLabel(c.client)}» — воронка «Аутрич», источник «Аутрич (email)», вся переписка в ленте сделки и задача «Связаться». Отказы, отписки и автоответы не передаём.</p>
+        <div className={styles.fields}>
+          <label className={styles.check}>
+            <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} />
+            <span>Передавать сами «Интересно» и горячие ответы<small className={styles.hint}>Остальные — кнопкой «Передать клиенту» во «Входящих». Выключите — всё только кнопкой.</small></span>
+          </label>
+          <label className={styles.field}>Ответственный у клиента (задача «Связаться»)
+            <select value={responsible} onChange={(e) => setResponsible(e.target.value)}>
+              <option value="">Собственник клиента</option>
+              {(client?.team || []).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+            </select>
+            <small>Горячим — срок 15 минут рабочего времени клиента, остальным — до конца его рабочего дня.</small>
+          </label>
+          <label className={styles.field}>Почта менеджера клиента для копии
+            <input type="email" maxLength={254} placeholder="manager@client.ru" value={cc} onChange={(e) => setCc(e.target.value)} />
+            <small>Подставится в копию, когда отвечаете лиду во «Входящих»: менеджер получит всю ветку и продолжит сам.</small>
+          </label>
+        </div>
+      </>}
       <h2>Когда отправлять</h2>
       <p className={styles.muted}>Время — по часовому поясу <b>получателей</b>: для США выберите их пояс, и письма придут в их рабочие часы, а не ночью.</p>
       <div className={styles.fields}>
@@ -392,6 +427,7 @@ function SettingsTab({ c, onSaved }: { c: Campaign; onSaved: (c: Campaign) => vo
         </div>
       </div>
       <h2>С каких ящиков слать</h2>
+      {!boxes.length && <p className={styles.muted}>{c.client ? "У клиента нет своих ящиков — в «Ящики и шаблоны писем» добавьте ящик на домене клиента и выберите его в поле «Клиент»." : "Нет ящиков агентства."}</p>}
       {boxes.map((m) => (
         <label key={m.id} className={styles.check}>
           <input type="checkbox" checked={chosen.includes(m.id)} onChange={(e) => setChosen(e.target.checked ? [...chosen, m.id] : chosen.filter((x) => x !== m.id))} />

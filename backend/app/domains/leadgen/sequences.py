@@ -343,8 +343,9 @@ async def enroll(db: AsyncSession, sequence: LgSequence, company: LgCompany, *,
     contact = contact or await _email_contact(db, company.id)
     if _uses(steps, "email") and contact is None:
         return EnrollResult(company.id, False, "no_email")
+    client = campaign.client_project_id if campaign is not None else None
     decision = await service.check_can_contact(db, company.id, contact.id if contact else None,
-                                               "email" if contact else "call", now=now)
+                                               "email" if contact else "call", now=now, client_project_id=client)
     if not decision.ok and decision.reason != "crm:open_deal":
         return EnrollResult(company.id, False, decision.reason)
     start = now
@@ -355,7 +356,8 @@ async def enroll(db: AsyncSession, sequence: LgSequence, company: LgCompany, *,
                        next_at=core.step_due(start, steps[0], window), started_at=now,
                        campaign_id=campaign.id if campaign is not None else None, vars=vars or None)
     db.add(row)
-    company.stage = "in_outreach"
+    if not client:   # этапы базы — про продажи агентства; рассылка клиента их не трогает
+        company.stage = "in_outreach"
     await db.flush()
     return EnrollResult(company.id, True, None, row.id)
 
@@ -535,7 +537,8 @@ async def _send_email_step(db, transport, enr, company, step, window, now) -> st
     if contact is None:
         _finish(enr, "stopped", "no_email", now)
         return "stopped"
-    decision = await service.check_can_contact(db, company.id, contact.id, "email", sequence_id=seq_key(enr), now=now)
+    decision = await service.check_can_contact(db, company.id, contact.id, "email", sequence_id=seq_key(enr), now=now,
+                                               client_project_id=await _client_of(db, enr))
     if not decision.ok and decision.reason != "crm:open_deal":
         _finish(enr, "stopped", decision.reason, now)
         return "stopped"
@@ -602,12 +605,23 @@ async def _task_step(db, enr, company, step, now) -> str:
     return "tasks"
 
 
-async def _dnc(db: AsyncSession, workspace_id: int, kind: str, value: str, reason: str) -> None:
+async def _dnc(db: AsyncSession, workspace_id: int, kind: str, value: str, reason: str,
+               client_project_id: int | None = None) -> None:
+    """Стоп-лист. Отписка от рассылки клиента — в стоп-лист этого клиента; bounce — общий."""
+    scope = LgDnc.client_project_id == client_project_id if client_project_id else LgDnc.client_project_id.is_(None)
     exists = await db.scalar(select(LgDnc.id).where(LgDnc.workspace_id == workspace_id, LgDnc.kind == kind,
-                                                    LgDnc.value_norm == value))
+                                                    LgDnc.value_norm == value, scope))
     if not exists:
         db.add(LgDnc(workspace_id=workspace_id, kind=kind, value_norm=value, reason=reason,
-                     note="Автоматически: цепочка касаний"))
+                     client_project_id=client_project_id, note="Автоматически: цепочка касаний"))
+
+
+async def _client_of(db: AsyncSession, enr: LgEnrollment | None) -> int | None:
+    """Проект клиента, от имени которого идёт кампания (None — пишет агентство)."""
+    if enr is None or not enr.campaign_id:
+        return None
+    from app.domains.leadgen.models import LgCampaign
+    return await db.scalar(select(LgCampaign.client_project_id).where(LgCampaign.id == enr.campaign_id))
 
 
 # ---------------------------------------------------------------- входящие
@@ -683,7 +697,15 @@ async def handle_inbound(db: AsyncSession, mailbox: LgMailbox, mail: IncomingMai
                                                               LgEnrollment.id != enr.id,
                                                               LgEnrollment.status.in_(("active", "paused"))))).all():
         _finish(other, "stopped", "company_replied", now)
-    if kind == "unsubscribe":
+    client = await _client_of(db, enr)
+    from app.domains.leadgen import client_outreach
+    if kind == "unsubscribe" and client:
+        if contact is not None:
+            await _dnc(db, company.workspace_id, "email", contact.value_norm, "unsubscribed", client)
+        await _dnc(db, company.workspace_id, "company", str(company.id), "unsubscribed", client)
+        await client_outreach.close_deal(db, enr, f"Отписался от рассылки: «{fresh[:500]}»", now)
+        await db.flush()
+    elif kind == "unsubscribe":
         if contact is not None:
             await _dnc(db, company.workspace_id, "email", contact.value_norm, "unsubscribed")
         await _dnc(db, company.workspace_id, "company", str(company.id), "unsubscribed")
@@ -691,6 +713,11 @@ async def handle_inbound(db: AsyncSession, mailbox: LgMailbox, mail: IncomingMai
         await _move_deal(db, company, STAGE_LOST, note=f"Отказ по почте: «{fresh[:500]}»")
         await db.flush()
         await service.recalc_score(db, company, now=now)
+    elif client:
+        await db.flush()
+        from app.domains.leadgen import hot
+        await hot.mark(db, touch, company, score=None, signals=hot.rule_signals(fresh), now=now)
+        await client_outreach.after_reply(db, touch, company, now=now)
     else:
         company.stage = "replied"
         await _move_deal(db, company, STAGE_REPLIED, note=f"Ответ на письмо от {mail.sender}:\n{fresh}")

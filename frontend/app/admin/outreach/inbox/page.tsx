@@ -14,7 +14,8 @@ type Item = {
   sequence: string | null; subject: string | null; snippet: string; label: string | null; label_name: string | null;
   label_source: string | null; summary: string | null; handled: boolean; happened_at: string | null;
   hot: boolean; hot_at: string | null; intent_score: number | null; intent_signals: string[];
-  campaign: { id: number; name: string } | null;
+  campaign: { id: number; name: string; handoff_cc?: string | null; client?: string | null } | null;
+  client_deal_id?: number | null;
   messages?: number;
 };
 type Full = Item & {
@@ -126,6 +127,12 @@ function Inbox() {
       refresh();
     } catch (e) { setError(message(e)); } finally { setBusy(false); }
   }
+  async function toClient() {
+    if (!full || busy) return;
+    setBusy(true); setError("");
+    try { const r = await post<Full>(`/inbox/${full.id}/to-client`, {}); setFull({ ...full, ...r }); setNotice(`Передали клиенту «${full.campaign?.client}»: сделка в воронке «Аутрич» и задача «Связаться»`); refresh(); }
+    catch (e) { setError(message(e)); } finally { setBusy(false); }
+  }
   async function toCrm() {
     if (!full || busy) return;
     setBusy(true); setError("");
@@ -231,13 +238,16 @@ function Inbox() {
               <div>
                 <h2>{full.hot ? "🔥 " : ""}{full.company}</h2>
                 <p className={styles.muted}>
-                  {full.address} → {full.mailbox}{full.campaign ? ` · кампания «${full.campaign.name}»` : full.sequence ? ` · цепочка «${full.sequence}»` : ""}
+                  {full.address} → {full.mailbox}{full.campaign ? ` · кампания «${full.campaign.name}»${full.campaign.client ? ` для ${full.campaign.client}` : ""}` : full.sequence ? ` · цепочка «${full.sequence}»` : ""}
                   {full.domain && <> · <a href={`https://${full.domain}`} target="_blank" rel="noopener noreferrer">{full.domain}</a></>}
                 </p>
               </div>
               <div className={styles.actions}>
                 <Link className={styles.secondary} href={`/admin/leadgen/companies?company=${full.company_id}`}>Карточка</Link>
-                {full.crm_deal_id ? <Link className={styles.secondary} href={`/crm?deal=${full.crm_deal_id}`}>Сделка в CRM</Link>
+                {full.campaign?.client ? (full.client_deal_id
+                  ? <span className={`${styles.badge} ${styles.fitYes}`} title="Сделка и задача — в CRM клиента">✓ Передано клиенту</span>
+                  : <button type="button" className={styles.primary} disabled={busy} onClick={toClient} title={`Сделка и задача «Связаться» в CRM клиента «${full.campaign.client}»`}>Передать клиенту →</button>)
+                  : full.crm_deal_id ? <Link className={styles.secondary} href={`/crm?deal=${full.crm_deal_id}`}>Сделка в CRM</Link>
                   : <button type="button" className={styles.primary} disabled={busy} onClick={toCrm} title="Создать сделку в воронке «Аутрич»">＋ В CRM</button>}
               </div>
             </header>
@@ -278,13 +288,13 @@ function Inbox() {
                   placeholder={`Ответ уйдёт с ${full.mailbox} в эту же ветку`}
                   onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void send(); } }} />
                 <label className={styles.check}>
-                  <input type="checkbox" checked={handoff} onChange={(e) => setHandoff(e.target.checked)} />
-                  Передать переписку на другую почту (поставить в копию)
+                  <input type="checkbox" checked={handoff} onChange={(e) => { setHandoff(e.target.checked); if (e.target.checked && !cc) setCc(full.campaign?.handoff_cc || ""); }} />
+                  {full.campaign?.client ? "Передать переписку менеджеру клиента (поставить в копию)" : "Передать переписку на другую почту (поставить в копию)"}
                 </label>
                 {handoff && (
                   <label className={styles.field}>Адрес для копии
                     <input type="email" placeholder="например, ваш рабочий адрес" value={cc} onChange={(e) => setCc(e.target.value)} />
-                    <small>Лид увидит этот адрес в копии и дальше сможет писать туда. Текст о передаче напишите в ответе сами.</small>
+                    <small>Лид увидит этот адрес в копии и дальше сможет писать туда. Под вашим ответом портал приложит всю предыдущую переписку — адресат в копии увидит историю целиком. Текст о передаче напишите сами.</small>
                   </label>
                 )}
                 <div className={styles.actions}>

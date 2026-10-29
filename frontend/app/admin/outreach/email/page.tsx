@@ -5,7 +5,8 @@ import { Suspense, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { base, date, message, post } from "../../leadgen/shared";
 import styles from "../../leadgen/leadgen.module.css";
-import { applyTool, Formatted, hasMarkup, TOOLS } from "./format";
+import { Formatted, formatHotkey, formatTextarea, hasMarkup, TOOLS } from "./format";
+import { clientLabel, type OutreachClient } from "../campaigns/types";
 import {
   channelNames,
   emptyStep,
@@ -33,6 +34,10 @@ function EmailPage() {
   const [mailboxes, setMailboxes] = useState<Mailbox[]>([]),
     [sequences, setSequences] = useState<Sequence[]>([]),
     [variables, setVariables] = useState<string[]>([]);
+  const [clients, setClients] = useState<OutreachClient[]>([]);
+  useEffect(() => {
+    api<{ items: OutreachClient[] }>(`${base}/clients`).then((d) => setClients(d.items)).catch(() => {});
+  }, []);
   const [error, setError] = useState(""),
     [notice, setNotice] = useState(""),
     [busy, setBusy] = useState(false),
@@ -130,6 +135,16 @@ function EmailPage() {
     setError(text);
     setFields(Object.fromEntries(text.split("; ").map((part) => [fieldForError(part), part])));
   }
+  async function setOwner(mailbox: Mailbox, value: string) {
+    const warn = value ? "Ящик будет писать только в кампаниях этого клиента" : "Ящик будет писать только в кампаниях агентства";
+    if (!globalThis.confirm(`${mailbox.email}: ${warn}. Из кампаний прежнего владельца он уберётся. Продолжить?`)) return;
+    setBusy(true); setError(""); setNotice("");
+    try {
+      await api(`${base}/mailboxes/${mailbox.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(value ? { client_project_id: Number(value) } : { clear_client: true }) });
+      setRevision((n) => n + 1);
+    } catch (e) { fail(e); } finally { setBusy(false); }
+  }
   async function mailboxAction(mailbox: Mailbox, action: "check" | "toggle" | "delete") {
     if (busy) return;
     if (action === "delete" && !globalThis.confirm(`Удалить ящик ${mailbox.email}?`)) return;
@@ -175,6 +190,7 @@ function EmailPage() {
         daily_limit: Number(data.get("daily_limit")),
         warmup: data.has("warmup"),
         role: data.has("helper") ? "helper" : "outreach",
+        client_project_id: data.get("client_project_id") ? Number(data.get("client_project_id")) : null,
       });
       form.reset();
       setNotice("Ящик добавлен. Нажмите «Проверить» для проверки подключения.");
@@ -214,17 +230,13 @@ function EmailPage() {
     setFields({});
   }
   function format(index: number, key: string) {
-    const text = steps[index]?.body || "";
-    const pos = target.current && target.current.index === index && target.current.field === "body"
-      ? target.current : { index, field: "body" as const, start: text.length, end: text.length };
-    const next = applyTool(text, pos.start, pos.end, key);
-    updateStep(index, "body", next.text);
-    target.current = { index, field: "body", start: next.start, end: next.end };
-    requestAnimationFrame(() => {
-      const input = editorRef.current?.querySelector<HTMLTextAreaElement>(`[data-step="${index}"][data-field="body"]`);
-      input?.focus();
-      input?.setSelectionRange(next.start, next.end);
-    });
+    const input = editorRef.current?.querySelector<HTMLTextAreaElement>(`[data-step="${index}"][data-field="body"]`);
+    if (!input) return;
+    const pos = target.current;
+    if (document.activeElement !== input && pos && pos.index === index && pos.field === "body") {
+      input.setSelectionRange(pos.start, pos.end);   // кнопка нажата после клика вне поля — возвращаем выделение
+    }
+    formatTextarea(input, key);   // правка через ввод: ⌘/Ctrl+Z её отменит
   }
   function insert(variable: string) {
     const position = target.current;
@@ -235,6 +247,18 @@ function EmailPage() {
     setNotice("");
     const text = steps[position.index]?.[position.field] || "",
       token = `{{${variable}}}`;
+    const el = editorRef.current?.querySelector<HTMLInputElement | HTMLTextAreaElement>(
+      `[data-step="${position.index}"][data-field="${position.field}"]`,
+    );
+    if (el && document.execCommand) {   // как обычный ввод — тогда ⌘/Ctrl+Z отменит вставку
+      el.focus();
+      el.setSelectionRange(position.start, position.end);
+      if (document.execCommand("insertText", false, token)) {
+        const cursor = position.start + token.length;
+        target.current = { ...position, start: cursor, end: cursor };
+        return;
+      }
+    }
     updateStep(
       position.index,
       position.field,
@@ -397,6 +421,7 @@ function EmailPage() {
                       {[
                         "Email",
                         "Отправитель",
+                        "Чей ящик",
                         "Лимит",
                         "Сегодня / осталось",
                         "Прогрев с",
@@ -418,6 +443,16 @@ function EmailPage() {
                           {mailbox.cold_paused && <small className={styles.errorText}>⏸ холодные на паузе</small>}
                         </td>
                         <td>{mailbox.sender_name || "—"}</td>
+                        <td>
+                          {mailbox.role === "helper" ? "—" : (
+                            <select aria-label={`Чей ящик ${mailbox.email}`} disabled={busy}
+                              value={mailbox.client?.project_id ? String(mailbox.client.project_id) : ""}
+                              onChange={(e) => setOwner(mailbox, e.target.value)}>
+                              <option value="">Агентство</option>
+                              {clients.map((c) => <option key={c.project_id} value={c.project_id}>{clientLabel(c)}</option>)}
+                            </select>
+                          )}
+                        </td>
                         <td>{mailbox.daily_limit}</td>
                         <td>
                           {mailbox.sent_today} / {mailbox.left_today}
@@ -493,6 +528,14 @@ function EmailPage() {
                 </label>
               ))}
             </div>
+            <label className={styles.field}>
+              Чей ящик
+              <select name="client_project_id" defaultValue="">
+                <option value="">Агентство (наши продажи)</option>
+                {clients.map((c) => <option key={c.project_id} value={c.project_id}>Клиент: {clientLabel(c)}</option>)}
+              </select>
+              <small className={styles.hint}>Ящик на домене клиента пишет только в кампаниях этого клиента — другим он недоступен.</small>
+            </label>
             <label className={styles.check}>
               <input type="checkbox" name="warmup" defaultChecked />
               Прогрев
@@ -829,6 +872,7 @@ function EmailPage() {
                           };
                           updateStep(index, "body", e.target.value);
                         }}
+                        onKeyDown={(e) => { if (step.channel === "email") formatHotkey(e); }}
                         aria-invalid={!!fields[`steps.${index}.body`]}
                       />
                       {fieldError(`steps.${index}.body`)}

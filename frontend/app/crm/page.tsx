@@ -10,6 +10,7 @@ import { ContactCard } from "@/components/crm/contact-card";
 import { DealCard, formAnswers } from "@/components/crm/deal-card";
 import { Inbox } from "@/components/crm/inbox";
 import { SalesReport } from "@/components/crm/report";
+import { OutreachReport } from "@/components/crm/outreach-report";
 import { CallsTab, IncomingCall, useTelephony } from "@/components/crm/telephony";
 import { CompleteTaskModal, NewTaskModal } from "@/components/crm/task-modals";
 import { Board, Contact, CustomField, Deal, days, Inbound, Pipeline, Project, rejectReasons, request, Source,
@@ -18,7 +19,7 @@ import "../result/result.css";
 import "./crm.css";
 import "@/components/crm/crm-pro.css";
 
-type Tab = "deals" | "chats" | "calls" | "contacts" | "tasks" | "inbound" | "report" | "automation" | "pipeline";
+type Tab = "deals" | "chats" | "calls" | "contacts" | "tasks" | "inbound" | "report" | "outreach" | "automation" | "pipeline";
 type Modal = "deal" | "stage" | "field" | "lost" | "pipeline" | "task" | null;
 
 export default function CrmPage() {
@@ -309,6 +310,7 @@ export default function CrmPage() {
       {notice && <div className="crmOkBar" role="status">{notice} <button onClick={() => setNotice("")}>×</button></div>}
       {!projectId ? <div className="resultLoading">{error.includes("401") || error.includes("вход") ? <><p>Для работы с CRM войдите в клиентский кабинет.</p><Link href="/login?next=%2Fcrm">Войти →</Link></> : "Нет доступного проекта"}</div> : <>
       <div className="crmTabs">{([["deals", "▣ Сделки"], ["chats", "💬 Чаты"], ["calls", "📞 Звонки"], ["tasks", "◷ Задачи"], ["contacts", "♙ Контакты"], ["report", "📊 Аналитика продаж"],
+        ...(pipelines.some(p => p.name === "Аутрич") ? [["outreach", "✉ Аутрич"]] : []),
         ...(can("manage_pipeline") ? [["automation", "⚡ Автоматизация"], ["pipeline", "⚙ Воронки и поля"]] : [])] as [Tab, string][]).map(([key, label]) =>
         <button key={key} className={tab === key ? "active" : ""} onClick={() => setTab(key)}>{label}{key === "deals" && board?.inbound_count ? <b title="Новых заявок в «Неразобранном»">{board.inbound_count}</b> : null}{key === "chats" && unreadChats ? <b>{unreadChats}</b> : null}</button>)}</div>
 
@@ -384,6 +386,7 @@ export default function CrmPage() {
 
       {tab === "chats" && <Inbox projectId={projectId} team={team} can={can} onOpenDeal={id => setDealId(id)} onOpenInbound={() => { setTab("deals"); setView("kanban"); }}/>}
       {tab === "calls" && <CallsTab projectId={projectId} team={team} info={telephony.info} reloadInfo={telephony.reload} onOpenDeal={id => setDealId(id)} onOpenInbound={() => { setTab("deals"); setView("kanban"); }}/>}
+      {tab === "outreach" && <OutreachReport projectId={projectId}/>}
       {tab === "report" && <SalesReport projectId={projectId} pipelines={pipelines} pipelineId={currentPipelineId}/>}
       {tab === "automation" && <Automations projectId={projectId} pipelines={pipelines} pipelineId={currentPipelineId} team={team} sources={sources} canManage={can("manage_pipeline")}/>}
 

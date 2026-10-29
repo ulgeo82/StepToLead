@@ -16,6 +16,7 @@ export type Sequence = {
 };
 export type Mailbox = {
   id: number;
+  client?: { project_id: number; name: string; project: string } | null;
   email: string;
   sender_name: string | null;
   daily_limit: number;

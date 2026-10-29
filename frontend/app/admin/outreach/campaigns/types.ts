@@ -1,6 +1,6 @@
 export type CampaignStats = {
   leads: number; waiting: number; sent: number; contacted: number; replied: number; reply_rate: number;
-  interested: number; hot: number; unsubscribed: number; bounced: number; finished: number;
+  interested: number; hot: number; handed?: number; unsubscribed: number; bounced: number; finished: number;
   by_status: Record<string, number>;
 };
 export type Campaign = {
@@ -8,7 +8,11 @@ export type Campaign = {
   mailbox_ids: number[]; variables: string[]; start_at: string | null; created_at: string | null;
   window: { tz: string; start_hour: number; end_hour: number; weekdays: number[]; gap_minutes: number; daily_new: number };
   stats: CampaignStats | null;
+  client: ClientRef | null; responsible_user_id: number | null; handoff_cc: string | null; auto_handoff: boolean;
 };
+export type ClientRef = { project_id: number; project: string; workspace_id: number; name: string };
+export type OutreachClient = ClientRef & { team: { id: number; name: string; role: string }[] };
+export const clientLabel = (c: ClientRef) => (c.project && c.project !== c.name ? `${c.name} · ${c.project}` : c.name);
 export type Column = { index: number; header: string; sample: string[]; filled: number; field: string; var?: string };
 export type UploadPreview = { columns: Column[]; rows: number; fields: Record<string, string>; sample: Record<string, string>[] };
 export type ImportReport = {

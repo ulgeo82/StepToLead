@@ -53,7 +53,8 @@ class CampaignError(Exception):
 # ---------------------------------------------------------------- создание
 
 async def create(db: AsyncSession, workspace_id: int, *, name: str, template: LgSequence | None,
-                 mailbox_ids: list[int], user_id: int | None = None) -> LgCampaign:
+                 mailbox_ids: list[int], user_id: int | None = None,
+                 client_project_id: int | None = None) -> LgCampaign:
     """Цепочка кампании — копия шаблона: правки в одной кампании не задевают другие."""
     seq = LgSequence(workspace_id=workspace_id, name=f"{name} — цепочка"[:180],
                      steps=[dict(s) for s in (template.steps if template else DEFAULT_STEPS)],
@@ -62,17 +63,21 @@ async def create(db: AsyncSession, workspace_id: int, *, name: str, template: Lg
     db.add(seq)
     await db.flush()
     campaign = LgCampaign(workspace_id=workspace_id, name=name, status="draft", sequence_id=seq.id,
-                          mailbox_ids=await valid_mailboxes(db, workspace_id, mailbox_ids), variables=[],
-                          created_by_id=user_id)
+                          mailbox_ids=await valid_mailboxes(db, workspace_id, mailbox_ids, client_project_id),
+                          variables=[], created_by_id=user_id, client_project_id=client_project_id,
+                          auto_handoff=True)
     db.add(campaign)
     await db.flush()
     return campaign
 
 
-async def valid_mailboxes(db: AsyncSession, workspace_id: int, ids: list[int]) -> list[int]:
+async def valid_mailboxes(db: AsyncSession, workspace_id: int, ids: list[int],
+                          client_project_id: int | None = None) -> list[int]:
+    """Ящики клиента пишут только в его кампаниях, ящики агентства — только в кампаниях агентства."""
     if not ids:
         return []
-    rows = (await db.scalars(select(LgMailbox.id).where(LgMailbox.workspace_id == workspace_id,
+    owner = LgMailbox.client_project_id == client_project_id if client_project_id else LgMailbox.client_project_id.is_(None)
+    rows = (await db.scalars(select(LgMailbox.id).where(LgMailbox.workspace_id == workspace_id, owner,
                                                         LgMailbox.id.in_(ids), LgMailbox.role != "helper"))).all()
     return sorted(set(rows))
 
@@ -333,7 +338,9 @@ async def stats(db: AsyncSession, campaign: LgCampaign) -> dict:
             "interested": sum(1 for label in replies if label in ("interested", "question")),
             "hot": sum(1 for _, hot in inbound if hot), "unsubscribed": sum(1 for label in replies if label == "unsubscribe"),
             "bounced": int(touches.get("bounced", 0)), "finished": int(by_status.get("finished", 0)),
-            "by_status": by_status}
+            "by_status": by_status,
+            "handed": int(await db.scalar(select(func.count(LgEnrollment.id)).where(
+                LgEnrollment.campaign_id == campaign.id, LgEnrollment.client_deal_id.is_not(None))) or 0)}
 
 
 async def leads(db: AsyncSession, campaign: LgCampaign, *, status: str | None = None, q: str | None = None,
@@ -369,4 +376,19 @@ async def row(db: AsyncSession, campaign: LgCampaign, with_stats: bool = True) -
             "window": {**DEFAULT_WINDOW, **(seq.window or {})} if seq else DEFAULT_WINDOW,
             "steps": len(seq.steps or []) if seq else 0, "mailbox_ids": campaign.mailbox_ids or [],
             "variables": campaign.variables or [], "start_at": iso(campaign.start_at), "created_at": iso(campaign.created_at),
+            "client": await client_info(db, campaign.client_project_id),
+            "responsible_user_id": campaign.responsible_user_id, "handoff_cc": campaign.handoff_cc,
+            "auto_handoff": bool(campaign.auto_handoff),
             "stats": await stats(db, campaign) if with_stats else None}
+
+
+async def client_info(db: AsyncSession, project_id: int | None) -> dict | None:
+    if not project_id:
+        return None
+    from app.models.marketing import ClientWorkspace, Project
+    project = await db.get(Project, project_id)
+    if project is None:
+        return None
+    ws = await db.get(ClientWorkspace, project.workspace_id)
+    return {"project_id": project.id, "project": project.name, "workspace_id": project.workspace_id,
+            "name": ws.name if ws else project.name}

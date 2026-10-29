@@ -529,6 +529,22 @@ def _ratio(top, bottom):
     return round(top / bottom * 100, 1) if bottom else None
 
 
+@router.get("/projects/{project_id}/outreach-report")
+async def outreach_report(project_id: int, start: date | None = None, end: date | None = None,
+                          db: AsyncSession = Depends(get_db), user: PortalUser = Depends(require_portal_user)):
+    """Отчёт «Аутрич»: сколько компаний написали от имени клиента, ответили, передали в CRM, дошли до созвона."""
+    require_permission(user, "view_crm")
+    project = await project_for(db, user, project_id)
+    end = end or now().date()
+    start = start or end - timedelta(days=29)
+    if end < start or (end - start).days > 366:
+        raise HTTPException(422, "Выберите период до 367 дней")
+    from app.domains.leadgen import client_outreach
+    return {"period": {"start": start.isoformat(), "end": end.isoformat()},
+            **await client_outreach.report(db, project, datetime.combine(start, time.min, timezone.utc),
+                                           datetime.combine(end + timedelta(days=1), time.min, timezone.utc))}
+
+
 @router.get("/projects/{project_id}/report")
 async def sales_report(project_id: int, start: date | None = None, end: date | None = None,
                        pipeline_id: int | None = None, db: AsyncSession = Depends(get_db),
