@@ -41,6 +41,10 @@ _errors: deque = deque(maxlen=200)
 _tasks: dict[str, asyncio.Task] = {}
 
 
+# Связь Telegram-профилей и прокси моргает (обрыв соединения, ТСПУ, медленный прокси) и сама восстанавливается
+# за минуту-две: о таких сбоях сообщаем, только если они держатся дольше FLAKY_MINUTES.
+FLAKY_PREFIXES = ("chan:", "clientproxy:")
+FLAKY_MINUTES = 10
 REPEATED_ERROR = 3       # одна и та же ошибка столько раз за окно — отдельное уведомление
 
 
@@ -248,12 +252,21 @@ async def run_once(db: AsyncSession) -> dict:
     fresh, repeat, resolved = [], [], []
     for key, p in current.items():
         seen = state.get(key)
+        flaky = key.startswith(FLAKY_PREFIXES)
         if not seen:
-            fresh.append(p); state[key] = {"since": t.isoformat(), "notified": t.isoformat(), "title": p["title"], "client": p.get("client")}
+            state[key] = {"since": t.isoformat(), "notified": None if flaky else t.isoformat(),
+                          "title": p["title"], "client": p.get("client")}
+            if not flaky:
+                fresh.append(p)
+        elif not seen.get("notified"):   # моргающий сбой: ждём, не пройдёт ли сам
+            if datetime.fromisoformat(seen["since"]) <= t - timedelta(minutes=FLAKY_MINUTES):
+                fresh.append(p); seen["notified"] = t.isoformat()
         elif datetime.fromisoformat(seen["notified"]) < t - timedelta(hours=REPEAT_HOURS):
             repeat.append(p); seen["notified"] = t.isoformat()
     for key in [k for k in state if k not in current]:
-        resolved.append(state.pop(key))
+        gone = state.pop(key)
+        if gone.get("notified"):   # о сбое, про который не писали, и «восстановлено» не пишем
+            resolved.append(gone)
     messages = []
     if fresh:
         hint = "\n\n" + LOG_HINT if any(p["key"].startswith(("err:", "errors")) for p in fresh) else ""

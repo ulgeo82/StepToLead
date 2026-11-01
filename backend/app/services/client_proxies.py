@@ -65,6 +65,14 @@ async def check_due(db):
     if not due:
         return
     results = await asyncio.gather(*(asyncio.wait_for(check(p), 12) for p in due), return_exceptions=True)
+    # Одна неудачная попытка — ещё не поломка: прокси и связь до Telegram иногда моргают. Перепроверяем.
+    retry = [i for i, r in enumerate(results) if isinstance(r, BaseException)]
+    if retry:
+        await asyncio.sleep(3)
+        again = await asyncio.gather(*(asyncio.wait_for(check(due[i]), 12) for i in retry), return_exceptions=True)
+        results = list(results)
+        for i, r in zip(retry, again):
+            results[i] = r
     channels = (await db.scalars(select(MessagingChannel).where(MessagingChannel.kind == "telegram_user"))).all()
     for proxy, result in zip(due, results):
         if isinstance(result, BaseException):

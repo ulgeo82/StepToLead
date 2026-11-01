@@ -37,6 +37,33 @@ class MonitorTests(unittest.TestCase):
             self.assertEqual(self.run_db(monitor.run_once)["resolved"], 1)
             self.assertIn("Восстановлено", send.await_args.args[1])
 
+    def test_flaky_telegram_proxy_alerts_only_if_it_lasts(self):
+        from datetime import timedelta
+        from app.models.proxy import Proxy
+
+        async def broken(db):
+            db.add(Proxy(id=901, scheme="socks5", host="5.129.234.30", port=1080, pool="client", status="error",
+                         last_error="Нет связи через прокси"))
+            admin = await db.get(AdminUser, 1); admin.telegram_chat_id = "555"
+            await db.commit()
+        self.run_db(broken)
+        send = AsyncMock(return_value=1)
+        with patch.object(monitor, "send", send):
+            self.assertEqual(self.run_db(monitor.run_once)["new"], 0)        # моргнул — молчим
+            async def fixed(db):
+                row = await db.get(Proxy, 901); row.status = "working"; await db.commit()
+            self.run_db(fixed)
+            self.assertEqual(self.run_db(monitor.run_once)["resolved"], 0)   # и «восстановлено» не шлём
+            self.assertEqual(send.await_count, 0)
+            async def broken_again(db):
+                row = await db.get(Proxy, 901); row.status = "error"; await db.commit()
+            self.run_db(broken_again)
+            self.run_db(monitor.run_once)
+            later = monitor.now() + timedelta(minutes=monitor.FLAKY_MINUTES + 1)
+            with patch.object(monitor, "now", return_value=later):
+                self.assertEqual(self.run_db(monitor.run_once)["new"], 1)    # держится 10+ минут — сообщаем
+            self.assertIn("Нет связи через прокси", send.await_args.args[1])
+
     def test_dead_worker_and_error_burst(self):
         async def dead():
             raise RuntimeError("boom")
