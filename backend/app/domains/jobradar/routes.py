@@ -239,6 +239,54 @@ async def run_now(filter_id: int, db: AsyncSession = Depends(get_db), admin: Adm
     return {"queued": True}
 
 
+class PreviewIn(FilterIn):
+    days: int = Field(default=3, ge=1, le=14)
+
+
+@router.post("/preview")
+async def preview(payload: PreviewIn, db: AsyncSession = Depends(get_db), admin: AdminUser = Depends(require_admin)):
+    """«Посмотреть, что найдёт»: поиск по условиям из формы, без записи в базу и без постов."""
+    from app.domains.jobradar import core
+    data = payload.model_dump(exclude_unset=True)
+    days = data.pop("days", 3)
+    row = JrFilter(keywords=[], exclude=[], regions=[], experience=[], sources=["hh", "trudvsem", "habr"],
+                   salary_from=0, allow_no_salary=True, remote_only=False)
+    _apply(row, {k: v for k, v in data.items() if k not in ("name", "enabled")})
+    if not row.keywords or not row.sources:
+        raise HTTPException(422, "Добавьте ключевые слова и выберите хотя бы один источник")
+    cfg = await runner.get_settings(db)
+    client = runner.make_client(cfg)
+    query = runner.as_dict(row)
+    since = runner.now() - timedelta(days=days)
+    sources, found = {}, []
+
+    async def one(source):
+        try:
+            got = await asyncio.wait_for(client.fetch(source, query, since), 60)
+            sources[source] = {"name": NAMES[source], "found": len(got)}
+            return got
+        except Exception as exc:  # noqa: BLE001
+            sources[source] = {"name": NAMES[source], "error": f"{type(exc).__name__}: {str(exc)[:150]}"}
+            return []
+    for got in await asyncio.gather(*(one(s) for s in row.sources)):
+        found += got
+    groups = core.group(list({v.uid: v for v in found}.values()))
+    items = []
+    for cards in groups.values():
+        results = [core.matches(c, query) for c in cards]
+        ok = any(r[0] for r in results)
+        main = cards[0]
+        items.append({"title": main.title, "company": main.company, "city": main.city, "remote": main.remote,
+                      "salary_from": main.salary_from, "salary_to": main.salary_to, "url": main.url,
+                      "experience": main.experience, "employer_url": main.employer.get("url"),
+                      "sources": [NAMES.get(c.source, c.source) for c in cards], "ok": ok,
+                      "reason": None if ok else results[0][1]})
+    items.sort(key=lambda i: (not i["ok"], (i["company"] or "").lower()))
+    matched = [i for i in items if i["ok"]]
+    return {"days": days, "sources": [sources[s] for s in row.sources], "total": len(items), "matched": len(matched),
+            "companies": len({(i["company"] or "").lower() for i in matched}), "items": items[:300]}
+
+
 @router.get("/vacancies")
 async def vacancies(filter_id: int | None = None,
                     status: str | None = Query(None, pattern="^(sent|lead|skipped|ai_low|failed)$"),

@@ -73,7 +73,7 @@ def make_client(cfg: dict) -> Client:
 def as_dict(f: JrFilter) -> dict:
     return {"keywords": f.keywords or [], "exclude": f.exclude or [], "remote_only": f.remote_only,
             "regions": f.regions or [], "salary_from": f.salary_from or 0, "allow_no_salary": f.allow_no_salary,
-            "experience": f.experience or []}
+            "experience": f.experience or [], "strict_city": f.mode == "leads"}
 
 
 async def ensure_starter(db: AsyncSession, workspace_id: int) -> None:

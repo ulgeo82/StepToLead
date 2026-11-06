@@ -67,6 +67,8 @@ class FilterTests(unittest.TestCase):
         city = {**F, "remote_only": False, "regions": ["Самара"]}
         self.assertTrue(core.matches(V(remote=False, city="Самара"), city)[0])
         self.assertEqual(core.matches(V(remote=False, city="Москва"), city)[1], "не тот город")
+        self.assertTrue(core.matches(V(remote=True, city="Москва"), city)[0])                     # удалёнка — любой город
+        self.assertFalse(core.matches(V(remote=True, city="Москва"), {**city, "strict_city": True})[0])   # лиды — город компании
 
     def test_fingerprint_merges_sources(self):
         a = V()
@@ -119,8 +121,8 @@ class RunTests(FlowBase):
                      runner.sleep, runner.complete)
         settings.agency_workspace_id = 7
         runner.session_factory = self.sessions
-        self.fail: set[str] = set()
-        runner.client_factory = lambda: Client(transport=transport(self.fail))
+        self.down: set[str] = set()
+        runner.client_factory = lambda: Client(transport=transport(self.down))
         self.sent: list[tuple] = []
 
         async def send(chat_id, text, markup=None):
@@ -176,7 +178,7 @@ class RunTests(FlowBase):
         self.assertIsNotNone(last)
 
     def test_one_source_down_does_not_break_pass(self):
-        self.fail = {"career.habr.com"}
+        self.down = {"career.habr.com"}
         fid = self.make_filter()
         result = self.run_filter(fid)
         self.assertEqual(result.sent, 1)
@@ -341,6 +343,14 @@ class RunTests(FlowBase):
         self.assertNotIn("secret", json.dumps(over))
         self.assertEqual([x["id"] for x in over["sources"]], ["hh", "trudvsem", "habr"])
         self.assertEqual(client.get(f"{b}/vacancies").json()["total"], 0)
+        pv = client.post(f"{b}/preview", headers=ORIGIN, json={
+            "keywords": ["маркетолог", "директолог"], "exclude": ["senior", "мерчендайзер"], "remote_only": False,
+            "regions": ["Самара"], "sources": ["hh", "trudvsem"], "days": 7}).json()
+        self.assertEqual([s.get("found") for s in pv["sources"]], [3, 2])
+        ok = [i["company"] for i in pv["items"] if i["ok"]]
+        self.assertEqual(ok, ["ООО Ромашка"])                             # удалёнка проходит при любом городе
+        self.assertIn("не тот город", {i["reason"] for i in pv["items"]})
+        self.assertEqual(client.get(f"{b}/vacancies").json()["total"], 0)  # предпросмотр ничего не пишет
         self.assertEqual(client.delete(f"{b}/filters/{created['id']}", headers=ORIGIN).status_code, 204)
 
 

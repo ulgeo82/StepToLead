@@ -20,7 +20,8 @@ def matches(v: Vacancy, f: dict) -> tuple[bool, str]:
     if f.get("remote_only") and not v.remote:
         return False, "не удалёнка"
     regions = [norm(r).strip() for r in f.get("regions") or [] if norm(r).strip()]
-    if regions and not v.remote and not any(r in norm(v.city) for r in regions):
+    # Вакансия на удалёнке подходит из любого города; для лидов важен город самой компании (strict_city).
+    if regions and (f.get("strict_city") or not v.remote) and not any(r in norm(v.city) for r in regions):
         return False, "не тот город"
     floor = int(f.get("salary_from") or 0)
     top = v.salary_to or v.salary_from

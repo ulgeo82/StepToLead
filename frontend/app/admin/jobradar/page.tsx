@@ -23,6 +23,12 @@ type Overview = {
   sources: { id: string; name: string; ok_at?: string | null; error?: string | null; error_at?: string | null }[];
   chats: { id: string; title: string }[];
 };
+type Preview = {
+  days: number; total: number; matched: number; companies: number;
+  sources: { name: string; found?: number; error?: string }[];
+  items: { title: string; company: string; city: string; remote: boolean; salary_from: number | null; salary_to: number | null;
+    url: string; employer_url: string | null; sources: string[]; ok: boolean; reason: string | null }[];
+};
 type Item = {
   id: number; filter: string; status: string; status_name: string; reason: string | null; score: number | null;
   why: string | null; sources: string[]; feedback: number | null; company_id: number | null; created_at: string | null;
@@ -164,8 +170,22 @@ function FilterForm({ value, chats, aiAvailable, close, saved }: {
   const [manual, setManual] = useState(!!value.chat_id && !chats.some((c) => c.id === value.chat_id));
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [days, setDays] = useState(3);
+  const [preview, setPreview] = useState<Preview | null>(null);
+  const [looking, setLooking] = useState(false);
+  const [showAll, setShowAll] = useState(false);
   const toggle = (key: "experience" | "sources", item: string) =>
     setF({ ...f, [key]: f[key].includes(item) ? f[key].filter((x) => x !== item) : [...f[key], item] });
+
+  const formBody = () => ({ mode: f.mode, keywords: lines(keywords), exclude: lines(exclude), regions: lines(regions),
+    remote_only: f.remote_only, salary_from: Number(f.salary_from) || 0, allow_no_salary: f.allow_no_salary,
+    experience: f.experience, sources: f.sources });
+
+  async function look() {
+    setLooking(true); setError(""); setPreview(null); setShowAll(false);
+    try { setPreview(await send<Preview>("/preview", { ...formBody(), days })); }
+    catch (err) { setError(message(err)); } finally { setLooking(false); }
+  }
 
   async function submit(e: FormEvent) {
     e.preventDefault(); setBusy(true); setError("");
@@ -234,6 +254,36 @@ function FilterForm({ value, chats, aiAvailable, close, saved }: {
         </label>
         <label className={styles.check}><input type="checkbox" checked={f.enabled} onChange={(e) => setF({ ...f, enabled: e.target.checked })} />Включён — проверять по расписанию</label>
       </div>
+      <section className={styles.formFieldset} aria-live="polite">
+        <div className={styles.inlineForm}>
+          <button type="button" className={styles.secondary} disabled={looking || !lines(keywords).length || !f.sources.length} onClick={look}>
+            {looking ? "Ищем на сайтах… до минуты" : "🔍 Посмотреть, что найдёт"}</button>
+          <label className={styles.field}>за последние
+            <select value={days} onChange={(e) => setDays(Number(e.target.value))}>
+              {[1, 3, 7, 14].map((d) => <option key={d} value={d}>{d} {d === 1 ? "день" : d < 5 ? "дня" : "дней"}</option>)}
+            </select></label>
+        </div>
+        <small className={styles.hint}>Пробный поиск по условиям выше: ничего не сохраняет, в базу и в Telegram ничего не уходит.</small>
+        {preview && <>
+          <p><b>Подходит {preview.matched} из {preview.total}</b>{f.mode === "leads" ? ` · компаний: ${preview.companies}` : ""}
+            {" · "}{preview.sources.map((s) => s.error ? `${s.name}: ошибка` : `${s.name}: ${s.found}`).join(" · ")}</p>
+          {preview.sources.filter((s) => s.error).map((s) => <p key={s.name} className={styles.errorText}>{s.name}: {s.error}</p>)}
+          <div className={styles.scroll} style={{ maxHeight: 360 }}>
+            <table className={styles.table}>
+              <tbody>{preview.items.filter((i) => showAll || i.ok).map((i, n) => (
+                <tr key={n}>
+                  <td>{i.ok ? "✅" : "—"}</td>
+                  <td>{i.url ? <a href={i.url} target="_blank" rel="noopener noreferrer">{i.title}</a> : i.title}
+                    <small>{i.company || "—"}{i.employer_url ? <> · <a href={i.employer_url} target="_blank" rel="noopener noreferrer">работодатель</a></> : ""} · {i.sources.join(", ")}</small></td>
+                  <td>{i.remote ? "удалёнка" : i.city || "—"}<small>{i.salary_from || i.salary_to ? `${i.salary_from ? `от ${i.salary_from.toLocaleString("ru-RU")}` : ""}${i.salary_to ? ` до ${i.salary_to.toLocaleString("ru-RU")}` : ""} ₽` : "з/п не указана"}</small></td>
+                  <td>{i.reason ? <small>{i.reason}</small> : null}</td>
+                </tr>))}</tbody>
+            </table>
+          </div>
+          {preview.total > preview.matched && <button type="button" className={styles.secondary} onClick={() => setShowAll(!showAll)}>
+            {showAll ? "Только подходящие" : `Показать и отсеянные (${preview.total - preview.matched}) — с причиной`}</button>}
+        </>}
+      </section>
       <div className={styles.actions}>
         <button type="submit" className={styles.primary} disabled={busy}>{busy ? "Сохраняем…" : "Сохранить"}</button>
         <button type="button" className={styles.secondary} onClick={close}>Отмена</button>
