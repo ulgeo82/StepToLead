@@ -1,0 +1,58 @@
+"""Пост вакансии в Telegram (через бота агентства) и кнопки 👍/👎."""
+from __future__ import annotations
+
+import html
+
+from app.domains.jobradar.sources import NAMES, Vacancy
+
+SNIPPET = 280
+
+
+def salary(v: Vacancy) -> str:
+    if not v.salary_from and not v.salary_to:
+        return "💰 з/п не указана"
+    cur = "₽" if v.currency in ("RUR", "RUB", "", None) else html.escape(v.currency)
+    fmt = lambda n: f"{n:,}".replace(",", " ")
+    if v.salary_from and v.salary_to:
+        return f"💰 {fmt(v.salary_from)}–{fmt(v.salary_to)} {cur}"
+    return f"💰 от {fmt(v.salary_from)} {cur}" if v.salary_from else f"💰 до {fmt(v.salary_to)} {cur}"
+
+
+def render(v: Vacancy, *, score: int | None = None, why: str = "", sources: list[str] | None = None,
+           lead: bool = False) -> str:
+    e = html.escape
+    lines = [f"<b>{e(v.title)}</b>"]
+    if v.company:
+        lines.append(f"🏢 {e(v.company)}")
+    place = "🌍 удалёнка" if v.remote else (f"📍 {e(v.city)}" if v.city else "")
+    lines.append(" · ".join(x for x in (salary(v), place) if x))
+    if score is not None:
+        lines.append(f"🎯 {score}/100" + (f" — {e(why)}" if why else ""))
+    if lead:
+        lines.append("📇 Компания добавлена в «Базу компаний» лидогенерации")
+    if v.snippet:
+        text = v.snippet if len(v.snippet) <= SNIPPET else v.snippet[:SNIPPET - 1].rstrip() + "…"
+        lines.append(f"\n<i>{e(text)}</i>")
+    names = ", ".join(NAMES.get(s, s) for s in (sources or [v.source]))
+    link = f'<a href="{e(v.url, quote=True)}">Открыть вакансию</a> · ' if v.url.startswith(("https://", "http://")) else ""
+    lines.append(f"\n🔗 {link}{e(names)}")
+    return "\n".join(lines)
+
+
+def keyboard(match_id: int) -> dict:
+    return {"inline_keyboard": [[{"text": "👍 Подходит", "callback_data": f"jr:{match_id}:1"},
+                                 {"text": "👎 Мимо", "callback_data": f"jr:{match_id}:-1"}]]}
+
+
+def done_keyboard(value: int) -> dict:
+    return {"inline_keyboard": [[{"text": "✅ Подходит" if value > 0 else "❌ Мимо", "callback_data": "jr:done"}]]}
+
+
+async def send(chat_id: str, text: str, markup: dict | None = None) -> int:
+    """Через общий telegram_api портала: та же очередь, пауза между отправками и повтор при 429."""
+    from app.services.notifications import telegram_api
+    payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True}
+    if markup:
+        payload["reply_markup"] = markup
+    result = await telegram_api("sendMessage", payload, timeout=20)
+    return int((result or {}).get("message_id") or 0)

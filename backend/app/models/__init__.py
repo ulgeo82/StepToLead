@@ -17,4 +17,5 @@ from app.models.telephony import TelephonyConnection, Call  # noqa: E402,F401
 from app.models.system import AppSetting, PushSubscription, WorkspaceBot  # noqa: E402,F401
 from app.models.brief import ClientBrief, ExpressAssessment  # noqa: E402,F401
 from app.domains.leadgen.models import LgCompany, LgCompanyKey, LgSourceRun, LgAd, LgSignal, LgContact, LgEnrichment, LgSegment, LgTouch, LgDnc, LgMailbox, LgSequence, LgEnrollment, LgList, LgListItem, LgExport  # noqa: E402,F401
+from app.domains.jobradar.models import JrFilter, JrMatch, JrVacancy  # noqa: E402,F401
 from app.models.report import ClientReport  # noqa: E402,F401

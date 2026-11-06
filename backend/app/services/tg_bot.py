@@ -471,6 +471,7 @@ async def process_update(update, sessions=None):
     private = private and str((sender or {}).get("id")) == str(chat.get("id"))
     update_id = int(update["update_id"])
     response = None
+    jr_edit = None   # радар вакансий: 👍/👎 под постом в канале
     async with sessions() as db:
         state = await db.get(AppSetting, state_key(), with_for_update=True)
         if state is None:
@@ -482,7 +483,10 @@ async def process_update(update, sessions=None):
             # A savepoint prevents an invalid action from committing partial acceptance/writes.
             async with db.begin_nested():
                 text = message.get("text") or ""
-                if not private:
+                from app.domains.jobradar import feedback as jobradar_feedback
+                if jobradar_feedback.is_jobradar(query):
+                    jr_edit = await jobradar_feedback.apply(db, query)
+                elif not private:
                     pass
                 elif not query and text.startswith("/start "):
                     response = await link(db, chat, sender or {}, text.split(maxsplit=1)[1].strip())
@@ -504,6 +508,8 @@ async def process_update(update, sessions=None):
                        "processed": (saved.get("processed", []) + [update_id])[-200:]}
         await db.commit()
         flush_telegram(db)
+    if jr_edit:
+        await safe_api("editMessageReplyMarkup", jr_edit, sessions)
     if response:
         text, markup = response
         payload = {"chat_id": chat["id"], "text": bounded_html(text), "parse_mode": "HTML", "reply_markup": markup,

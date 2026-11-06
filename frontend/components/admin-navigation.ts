@@ -28,6 +28,7 @@ export const adminNavigation: NavigationNode[] = [
     label: "Рост агентства",
     children: [
       { kind: "item", id: "growth-leads", label: "Заявки роста", href: "/admin/growth-leads" },
+      { kind: "item", id: "jobradar", label: "Радар вакансий", href: "/admin/jobradar" },
       {
         kind: "folder",
         id: "leadgen",
