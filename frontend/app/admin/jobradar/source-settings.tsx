@@ -11,7 +11,7 @@ export const send = <T,>(path: string, body: unknown, method = "POST") =>
     timeoutMs: path === "/preview" ? 180_000 : path.endsWith("/check") ? 75_000 : 30_000,
   });
 export const shortMessage = (error: unknown) => message(error)
-  .replace(/https?:\/\/\S+|(?:\b[\w-]+\.)+(?:ru|com|org|net|io)\b[^\s]*/gi, "[адрес скрыт]")
+  .replace(/https?:\/\/\S+/gi, "[адрес скрыт]")
   .replace(/\s+/g, " ").slice(0, 80);
 export const list = (value: unknown): string[] => Array.isArray(value)
   ? value.filter((v): v is string => typeof v === "string")

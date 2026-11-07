@@ -8,7 +8,7 @@ from app.domains.jobradar.sources import Vacancy
 
 FALLBACK = {"hh": "hh.ru", "trudvsem": "Работа России", "habr": "Хабр Карьера", "getmatch": "getmatch",
             "flru": "FL.ru", "telegram": "Telegram", "superjob": "SuperJob"}
-FORMATS = {"remote": "удалёнка", "office": "офис", "hybrid": "гибрид"}
+FORMATS = {"remote": "удалёнка", "office": "офис", "hybrid": "гибрид", "relocation": "релокация"}
 
 
 def source_name(code: str) -> str:

@@ -39,6 +39,44 @@ def context(handler):
 
 
 class GetmatchTests(unittest.IsolatedAsyncioTestCase):
+    async def test_isolated_invalid_records_are_skipped_and_counted(self):
+        valid = sample_offers()["offers"][1:]
+        for rows, expected, fails in (([{}, *valid], 2, False), ([{}, valid[0]], 1, False),
+                                      ([{}, {}, valid[0]], 0, True)):
+            with self.subTest(rows=len(rows), fails=fails):
+                ctx = context(lambda _: httpx.Response(200, json={
+                    "meta": {"total": len(rows), "offset": 0, "limit": 100}, "offers": rows,
+                }))
+                if fails:
+                    with self.assertRaises(SourceFormatError):
+                        await GETMATCH.fetch({}, SINCE, {}, {}, ctx)
+                    self.assertNotIn("getmatch", ctx.cache)
+                else:
+                    found = await GETMATCH.fetch({}, SINCE, {}, {}, ctx)
+                    self.assertEqual(len(found), expected)
+                self.assertEqual(ctx.cache["getmatch_skipped"], 2 if fails else 1)
+
+    async def test_relocation_empty_city_and_unknown_format_keep_offers(self):
+        for city in ("", None):
+            with self.subTest(city=city):
+                relocation = copy.deepcopy(sample_offers()["offers"][1])
+                relocation["id"] = 99999
+                relocation["location_requirements"] = [{"city": city, "format": "relocation_company"}]
+                rows = [relocation, *sample_offers()["offers"][1:]]
+                ctx = context(lambda _: httpx.Response(200, json={
+                    "meta": {"total": 3, "offset": 0, "limit": 100}, "offers": rows,
+                }))
+                found = await GETMATCH.fetch({}, SINCE, {}, {}, ctx)
+                self.assertEqual(len(found), 3)
+                self.assertEqual(ctx.cache["getmatch_skipped"], 0)
+                self.assertEqual(found[0].extra["work_format"], "relocation")
+                self.assertEqual(found[0].city, "")
+                self.assertFalse(found[0].remote)
+                relocation["location_requirements"][0]["format"] = "unknown_future_format"
+                parsed = parse_offer(relocation)
+                self.assertEqual(parsed.extra["work_format"], "office")
+                self.assertFalse(parsed.remote)
+
     async def test_live_offer_parse_pagination_and_cache_between_filters(self):
         sample = sample_offers()
         requests = []

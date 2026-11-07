@@ -35,15 +35,22 @@ def parse_offer(row: dict) -> Vacancy:
             raise SourceFormatError()
         stack.append(skill["name"])
     locations = []
+    formats = set()
     for location in row["location_requirements"]:
-        if not isinstance(location, dict) or not isinstance(location.get("city"), str):
+        if not isinstance(location, dict):
             raise SourceFormatError()
-        if location.get("format") not in {"remote", "office", "hybrid"}:
+        city = location.get("city")
+        if city is not None and not isinstance(city, str):
             raise SourceFormatError()
         if not location.get("exclude"):
-            locations.append(location)
-    formats = {item["format"] for item in locations}
-    work_format = "remote" if "remote" in formats else "hybrid" if "hybrid" in formats else "office"
+            raw_format = location.get("format")
+            work_format = raw_format if raw_format in ("remote", "office", "hybrid") else "office"
+            if raw_format == "relocation_company":
+                work_format = "relocation"
+            formats.add(work_format)
+            if city and city.strip():
+                locations.append({"city": city.strip()})
+    work_format = next((kind for kind in ("remote", "hybrid", "relocation") if kind in formats), "office")
     cities = list(dict.fromkeys(item["city"] for item in locations if item["city"] != "Весь мир"))
     description = strip_tags(row.get("offer_description") or row.get("description_html"))
     url = urljoin("https://getmatch.ru", row["url"])
@@ -92,6 +99,7 @@ class GetmatchAdapter(Adapter):
             collected = {}
             seen_ids = set()
             offset = 0
+            ctx.cache["getmatch_skipped"] = 0
             async with ctx.http() as http:
                 for _ in range(1000):
                     response = await http.get(ENDPOINT, params={"offset": offset, "limit": 100})
@@ -101,14 +109,22 @@ class GetmatchAdapter(Adapter):
                     except ValueError as error:
                         raise SourceFormatError() from error
                     new_ids = 0
+                    invalid = 0
                     for row in rows:
-                        vacancy = parse_offer(row)
+                        try:
+                            vacancy = parse_offer(row)
+                        except (SourceFormatError, ValueError):
+                            invalid += 1
+                            continue
                         if vacancy.ext_id in seen_ids:
                             continue
                         new_ids += 1
                         seen_ids.add(vacancy.ext_id)
                         if row.get("is_active", True):
                             collected[vacancy.ext_id] = vacancy
+                    ctx.cache["getmatch_skipped"] += invalid
+                    if invalid * 2 > len(rows):
+                        raise SourceFormatError("невалидны больше половины предложений страницы")
                     if rows and not new_ids:
                         raise SourceFormatError("повтор страницы предложений")
                     offset += len(rows)
