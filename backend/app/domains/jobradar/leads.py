@@ -11,7 +11,7 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domains.jobradar.sources import Client, Vacancy
+from app.domains.jobradar.sources import REGISTRY, Context, Vacancy
 from app.domains.leadgen import service
 from app.domains.leadgen.core.contact_policy import BLOCKED_STAGES
 from app.domains.leadgen.core.normalize import normalize_domain
@@ -49,7 +49,19 @@ async def _company_blocked(db: AsyncSession, company: LgCompany, now: datetime) 
     return any(e.kind == "company" and e.value_norm == str(company.id) for e in entries)
 
 
-async def add_company(db: AsyncSession, workspace_id: int, cards: list[Vacancy], client: Client, *,
+async def _legal(db: AsyncSession, company: LgCompany, now: datetime) -> None:
+    from app.domains.leadgen import dadata, routes as leadgen_routes
+    try:
+        provider = leadgen_routes.dadata_factory()
+    except Exception:  # noqa: BLE001 — DaData не подключена: компания останется с ИНН, без юрлица
+        return
+    try:
+        await dadata.enrich_legal(db, company, provider, now=now)
+    except Exception as exc:  # noqa: BLE001
+        logger.info("jobradar dadata failed type=%s", type(exc).__name__)
+
+
+async def add_company(db: AsyncSession, workspace_id: int, cards: list[Vacancy], ctx: Context, hh_settings: dict, *,
                       now: datetime) -> tuple[int | None, str]:
     """(id компании, что сделали) — что сделали: added / known / blocked / skipped."""
     main = next((c for c in cards if c.employer.get("id")), cards[0])
@@ -57,15 +69,15 @@ async def add_company(db: AsyncSession, workspace_id: int, cards: list[Vacancy],
         return None, "skipped"
     employer = dict(main.employer)
     site = employer.get("site") or next((c.employer.get("site") for c in cards if c.employer.get("site")), None)
-    if not site and employer.get("id"):
+    if not site and employer.get("id") and main.source == "hh" and "hh" in REGISTRY:
         try:
-            site = await client.hh_employer_site(employer["id"])
+            site = await REGISTRY["hh"].employer_site(employer["id"], hh_settings, ctx)
         except Exception as exc:  # noqa: BLE001 — без сайта компания всё равно попадёт в базу
             logger.info("jobradar hh employer site failed type=%s", type(exc).__name__)
     domain = normalize_domain(site) if site else None
     if await _domain_blocked(db, workspace_id, domain, now):
         return None, "blocked"
-    inn = next((c.employer.get("inn") for c in cards if c.employer.get("inn")), None)
+    inn = next((c.company_inn or c.employer.get("inn") for c in cards if c.company_inn or c.employer.get("inn")), None)
     finding = service.FindingIn(source=SOURCE, name=main.company, inn=inn, domain=domain,
                                 city=None if main.remote else (main.city or None),
                                 hh_employer_id=employer.get("id"), source_url=employer.get("url") or main.url)
@@ -82,6 +94,8 @@ async def add_company(db: AsyncSession, workspace_id: int, cards: list[Vacancy],
             await service.add_signal(db, company, SIGNAL, key=card.uid, now=now, recalc=False,
                                      payload={"title": card.title, "url": card.url, "source": card.source,
                                               "employer_url": card.employer.get("url")})
+    if result.created and company.inn and not company.legal_name:
+        await _legal(db, company, now)   # юрлицо по ИНН — через DaData, как при поиске компаний
     await service.recalc_score(db, company, now=now)
     lst = await hiring_list(db, workspace_id)
     if not await db.get(LgListItem, (lst.id, company.id)):

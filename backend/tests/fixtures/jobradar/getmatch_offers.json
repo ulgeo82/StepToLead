@@ -1,0 +1,686 @@
+{
+ "meta": {
+  "total": 928,
+  "offset": 0,
+  "limit": 20
+ },
+ "offers": [
+  {
+   "published_at": "2026-10-19T08:35:13.045864",
+   "is_active": true,
+   "position": "Data Scientist Fast Track",
+   "language": "ru",
+   "type": "web_and_tg",
+   "id": 36738,
+   "offer_type": "one_day_offer_v3",
+   "cover_letter_required": false,
+   "cover_letter_placeholder": null,
+   "source": "backoffice",
+   "incognito_publication": false,
+   "salary_description": null,
+   "salary_hidden": true,
+   "salary_display_from": null,
+   "salary_display_to": null,
+   "salary_currency": null,
+   "salary_taxes": "net",
+   "salary_is_total": false,
+   "salary_by_our_version": false,
+   "salary_hidden_variant": null,
+   "offer_description": "Приглашаем на <b>Data Scientist Fast Track</b> для Middle+ и Senior-специалистов! Пройдите все этапы отбора в ускоренном формате с 9 по 15 ноября и получите оффер в Авито всего за неделю!\n\n✓ До 9 ноября — подайте заявку и пройдите HR-скрининг. \n✓ До 13 ноября — пройдите техническую секцию (ML-теория и Python).\n✓ 14 ноября — пройдите ML System Design.\n✓ 15 ноября — пройдите финал.\n\n<b>Кого ждём?</b>\n\n✓ Кандидатов с опытом работы от 3,5 лет в крупных российских и международных IT-, BigTech- и FinTech-компаниях. \n✓ С опытом полного цикла разработки моделей: от ресёрча до выкатки в продакшен. \n✓ С опытом полного лидирования проекта.\n\n<b>Формат работы:</b>  Офис или гибрид в Москве, Санкт-Петербурге, Самаре, Казани, Нижнем Новгороде, Ереване или полная удалёнка.\n\n<i>Подробную информацию о командах и мероприятии можно найти в описании анонса.</i>",
+   "skills_objects": [],
+   "url": "/vacancies/36738-data-scientist-fast-track",
+   "description_html": null,
+   "english_level": null,
+   "location_requirements": [
+    {
+     "location_id": "_cu-world",
+     "format": "remote",
+     "exclude": false,
+     "ancestors": [],
+     "metros": [],
+     "city": "Весь мир",
+     "country": ""
+    },
+    {
+     "location_id": "moscow__mo__russia",
+     "format": "hybrid",
+     "exclude": false,
+     "ancestors": [
+      "moscow",
+      "mo__russia",
+      "russia",
+      "_cu-europe",
+      "_cu-emea",
+      "_cu-world"
+     ],
+     "metros": [],
+     "city": "Москва",
+     "country": "Россия"
+    },
+    {
+     "location_id": "saint-petersburg__leningrad__russia",
+     "format": "hybrid",
+     "exclude": false,
+     "ancestors": [
+      "saint-petersburg",
+      "leningrad__russia",
+      "russia",
+      "_cu-europe",
+      "_cu-emea",
+      "_cu-world"
+     ],
+     "metros": [],
+     "city": "Санкт-Петербург",
+     "country": "Россия"
+    },
+    {
+     "location_id": "samara__samara__russia",
+     "format": "hybrid",
+     "exclude": false,
+     "ancestors": [
+      "samara",
+      "samara__russia",
+      "russia",
+      "_cu-europe",
+      "_cu-emea",
+      "_cu-world"
+     ],
+     "metros": [],
+     "city": "Самара",
+     "country": "Россия"
+    },
+    {
+     "location_id": "kazan__tatarstan__russia",
+     "format": "hybrid",
+     "exclude": false,
+     "ancestors": [
+      "kazan",
+      "tatarstan__russia",
+      "russia",
+      "_cu-europe",
+      "_cu-emea",
+      "_cu-world"
+     ],
+     "metros": [],
+     "city": "Казань",
+     "country": "Россия"
+    },
+    {
+     "location_id": "nizhniy-novgorod__nizjnij-novgorod__russia",
+     "format": "hybrid",
+     "exclude": false,
+     "ancestors": [
+      "nizhniy-novgorod",
+      "nizjnij-novgorod__russia",
+      "russia",
+      "_cu-europe",
+      "_cu-emea",
+      "_cu-world"
+     ],
+     "metros": [],
+     "city": "Нижний Новгород",
+     "country": "Россия"
+    },
+    {
+     "location_id": "yerevan__yerevan__armenia",
+     "format": "hybrid",
+     "exclude": false,
+     "ancestors": [
+      "yerevan",
+      "yerevan__armenia",
+      "armenia",
+      "_cu-world"
+     ],
+     "metros": [],
+     "city": "Ереван",
+     "country": "Армения"
+    }
+   ],
+   "location_items": [
+    {
+     "label": "Весь мир",
+     "format": "remote",
+     "exclude": false
+    },
+    {
+     "label": "Москва",
+     "format": "hybrid",
+     "exclude": false
+    },
+    {
+     "label": "Санкт-Петербург",
+     "format": "hybrid",
+     "exclude": false
+    },
+    {
+     "label": "Самара",
+     "format": "hybrid",
+     "exclude": false
+    },
+    {
+     "label": "Казань",
+     "format": "hybrid",
+     "exclude": false
+    },
+    {
+     "label": "Нижний Новгород",
+     "format": "hybrid",
+     "exclude": false
+    },
+    {
+     "label": "Ереван (Армения)",
+     "format": "hybrid",
+     "exclude": false
+    }
+   ],
+   "application": null,
+   "viewed": false,
+   "company": {
+    "id": null,
+    "name": "Avito",
+    "logotype": "e33b9bf3-65af-47e4-84e6-499b4bd5a1b6.png",
+    "url": "/companies/ZDv9oblG-avito"
+   },
+   "one_day_offer_content": null,
+   "one_day_offer_content_v3": {
+    "date": "9–15 ноября",
+    "teams": {
+     "items": [
+      {
+       "text": "",
+       "header": "RecSys, DL, LLM, NLP, Classical ML"
+      }
+     ],
+     "header": "В какие домены нанимаем "
+    },
+    "format": "Онлайн",
+    "schedule": {
+     "items": [
+      {
+       "date": "До 9 ноября",
+       "text": "",
+       "header": "Подайте заявку и пройдите HR⁠-⁠скрининг"
+      },
+      {
+       "date": "До 13 ноября",
+       "text": "",
+       "header": "Пройдите техническую секцию (ML-теория и Python)"
+      },
+      {
+       "date": "14 ноября",
+       "text": "<h3>15 ноября — финал.</h3>\n",
+       "header": "Пройдите этап ML System Design"
+      }
+     ],
+     "header": "Как пройдёт мероприятие"
+    },
+    "block_one": {
+     "header": "Что такое Fast Track",
+     "short_description": "Fast Track — это ускоренный процесс найма для Data Science-специалистов. За неделю пройдите все этапы отбора в ускоренном формате и получите оффер!"
+    },
+    "block_two": {
+     "stack": [],
+     "header": "Приглашаем Middle+ и Senior Data Science-специалистов",
+     "short_description": "\n<ul>\n  <li>Кандидатов с опытом работы от 3,5 лет в крупных российских и международных IT-, BigTech- и FinTech-компаниях.</li>\n  <li>С опытом полного цикла разработки моделей: от ресёрча до выкатки в продакшен.</li>\n  <li>С опытом полного лидирования проекта.</li>\n</ul>\n\n\n"
+    },
+    "advantages": {
+     "items": [
+      {
+       "icon": "🌍",
+       "text": "20+ млн объявлений в день проходят через наши модели. 5+ млн чатов в день обрабатываются ML — модерация, антифрод, ранжирование ответов, рекомендации. 50+ метрик качества, по которым мы оцениваем каждый релиз.",
+       "header": "Работа в классифайде № 1 в мире по количеству пользователей"
+      },
+      {
+       "icon": "🔄",
+       "text": "Senior DS отвечает за модель end-to-end: формулировка задачи → валидация → раскатка → A/B → мониторинг → итерации.",
+       "header": " Полный цикл работы Senior DS"
+      },
+      {
+       "icon": "🧠",
+       "text": "Применяем подходы, близкие к state-of-the-art в различных областях.",
+       "header": "Современные ML‑модели"
+      },
+      {
+       "icon": "🔬",
+       "text": "Фокусируемся на том, воспроизводится ли это на наших данных и реально ли двигает метрики. Это среда, где вы можете предложить нестандартное решение и проверить его на реальных пользователях.",
+       "header": "Проверка гипотез на реальных данных"
+      },
+      {
+       "icon": "⚙️",
+       "text": "Наш масштаб позволяет содержать развитую инфраструктуру: кластеры для распределённого обучения и параллельных вычислений на больших данных, GPU-серверы для CV/NLP/LLM-задач, собственные MLOps- и A/B-платформы и многое другое.",
+       "header": "Большие данные и развитая инфраструктура"
+      },
+      {
+       "icon": "💼",
+       "text": "Конкурентная заработная плата, работа с лучшими специалистами и чёткая матрица компетенций, которая обеспечивает понятные условия для роста. Мы работаем в удобном графике, поэтому жить можно где угодно и работать из дома или приходить в офисы в Москве, Санкт-Петербурге, Самаре, Казани, Нижнем Новгороде и Ереване. И, конечно, в компании есть вся IT-база — мощные ноутбуки, обучение, компенсация обедов, страховка и дополнительные дни отпуска.",
+       "header": "Комфортные условия"
+      }
+     ],
+     "header": "Преимущества работы с нами"
+    }
+   }
+  },
+  {
+   "published_at": "2026-11-07T09:00:54.496484",
+   "is_active": true,
+   "position": "Python-разработчик (Middle)",
+   "language": "ru",
+   "type": "only_web",
+   "id": 36673,
+   "offer_type": "vacancy",
+   "cover_letter_required": false,
+   "cover_letter_placeholder": null,
+   "source": "hh_import",
+   "incognito_publication": false,
+   "salary_description": "",
+   "salary_hidden": true,
+   "salary_display_from": null,
+   "salary_display_to": null,
+   "salary_currency": null,
+   "salary_taxes": "net",
+   "salary_is_total": false,
+   "salary_by_our_version": false,
+   "salary_hidden_variant": null,
+   "offer_description": "<b>Что делать:</b> Развивать и разрабатывать сервисы на Python, проектировать и реализовывать бизнес-логику, создавать и поддерживать интеграции с Kafka, внутренними системами и HTTP API.\n\n<b>О компании:</b> МегаФон (>70 млн. абонентов) — российская телекоммуникационная компания, предоставляющая услуги сотовой связи, а также местной телефонной связи, широкополосного доступа в Интернет, кабельного телевидения и ряд сопутствующих услуг. Награда за «Самую быструю сеть мобильной связи в России» (Ookla, 2020 год). Первыми запустили высокоскоростной интернет в России и уже тестируют сеть 5G.",
+   "skills_objects": [
+    {
+     "name": "PostgreSQL",
+     "slug": "postgresql",
+     "is_custom": false
+    },
+    {
+     "name": "SQL",
+     "slug": "sql",
+     "is_custom": false
+    },
+    {
+     "name": "Python",
+     "slug": "python",
+     "is_custom": false
+    },
+    {
+     "name": "Docker",
+     "slug": "docker",
+     "is_custom": false
+    },
+    {
+     "name": "Redis",
+     "slug": "redis",
+     "is_custom": false
+    },
+    {
+     "name": "Apache Kafka",
+     "slug": "apache kafka",
+     "is_custom": false
+    },
+    {
+     "name": "Go",
+     "slug": "go",
+     "is_custom": false
+    },
+    {
+     "name": "QA",
+     "slug": "qa",
+     "is_custom": false
+    },
+    {
+     "name": "FastAPI",
+     "slug": "fastapi",
+     "is_custom": false
+    }
+   ],
+   "url": "/vacancies/36673-python-razrabotchik-middle",
+   "description_html": null,
+   "english_level": null,
+   "location_requirements": [
+    {
+     "location_id": "moscow__mo__russia",
+     "format": "remote",
+     "exclude": false,
+     "ancestors": [
+      "moscow",
+      "mo__russia",
+      "russia",
+      "_cu-europe",
+      "_cu-emea",
+      "_cu-world"
+     ],
+     "metros": [
+      "Маяковская"
+     ],
+     "city": "Москва",
+     "country": "Россия"
+    }
+   ],
+   "location_items": [
+    {
+     "label": "Москва (Маяковская)",
+     "format": "remote",
+     "exclude": false
+    }
+   ],
+   "application": null,
+   "viewed": false,
+   "company": {
+    "id": null,
+    "name": "МегаФон",
+    "logotype": "94d67ed0-dc8b-4c1f-8657-a57504eb0f7e.png",
+    "url": "/companies/m6QOjDvr-megafon"
+   },
+   "one_day_offer_content": null,
+   "one_day_offer_content_v3": null
+  },
+  {
+   "published_at": "2026-11-07T09:00:54.424357",
+   "is_active": true,
+   "position": "QA-инженер систем взаимодействия с клиентами",
+   "language": "ru",
+   "type": "only_web",
+   "id": 36674,
+   "offer_type": "vacancy",
+   "cover_letter_required": false,
+   "cover_letter_placeholder": null,
+   "source": "hh_import",
+   "incognito_publication": false,
+   "salary_description": "",
+   "salary_hidden": true,
+   "salary_display_from": null,
+   "salary_display_to": null,
+   "salary_currency": null,
+   "salary_taxes": "net",
+   "salary_is_total": false,
+   "salary_by_our_version": false,
+   "salary_hidden_variant": null,
+   "offer_description": "<b>Что делать:</b> Составлять сценарии и чек-листы тестирования, проводить ручное, автоматизированное и нагрузочное тестирование, фиксировать и описывать ошибки, контролировать их исправление.\n\n<b>О компании:</b> МегаФон (>70 млн. абонентов) — российская телекоммуникационная компания, предоставляющая услуги сотовой связи, а также местной телефонной связи, широкополосного доступа в Интернет, кабельного телевидения и ряд сопутствующих услуг. Награда за «Самую быструю сеть мобильной связи в России» (Ookla, 2020 год). Первыми запустили высокоскоростной интернет в России и уже тестируют сеть 5G.",
+   "skills_objects": [
+    {
+     "name": "SQL",
+     "slug": "sql",
+     "is_custom": false
+    },
+    {
+     "name": "CI/CD",
+     "slug": "ci/cd",
+     "is_custom": false
+    },
+    {
+     "name": "Agile",
+     "slug": "agile",
+     "is_custom": false
+    },
+    {
+     "name": "QA",
+     "slug": "qa",
+     "is_custom": false
+    },
+    {
+     "name": "ClickHouse",
+     "slug": "clickhouse",
+     "is_custom": false
+    },
+    {
+     "name": "Grafana",
+     "slug": "grafana",
+     "is_custom": false
+    },
+    {
+     "name": "WebSocket",
+     "slug": "websocket",
+     "is_custom": false
+    },
+    {
+     "name": "NoSQL",
+     "slug": "nosql",
+     "is_custom": false
+    },
+    {
+     "name": "CI",
+     "slug": "ci",
+     "is_custom": false
+    }
+   ],
+   "url": "/vacancies/36674-qa-inzhener-sistem-vzaimodeistviia-s-klientami",
+   "description_html": null,
+   "english_level": null,
+   "location_requirements": [
+    {
+     "location_id": "moscow__mo__russia",
+     "format": "remote",
+     "exclude": false,
+     "ancestors": [
+      "moscow",
+      "mo__russia",
+      "russia",
+      "_cu-europe",
+      "_cu-emea",
+      "_cu-world"
+     ],
+     "metros": [
+      "Маяковская"
+     ],
+     "city": "Москва",
+     "country": "Россия"
+    }
+   ],
+   "location_items": [
+    {
+     "label": "Москва (Маяковская)",
+     "format": "remote",
+     "exclude": false
+    }
+   ],
+   "application": null,
+   "viewed": false,
+   "company": {
+    "id": null,
+    "name": "МегаФон",
+    "logotype": "94d67ed0-dc8b-4c1f-8657-a57504eb0f7e.png",
+    "url": "/companies/m6QOjDvr-megafon"
+   },
+   "one_day_offer_content": null,
+   "one_day_offer_content_v3": null
+  }
+ ],
+ "filters": {
+  "sp": [
+   {
+    "value": "qa_auto",
+    "name": "QA Auto"
+   },
+   {
+    "value": "project_management",
+    "name": "Project Manager"
+   },
+   {
+    "value": "engineering_management",
+    "name": "CTO / CIO"
+   },
+   {
+    "value": "qa_manual",
+    "name": "QA Manual"
+   },
+   {
+    "value": "information_security",
+    "name": "Information Security"
+   },
+   {
+    "value": "data_science",
+    "name": "Data Scientist & Machine Learning"
+   },
+   {
+    "value": "architect",
+    "name": "Architect"
+   },
+   {
+    "value": "c_language",
+    "name": "C"
+   },
+   {
+    "value": "sales",
+    "name": "Sales "
+   },
+   {
+    "value": "marketing",
+    "name": "Marketing"
+   },
+   {
+    "value": "systems_network_engineering",
+    "name": "Systems & Network Engineering"
+   },
+   {
+    "value": "embedded",
+    "name": "Embedded"
+   },
+   {
+    "value": "dev_ops",
+    "name": "DevOps"
+   },
+   {
+    "value": "sre",
+    "name": "SRE"
+   },
+   {
+    "value": "js_frontend",
+    "name": "JavaScript / TypeScript"
+   },
+   {
+    "value": "tech_recruitment",
+    "name": "HR & Recruitment"
+   },
+   {
+    "value": "php",
+    "name": "PHP"
+   },
+   {
+    "value": "java_scala",
+    "name": "Java / Scala "
+   },
+   {
+    "value": "c_sharp",
+    "name": "C#"
+   },
+   {
+    "value": "golang",
+    "name": "Golang"
+   },
+   {
+    "value": "ruby",
+    "name": "Ruby"
+   },
+   {
+    "value": "python",
+    "name": "Python"
+   },
+   {
+    "value": "js_backend",
+    "name": "Node.js"
+   },
+   {
+    "value": "ios",
+    "name": "iOS"
+   },
+   {
+    "value": "c_cpp",
+    "name": "C++"
+   },
+   {
+    "value": "android",
+    "name": "Android"
+   },
+   {
+    "value": "blockchain_crypto",
+    "name": "Blockchain & Crypto"
+   },
+   {
+    "value": "kotlin",
+    "name": "Kotlin"
+   },
+   {
+    "value": "typescript",
+    "name": "TypeScript"
+   },
+   {
+    "value": "dba",
+    "name": "DBA"
+   },
+   {
+    "value": "dwh_data_warehouse",
+    "name": "DWH (Data warehouse)"
+   },
+   {
+    "value": "devrel",
+    "name": "DevRel"
+   },
+   {
+    "value": "telecom_electronics_engineering",
+    "name": "Telecom & Electronics Engineering"
+   },
+   {
+    "value": "load_performance",
+    "name": "Load / Performance"
+   },
+   {
+    "value": "cross_platform_flutter_react_native",
+    "name": "Cross-Platform: Flutter & React Native "
+   },
+   {
+    "value": "fullstack",
+    "name": "Fullstack"
+   },
+   {
+    "value": "product_management",
+    "name": "Product Management"
+   },
+   {
+    "value": "product_design",
+    "name": "Product Design"
+   },
+   {
+    "value": "product_analyst",
+    "name": "Product Analytics"
+   },
+   {
+    "value": "system_analyst",
+    "name": "System Analytics"
+   },
+   {
+    "value": "one_c",
+    "name": "1C Development"
+   },
+   {
+    "value": "data_engineering",
+    "name": "Data Engineering"
+   },
+   {
+    "value": "business_analyst",
+    "name": "Business Analytics"
+   },
+   {
+    "value": "support_engineer",
+    "name": "Support Engineering"
+   },
+   {
+    "value": "ux_writer",
+    "name": "UX Writing"
+   },
+   {
+    "value": "data_analyst_bi",
+    "name": "Data Analytics & BI"
+   },
+   {
+    "value": "system_administrator",
+    "name": "System Administration"
+   },
+   {
+    "value": "one_c_analyst",
+    "name": "1C Analytics"
+   },
+   {
+    "value": "tech_writer",
+    "name": "Tech Writing"
+   }
+  ]
+ },
+ "current_filters": null,
+ "profile_filters": null
+}

@@ -30,6 +30,8 @@ class JrFilter(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_result: Mapped[dict] = mapped_column(JSON, default=dict)
+    # Настройки площадок в этом фильтре: {"telegram": {"channels": [...]}, "flru": {"budget_from": 0, ...}}
+    source_settings: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -42,17 +44,21 @@ class JrVacancy(Base):
     fingerprint: Mapped[str] = mapped_column(String(400), index=True)
     source: Mapped[str] = mapped_column(String(16))
     ext_id: Mapped[str] = mapped_column(String(160))
+    kind: Mapped[str] = mapped_column(String(10), default="vacancy")         # vacancy | project
     title: Mapped[str] = mapped_column(String(400))
     company: Mapped[str | None] = mapped_column(String(400))
+    company_inn: Mapped[str | None] = mapped_column(String(12))
     city: Mapped[str | None] = mapped_column(String(160))
     salary_from: Mapped[int | None] = mapped_column(Integer)
     salary_to: Mapped[int | None] = mapped_column(Integer)
     currency: Mapped[str | None] = mapped_column(String(8))
+    salary_known: Mapped[bool] = mapped_column(Boolean, default=True)
     remote: Mapped[bool] = mapped_column(Boolean, default=False)
     experience: Mapped[str | None] = mapped_column(String(32))
     url: Mapped[str | None] = mapped_column(String(1000))
     snippet: Mapped[str | None] = mapped_column(Text)
     employer: Mapped[dict] = mapped_column(JSON, default=dict)            # id, url, inn, site — для режима «лиды»
+    extra: Mapped[dict] = mapped_column(JSON, default=dict)               # стек, формат, бюджет, срок, канал
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -78,3 +84,31 @@ class JrMatch(Base):
     feedback: Mapped[int | None] = mapped_column(Integer)                # 1 — 👍, -1 — 👎
     feedback_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+class JrSource(Base):
+    """Площадка целиком: вкл/выкл, глобальные настройки (секреты — зашифрованы), последний ответ."""
+    __tablename__ = "jr_sources"
+
+    code: Mapped[str] = mapped_column(String(32), primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    settings: Mapped[dict] = mapped_column(JSON, default=dict)
+    last_ok_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(String(200))
+    last_error_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class JrTgChannel(Base):
+    """Telegram-канал в фильтре: с какого поста читать дальше и как он отвечает."""
+    __tablename__ = "jr_tg_channels"
+    __table_args__ = (UniqueConstraint("filter_id", "channel", name="uq_jr_tg_channel"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    filter_id: Mapped[int] = mapped_column(ForeignKey("jr_filters.id", ondelete="CASCADE"), index=True)
+    channel: Mapped[str] = mapped_column(String(64), index=True)
+    status: Mapped[str] = mapped_column(String(16), default="unknown")      # ok / unavailable / closed / unknown
+    last_post_id: Mapped[int | None] = mapped_column(Integer)
+    last_post_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    error: Mapped[str | None] = mapped_column(String(200))
+    checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

@@ -1,6 +1,6 @@
 {"status": "200", "results": {"vacancies": [
  {"vacancy": {"id": "tv-1", "job-name": "Интернет маркетолог", "schedule": "Удаленная работа",
-   "company": {"name": "ООО «Ромашка»", "inn": "6312345678"}, "region": {"name": "Самарская область"},
+   "company": {"name": "ООО «Ромашка»", "inn": "7707083893"}, "region": {"name": "Самарская область"},
    "salary_min": 60000, "salary_max": 80000, "vac_url": "https://trudvsem.ru/vacancy/card/tv-1",
    "duty": "<p>Настройка рекламы</p>", "creation-date": "2026-11-06"}},
  {"vacancy": {"id": "tv-2", "job-name": "Мерчендайзер-маркетолог", "schedule": "Полный день",

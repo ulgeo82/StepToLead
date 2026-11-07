@@ -18,6 +18,9 @@ def upgrade_existing_schema(connection):
     ExpressAssessment.__table__.create(connection, checkfirst=True)
     inspector = inspect(connection)
     columns = {
+        "jr_filters": {"source_settings": "JSON"},
+        "jr_vacancies": {"kind": "VARCHAR(10) NOT NULL DEFAULT 'vacancy'", "company_inn": "VARCHAR(12)",
+                         "salary_known": "BOOLEAN NOT NULL DEFAULT TRUE", "extra": "JSON"},
         "messages": {"meta": "JSON"},
         "ai_usage": {"bucket": "VARCHAR(12) NOT NULL DEFAULT 'client'"},
         "proxies": {"pool": "VARCHAR(16) NOT NULL DEFAULT 'agency'",

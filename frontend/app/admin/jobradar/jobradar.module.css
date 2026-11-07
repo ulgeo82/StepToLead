@@ -1,0 +1,23 @@
+.platforms { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-bottom: 20px; }
+.platform { margin-bottom: 0; min-width: 0; }
+.head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.head h2 { margin-bottom: 6px; font-size: 18px; }
+.stats { display: flex; flex-wrap: wrap; gap: 12px; margin: 14px 0; font-size: 12px; color: #8391ad; }
+.stats b { color: #fff; margin-right: 4px; }
+.settings { border-top: 1px solid #26324d; padding-top: 12px; margin-top: 12px; }
+.settings summary { cursor: pointer; min-height: 36px; color: #c9d2e3; }
+.settings > form > div { grid-template-columns: 1fr; }
+.channels { display: grid; gap: 10px; margin-top: 16px; }
+.channel { border: 1px solid #26324d; border-radius: 10px; padding: 10px; min-width: 0; }
+.channel b { overflow-wrap: anywhere; }
+.channel small { display: block; color: #8391ad; margin: 5px 0; }
+.channel button { min-height: 36px; padding: 6px 9px; font-size: 12px; }
+.channelForm { display: grid; gap: 10px; padding-top: 12px; }
+.sourceOption { min-width: 0; display: grid; gap: 8px; margin-bottom: 10px; }
+.sourceOption > button { width: fit-content; }
+.disabled { opacity: .5; }
+.breakdown { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; color: #8391ad; font-size: 12px; }
+.platform input, .platform select, .platform textarea { max-width: 100%; }
+.platform :focus-visible, .sourceOption :focus-visible { outline: 2px solid #7fa4ff; outline-offset: 3px; }
+@media (max-width: 1450px) { .platforms { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 720px) { .platforms { grid-template-columns: 1fr; } }

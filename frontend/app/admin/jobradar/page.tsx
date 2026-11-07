@@ -3,16 +3,16 @@
 import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
-import { date, message, PageHeader } from "../leadgen/shared";
+import { date, PageHeader } from "../leadgen/shared";
 import styles from "../leadgen/leadgen.module.css";
-
-const base = "/admin/jobradar";
-const send = <T,>(path: string, body: unknown, method = "POST") =>
-  api<T>(`${base}${path}`, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+import local from "./jobradar.module.css";
+import { FilterSourceOptions, SourcesPanel } from "./sources-panel";
+import { base, Channel, normalizeValues, send, Settings, shortMessage as message, Source } from "./source-settings";
 
 type Filter = {
   id: number; name: string; mode: "work" | "leads"; keywords: string[]; exclude: string[]; remote_only: boolean;
   regions: string[]; salary_from: number; allow_no_salary: boolean; experience: string[]; sources: string[];
+  source_settings: Record<string, Settings>;
   chat_id: string | null; ai_min_score: number; profile: string | null; enabled: boolean; last_run_at: string | null;
   last_result: { found?: number; sent?: number; leads?: number; skipped?: number; ai_low?: number; errors?: Record<string, string>;
     by_source?: Record<string, BySource> };
@@ -20,20 +20,12 @@ type Filter = {
 };
 type BySource = { state: "ok" | "skipped" | "error"; found?: number; passed?: number; dropped?: number; reason?: string;
   note?: string; error?: string };
-const SOURCE_NAMES: Record<string, string> = { hh: "hh.ru", trudvsem: "Работа России", habr: "Хабр" };
 function sourceLine(id: string, b: BySource): string {
-  const name = SOURCE_NAMES[id] || id;
-  if (b.state === "skipped") return `${name}: пропущен — ${b.note}`;
-  if (b.state === "error") return `${name}: ошибка ${b.error}`;
-  const found = b.found || 0;
-  if (!found) return `${name}: 0 найдено`;
-  return `${name}: найдено ${found}, прошло ${b.passed || 0}, отсеяно ${b.dropped || 0}${b.reason ? ` (чаще всего: ${b.reason})` : ""}`;
+  return `${id === "telegram" ? "tg" : id} ${b.found || 0}→${b.passed || 0}`;
 }
 type Overview = {
   bot_configured: boolean; ai_available: boolean;
-  settings: { interval_minutes: number; hh_token_set: boolean };
-  sources: { id: string; name: string; state?: "ok" | "skipped" | "error"; note?: string | null; ok_at?: string | null;
-    error?: string | null; error_at?: string | null }[];
+  settings: { interval_minutes: number };
   chats: { id: string; title: string }[];
 };
 type Preview = {
@@ -49,7 +41,6 @@ type Item = {
     salary_to: number | null; url: string | null };
 };
 
-const SOURCES: [string, string][] = [["hh", "hh.ru"], ["trudvsem", "Работа России"], ["habr", "Хабр Карьера"]];
 const EXPERIENCE: [string, string][] = [["noExperience", "Без опыта"], ["between1And3", "1–3 года"],
   ["between3And6", "3–6 лет"], ["moreThan6", "Больше 6 лет"]];
 const STATUSES: [string, string][] = [["", "Все"], ["sent", "Отправлено"], ["lead", "В базе компаний"],
@@ -62,11 +53,14 @@ const salary = (v: Item["vacancy"]) => !v.salary_from && !v.salary_to ? "з/п �
 const empty: Omit<Filter, "id" | "last_run_at" | "last_result" | "stats"> = {
   name: "", mode: "work", keywords: [], exclude: [], remote_only: true, regions: [], salary_from: 0, allow_no_salary: true,
   experience: [], sources: ["hh", "trudvsem", "habr"], chat_id: null, ai_min_score: 0, profile: "", enabled: false,
+  source_settings: {},
 };
 
 export default function JobRadarPage() {
   const [filters, setFilters] = useState<Filter[] | null>(null);
   const [overview, setOverview] = useState<Overview | null>(null);
+  const [sources, setSources] = useState<Source[] | null>(null);
+  const [channels, setChannels] = useState<Channel[]>([]);
   const [editing, setEditing] = useState<Partial<Filter> | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -75,8 +69,19 @@ export default function JobRadarPage() {
   const refresh = useCallback(() => setRevision((n) => n + 1), []);
 
   useEffect(() => {
-    api<{ items: Filter[] }>(`${base}/filters`).then((d) => setFilters(d.items)).catch((e) => setError(message(e)));
-    api<Overview>(`${base}/overview`).then(setOverview).catch(() => {});
+    const controller = new AbortController();
+    setError("");
+    const options = { signal: controller.signal };
+    const failure = (reason: unknown) => { if (!controller.signal.aborted) setError(message(reason)); };
+    api<{ items: Filter[] }>(`${base}/filters`, options)
+      .then(d => { if (!controller.signal.aborted) setFilters(d.items); }).catch(failure);
+    api<Overview>(`${base}/overview`, options)
+      .then(d => { if (!controller.signal.aborted) setOverview(d); }).catch(failure);
+    api<{ items: Source[] }>(`${base}/sources`, options)
+      .then(d => { if (!controller.signal.aborted) setSources(d.items); }).catch(failure);
+    api<{ items: Channel[] }>(`${base}/channels`, options)
+      .then(d => { if (!controller.signal.aborted) setChannels(d.items); }).catch(failure);
+    return () => controller.abort();
   }, [revision]);
 
   async function act(f: Filter, kind: "toggle" | "test" | "run" | "delete") {
@@ -93,12 +98,18 @@ export default function JobRadarPage() {
 
   return (
     <div className={`page ${styles.page}`}>
-      <PageHeader title="Радар вакансий" subtitle="Ищет новые вакансии на hh.ru, «Работе России» и Хабр Карьере и присылает их в Telegram. Режим «лиды» кладёт компании, которые нанимают маркетолога, в «Базу компаний».">
-        <div className={styles.actions}><button type="button" className={styles.primary} onClick={() => setEditing({ ...empty })}>＋ Новый фильтр</button></div>
+      <PageHeader title="Радар вакансий" subtitle="Площадки, публичные Telegram-каналы и фильтры вакансий и проектов.">
+        <div className={styles.actions}><button type="button" className={styles.primary} disabled={!sources || !overview}
+          onClick={() => setEditing({ ...empty, sources: empty.sources.filter(code =>
+            sources?.some(s => s.code === code && s.enabled && s.state !== "needs_key")) })}>＋ Новый фильтр</button></div>
       </PageHeader>
       {error && <p className={styles.error} role="alert">{error}</p>}
       {notice && <p className={styles.notice} role="status">{notice}</p>}
       {overview && !overview.bot_configured && <p className={styles.error}>Бот портала не подключён — посты в Telegram отправлять некуда. Укажите токен бота в настройках интеграций.</p>}
+
+      {sources ? <SourcesPanel sources={sources} channels={channels} filters={filters || []} refresh={refresh}/>
+        : <p role="status" className={styles.muted}>Загружаем площадки…
+          <button type="button" className={styles.secondary} onClick={refresh}>Повторить</button></p>}
 
       <section className={styles.card}>
         <h2>Фильтры</h2>
@@ -115,8 +126,11 @@ export default function JobRadarPage() {
                     <td>{f.stats.liked_share == null ? "—" : `${f.stats.liked_share}%`}<small>{f.stats.rated ? `оценок ${f.stats.rated}` : ""}</small></td>
                     <td>{date(f.last_run_at)}
                       <small>{f.last_result.found != null ? `найдено ${f.last_result.found}, ${f.mode === "leads" ? `в базу ${f.last_result.leads ?? 0}` : `отправлено ${f.last_result.sent ?? 0}`}` : ""}</small>
-                      {f.last_result.by_source ? Object.entries(f.last_result.by_source).map(([id, b]) => (
-                        <small key={id} className={b.state === "error" ? styles.errorText : ""}>{sourceLine(id, b)}</small>))
+                      {f.last_result.by_source ? <div className={local.breakdown}>
+                        {Object.entries(f.last_result.by_source).map(([id, b], index) => (
+                          <span key={id} title={message(new Error(b.reason || b.error || b.note || b.state))}
+                            className={b.state === "error" ? styles.errorText : ""}>
+                            {index > 0 ? " · " : ""}{sourceLine(id, b)}</span>))}</div>
                         : f.last_result.errors && Object.keys(f.last_result.errors).length > 0 && <small className={styles.errorText}>Ошибки: {Object.keys(f.last_result.errors).join(", ")}</small>}</td>
                     <td><div className={styles.rowActions}>
                       <button type="button" className={styles.secondary} onClick={() => setEditing(f)}>Изменить</button>
@@ -132,55 +146,45 @@ export default function JobRadarPage() {
         )}
       </section>
 
-      {overview && <Sources overview={overview} onSaved={refresh} />}
+      {overview && <RunInterval overview={overview} onSaved={refresh} />}
       <Feed filters={filters || []} revision={revision} />
-      {editing && overview && <FilterForm value={editing} chats={overview.chats} aiAvailable={overview.ai_available}
+      {editing && overview && sources && <FilterForm value={editing} chats={overview.chats}
+        sources={sources} channels={channels} aiAvailable={overview.ai_available}
         close={() => setEditing(null)} saved={() => { setEditing(null); setNotice("Фильтр сохранён"); refresh(); }} />}
     </div>
   );
 }
 
-function Sources({ overview, onSaved }: { overview: Overview; onSaved: () => void }) {
+function RunInterval({ overview, onSaved }: { overview: Overview; onSaved: () => void }) {
   const [every, setEvery] = useState(overview.settings.interval_minutes);
-  const [token, setToken] = useState("");
   const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
   async function save(e: FormEvent) {
-    e.preventDefault(); setError("");
+    e.preventDefault(); setError(""); setBusy(true);
     try {
-      await send("/settings", { interval_minutes: every, ...(token ? { hh_token: token } : {}) }, "PATCH");
-      setToken(""); onSaved();
-    } catch (err) { setError(message(err)); }
+      await send("/settings", { interval_minutes: every }, "PATCH");
+      onSaved();
+    } catch (err) { setError(message(err)); } finally { setBusy(false); }
   }
   return (
     <section className={styles.card}>
-      <h2>Источники</h2>
-      <dl className={styles.metrics}>
-        {overview.sources.map((s) => (
-          <div key={s.id}><dt>{s.name}</dt>
-            <dd className={s.state === "error" || (!s.state && s.error) ? styles.errorText : ""}>
-              {s.state === "skipped" ? "пропущен" : s.state === "error" || (!s.state && s.error) ? "ошибка" : s.ok_at ? "работает" : "ещё не проверялся"}</dd>
-            <small className={styles.muted}>{s.state === "skipped" ? s.note
-              : <>{s.ok_at ? `ответ ${date(s.ok_at)}` : ""}{s.error ? ` · ${s.error}` : ""}</>}</small></div>
-        ))}
-      </dl>
+      <h2>Проверка по расписанию</h2>
       <form className={styles.inlineForm} onSubmit={save}>
         <label className={styles.field}>Проверять каждые, мин
-          <input type="number" min={5} max={1440} value={every} onChange={(e) => setEvery(Number(e.target.value))} />
+          <input type="number" min={5} max={1440} required disabled={busy} value={every} onChange={(e) => setEvery(Number(e.target.value))} />
         </label>
-        <label className={styles.field}>Токен приложения hh.ru {overview.settings.hh_token_set ? "(сохранён)" : "— без него hh.ru пропускается"}
-          <input type="password" autoComplete="off" placeholder={overview.settings.hh_token_set ? "••••••• — введите новый, чтобы заменить" : "токен из dev.hh.ru → «Мои приложения»"} value={token} onChange={(e) => setToken(e.target.value)} />
-        </label>
-        <button type="submit" className={styles.secondary}>Сохранить</button>
+        <button type="submit" disabled={busy} className={styles.secondary}>Сохранить</button>
       </form>
-      {error && <p className={styles.error}>{error}</p>}
+      {error && <p className={styles.error} role="alert">{error}</p>}
     </section>
   );
 }
 
-function FilterForm({ value, chats, aiAvailable, close, saved }: {
+function FilterForm({ value, chats, sources, channels, aiAvailable, close, saved }: {
   value: Partial<Filter>; chats: Overview["chats"]; aiAvailable: boolean; close: () => void; saved: () => void;
+  sources: Source[]; channels: Channel[];
 }) {
-  const [f, setF] = useState({ ...empty, ...value });
+  const [f, setF] = useState({ ...empty, ...value, source_settings: value.source_settings || {} });
   const [keywords, setKeywords] = useState((value.keywords || []).join("\n"));
   const [exclude, setExclude] = useState((value.exclude || []).join("\n"));
   const [regions, setRegions] = useState((value.regions || []).join(", "));
@@ -196,7 +200,9 @@ function FilterForm({ value, chats, aiAvailable, close, saved }: {
 
   const formBody = () => ({ mode: f.mode, keywords: lines(keywords), exclude: lines(exclude), regions: lines(regions),
     remote_only: f.remote_only, salary_from: Number(f.salary_from) || 0, allow_no_salary: f.allow_no_salary,
-    experience: f.experience, sources: f.sources });
+    experience: f.experience, sources: f.sources,
+    source_settings: Object.fromEntries(Object.entries(f.source_settings).map(([code, values]) =>
+      [code, normalizeValues(sources.find(s => s.code === code)?.filter_schema || [], values)])) });
 
   async function look() {
     setLooking(true); setError(""); setPreview(null); setShowAll(false);
@@ -206,9 +212,7 @@ function FilterForm({ value, chats, aiAvailable, close, saved }: {
 
   async function submit(e: FormEvent) {
     e.preventDefault(); setBusy(true); setError("");
-    const body = { name: f.name.trim(), mode: f.mode, keywords: lines(keywords), exclude: lines(exclude), regions: lines(regions),
-      remote_only: f.remote_only, salary_from: Number(f.salary_from) || 0, allow_no_salary: f.allow_no_salary,
-      experience: f.experience, sources: f.sources, chat_id: (f.chat_id || "").trim() || null,
+    const body = { name: f.name.trim(), ...formBody(), chat_id: (f.chat_id || "").trim() || null,
       ai_min_score: Number(f.ai_min_score) || 0, profile: (f.profile || "").trim() || null, enabled: f.enabled };
     try {
       if (value.id) await send(`/filters/${value.id}`, body, "PATCH"); else await send("/filters", body);
@@ -230,11 +234,12 @@ function FilterForm({ value, chats, aiAvailable, close, saved }: {
           </select>
           <small>{f.mode === "leads" ? "Компания из вакансии попадёт в базу лидогенерации со списком «Нанимает маркетолога» и ссылкой на вакансию. Дубли и стоп-лист учитываются, сделки в CRM не создаются." : "Новые вакансии приходят постами с кнопками 👍 / 👎 — по ним ИИ учится, что вам подходит."}</small>
         </label>
-        <label className={styles.field}>Ключевые слова — хотя бы одно в названии вакансии
+        <label className={styles.field}>Ключевые слова — хотя бы одно в вакансии или проекте
           <textarea rows={4} value={keywords} onChange={(e) => setKeywords(e.target.value)} placeholder={"маркетолог\nдиректолог"} />
-          <small>По одному в строке или через запятую. Регистр и «ё/е» не важны.</small>
+          <small>По одному в строке или через запятую. Регистр и «ё/е» не важны.
+            Telegram и FL.ru проверяют также текст, getmatch — описание и стек.</small>
         </label>
-        <label className={styles.field}>Исключения — если есть в названии, вакансию пропускаем
+        <label className={styles.field}>Исключения — совпадение исключает вакансию или проект
           <textarea rows={3} value={exclude} onChange={(e) => setExclude(e.target.value)} placeholder={"senior\nhead of"} />
         </label>
         <label className={styles.check}><input type="checkbox" checked={f.remote_only} onChange={(e) => setF({ ...f, remote_only: e.target.checked })} />Только удалёнка</label>
@@ -248,9 +253,9 @@ function FilterForm({ value, chats, aiAvailable, close, saved }: {
           {EXPERIENCE.map(([id, name]) => <label key={id} className={styles.check}><input type="checkbox" checked={f.experience.includes(id)} onChange={() => toggle("experience", id)} />{name}</label>)}
           <small className={styles.hint}>Ничего не выбрано — любой опыт.</small>
         </fieldset>
-        <fieldset className={styles.formFieldset}><legend className={styles.legend}>Где искать</legend>
-          {SOURCES.map(([id, name]) => <label key={id} className={styles.check}><input type="checkbox" checked={f.sources.includes(id)} onChange={() => toggle("sources", id)} />{name}</label>)}
-        </fieldset>
+        <FilterSourceOptions sources={sources} selected={f.sources} settings={f.source_settings}
+          channels={channels} toggle={code => toggle("sources", code)}
+          onChange={source_settings => setF({ ...f, source_settings })}/>
         <label className={styles.field}>Telegram-чат
           {!manual ? (
             <select value={f.chat_id || ""} onChange={(e) => e.target.value === "__manual" ? setManual(true) : setF({ ...f, chat_id: e.target.value || null })}>
@@ -275,7 +280,7 @@ function FilterForm({ value, chats, aiAvailable, close, saved }: {
       <section className={styles.formFieldset} aria-live="polite">
         <div className={styles.inlineForm}>
           <button type="button" className={styles.secondary} disabled={looking || !lines(keywords).length || !f.sources.length} onClick={look}>
-            {looking ? "Ищем на сайтах… до минуты" : "🔍 Посмотреть, что найдёт"}</button>
+            {looking ? "Ищем на площадках…" : "🔍 Посмотреть, что найдёт"}</button>
           <label className={styles.field}>за последние
             <select value={days} onChange={(e) => setDays(Number(e.target.value))}>
               {[1, 3, 7, 14].map((d) => <option key={d} value={d}>{d} {d === 1 ? "день" : d < 5 ? "дня" : "дней"}</option>)}
@@ -285,7 +290,9 @@ function FilterForm({ value, chats, aiAvailable, close, saved }: {
         {preview && <>
           <p><b>Подходит {preview.matched} из {preview.total}</b>{f.mode === "leads" ? ` · компаний: ${preview.companies}` : ""}
             {" · "}{preview.sources.map((s) => s.skipped ? `${s.name}: пропущен` : s.error ? `${s.name}: ошибка` : `${s.name}: ${s.found}`).join(" · ")}</p>
-          {preview.sources.filter((s) => s.error || s.skipped).map((s) => <p key={s.name} className={s.error ? styles.errorText : styles.muted}>{s.name}: {s.error || s.skipped}</p>)}
+          {preview.sources.filter((s) => s.error || s.skipped).map((s) => <p key={s.name}
+            className={s.error ? styles.errorText : styles.muted}>
+            {s.name}: {message(new Error(s.error || s.skipped || ""))}</p>)}
           <div className={styles.scroll} style={{ maxHeight: 360 }}>
             <table className={styles.table}>
               <tbody>{preview.items.filter((i) => showAll || i.ok).map((i, n) => (
@@ -341,7 +348,7 @@ function Feed({ filters, revision }: { filters: Filter[]; revision: number }) {
                 <td>{salary(m.vacancy)}<small>{m.vacancy.remote ? "удалёнка" : m.vacancy.city || ""}</small></td>
                 <td><span className={`${styles.badge} ${tone[m.status] ? styles[tone[m.status]] : ""}`}>{m.status_name}</span>
                   {m.feedback != null && <span> {m.feedback > 0 ? "👍" : "👎"}</span>}
-                  <small>{m.reason || ""}{m.score != null ? ` 🎯 ${m.score}/100${m.why ? ` — ${m.why}` : ""}` : ""}</small>
+                  <small>{m.reason ? message(new Error(m.reason)) : ""}{m.score != null ? ` 🎯 ${m.score}/100${m.why ? ` — ${m.why}` : ""}` : ""}</small>
                   {m.company_id && <small><Link href={`/admin/leadgen/companies?company=${m.company_id}`}>Карточка компании</Link></small>}</td>
                 <td>{date(m.created_at)}</td>
               </tr>

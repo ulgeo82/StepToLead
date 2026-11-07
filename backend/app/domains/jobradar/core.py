@@ -5,7 +5,7 @@ from collections import defaultdict
 
 from app.domains.jobradar.sources import Vacancy, fingerprint, norm
 
-PRIORITY = {"hh": 0, "habr": 1, "trudvsem": 2}   # чья карточка главная в посте
+PRIORITY = {"hh": 0, "superjob": 1, "getmatch": 2, "habr": 3, "trudvsem": 4, "telegram": 5, "flru": 6}   # главная в посте
 RUB = ("RUR", "RUB", "", None)
 
 
@@ -23,6 +23,8 @@ def matches(v: Vacancy, f: dict) -> tuple[bool, str]:
     # Вакансия на удалёнке подходит из любого города; для лидов важен город самой компании (strict_city).
     if regions and (f.get("strict_city") or not v.remote) and not any(r in norm(v.city) for r in regions):
         return False, "не тот город"
+    if not getattr(v, "salary_known", True):
+        return True, ""   # площадка не отдаёт зарплату и опыт (Хабр RSS) — эти условия к ней не применяем
     floor = int(f.get("salary_from") or 0)
     top = v.salary_to or v.salary_from
     if top is None:

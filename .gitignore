@@ -12,3 +12,6 @@ backend/eval_reports/
 outputs/
 .DS_Store
 backend/data/
+
+# живые ответы площадок радара (могут содержать контакты работодателей) — только локально
+backend/tests/fixtures/jobradar/live/
