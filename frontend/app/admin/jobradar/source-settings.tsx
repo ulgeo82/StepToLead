@@ -8,7 +8,7 @@ export const base = "/admin/jobradar";
 export const send = <T,>(path: string, body: unknown, method = "POST") =>
   api<T>(`${base}${path}`, {
     method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
-    timeoutMs: path === "/preview" ? 180_000 : path.endsWith("/check") ? 75_000 : 30_000,
+    timeoutMs: path.endsWith("/preview") ? 180_000 : path.endsWith("/check") ? 75_000 : 30_000,
   });
 export const shortMessage = (error: unknown) => message(error)
   .replace(/https?:\/\/\S+/gi, "[адрес скрыт]")
@@ -42,7 +42,7 @@ export type CheckResult = {
 export type Channel = {
   channel: string; status: "ok" | "unavailable" | "closed" | "unknown";
   last_post_at: string | null; passed_24h: number; error: string | null;
-  filters: { id: number; name: string }[];
+  scanners: { id: number; name: string }[];
 };
 
 export function normalizeValues(schema: SchemaField[], values: Settings): Settings {

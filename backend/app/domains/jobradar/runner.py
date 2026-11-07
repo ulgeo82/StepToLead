@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings as app_settings
 from app.db import SessionLocal
-from app.domains.jobradar import core, leads, platforms, posting, scoring
+from app.domains.jobradar import core, crm, leads, platforms, posting, scanners, scoring
 from app.domains.jobradar.models import JrFilter, JrMatch, JrTgChannel, JrVacancy
 from app.domains.jobradar.sources import REGISTRY, Context, SourceSkipped, Vacancy, fingerprint, short_error
 from app.models.system import AppSetting
@@ -143,11 +143,13 @@ class Result:
     matched: int = 0
     sent: int = 0
     leads: int = 0
+    deals: int = 0
     skipped: int = 0
     ai_low: int = 0
     failed: int = 0
     errors: dict = field(default_factory=dict)
     by_source: dict = field(default_factory=dict)   # code: {state, found, passed, dropped, reason, note|error}
+    by_query: dict = field(default_factory=dict)    # query_id: {name, found, passed}
 
 
 async def _channels_in(db: AsyncSession, filter_id: int, names: list[str]) -> dict:
@@ -173,11 +175,26 @@ async def _channels_out(db: AsyncSession, filter_id: int, result: dict, moment: 
                 else datetime.fromisoformat(str(item["last_post_at"]).replace("Z", "+00:00"))
 
 
+def match_any(v: Vacancy, checks: list[dict]) -> tuple[int | None, str]:
+    """(номер подошедшего запроса, причина отсева по первому запросу)."""
+    first_reason = "нет запросов"
+    for i, q in enumerate(checks):
+        ok, why = core.matches(v, q)
+        if ok:
+            return i, ""
+        if i == 0:
+            first_reason = why
+    return None, first_reason
+
+
 async def collect(db: AsyncSession, f: JrFilter, since: datetime, ctx: Context, moment: datetime,
-                  *, record: bool = True) -> tuple[list[Vacancy], dict, dict]:
-    """Опрос площадок фильтра. -> (вакансии, by_source, ошибки). record=False — без записи статусов (предпросмотр)."""
+                  *, record: bool = True, query: dict | None = None,
+                  checks: list[dict] | None = None) -> tuple[list[Vacancy], dict, dict]:
+    """Опрос площадок сканера одним общим запросом (query) и разбивка по площадкам: найдено / прошло хоть один
+    из запросов (checks) / отсеяно. -> (вакансии, by_source, ошибки). record=False — без записи статусов."""
     rows = await platforms.ensure(db)
-    query = as_dict(f)
+    query = query or as_dict(f)
+    checks = checks if checks is not None else [query]
     found: list[Vacancy] = []
     by_source: dict[str, dict] = {}
     errors: dict[str, str] = {}
@@ -196,13 +213,13 @@ async def collect(db: AsyncSession, f: JrFilter, since: datetime, ctx: Context, 
             continue
         fs = dict((f.source_settings or {}).get(code) or {})
         if code == TG:
-            ctx.channel_state = await _channels_in(db, f.id, list(fs.get("channels") or [])) if f.id else \
+            ctx.channel_state = await _channels_in(db, f.id, list(fs.get("channels") or [])) if f.id and record else \
                 {name: None for name in fs.get("channels") or []}
             ctx.channel_result = {}
         try:
             got = await adapter.fetch(query, since, settings, fs, ctx)
             found += got
-            by_source[code] = {"state": "ok"}
+            by_source[code] = {"state": "ok", "found": 0, "passed": 0, "dropped": 0}   # 0 — тоже ответ
             if record:
                 platforms.mark(row, moment, None)
         except SourceSkipped as skip:   # не ошибка: ждёт настройки / нечего читать
@@ -222,8 +239,8 @@ async def collect(db: AsyncSession, f: JrFilter, since: datetime, ctx: Context, 
     for v in found:   # по каждой площадке: найдено / прошло фильтр / отсеяно и главная причина — видно, почему 0
         item = by_source.setdefault(v.source, {"state": "ok"})
         item["found"] = item.get("found", 0) + 1
-        ok, why = core.matches(v, query)
-        if ok:
+        index, why = match_any(v, checks)
+        if index is not None:
             item["passed"] = item.get("passed", 0) + 1
         else:
             item["dropped"] = item.get("dropped", 0) + 1
@@ -233,9 +250,19 @@ async def collect(db: AsyncSession, f: JrFilter, since: datetime, ctx: Context, 
     return found, by_source, errors
 
 
+async def plan(db: AsyncSession, f: JrFilter) -> tuple[list, list[dict], dict]:
+    """Запросы сканера -> (строки запросов, условия для core.matches, общий запрос к площадкам)."""
+    await scanners.ensure_queries(db, f)
+    rows = await scanners.queries_of(db, f)
+    strict = scanners.strict_city(f)
+    checks = [scanners.query_dict(q, strict_city=strict) for q in rows]
+    return rows, checks, scanners.merged(checks)
+
+
 async def run_filter(db: AsyncSession, f: JrFilter, *, moment: datetime | None = None,
                      ctx: Context | None = None) -> Result:
-    """Один проход одного фильтра. Коммитит сам (по ходу отправки — чтобы не слать повторно после сбоя)."""
+    """Один проход сканера: площадки -> запросы -> склейка -> ИИ -> действия. Коммитит по ходу (чтобы не слать
+    повторно после сбоя)."""
     moment = moment or now()
     filter_id = f.id
     cfg = await get_settings(db)
@@ -244,71 +271,106 @@ async def run_filter(db: AsyncSession, f: JrFilter, *, moment: datetime | None =
     result = Result()
     since = (aware(f.last_run_at) - timedelta(minutes=int(cfg["overlap_minutes"]))) if f.last_run_at \
         else moment - timedelta(days=int(cfg["first_run_days"]))
-    query = as_dict(f)
-    found, result.by_source, result.errors = await collect(db, f, since, ctx, moment)
+    query_rows, checks, query = await plan(db, f)
+    acts = scanners.actions_of(f)
+    if not checks:
+        result.errors["queries"] = "нет включённых запросов"
+    found, result.by_source, errors = await collect(db, f, since, ctx, moment, query=query, checks=checks)
+    result.errors.update(errors)
     ok_sources = sum(1 for b in result.by_source.values() if b.get("state") == "ok")
     result.found = len(found)
     rows = await save_vacancies(db, found)
     groups = core.group(found)
     known = set((await db.scalars(select(JrMatch.fingerprint).where(
         JrMatch.filter_id == f.id, JrMatch.fingerprint.in_(list(groups) or [""])))).all())
+    by_query = {str(q.id): {"name": q.name, "found": 0, "passed": 0} for q in query_rows}
+    for v in found:
+        for i, q in enumerate(checks):
+            if any(core.has_keyword(core.text(v.title), k) for k in q["keywords"]):
+                by_query[str(query_rows[i].id)]["found"] += 1
 
-    fresh: list[list[Vacancy]] = []
+    fresh: list[tuple[list[Vacancy], int]] = []
     for fp, cards in groups.items():
         if fp in known:
             continue
-        ok, why = core.matches(cards[0], query)
-        if not ok:   # проверяем и остальные карточки: на другом сайте могли указать зарплату или удалёнку
-            ok = any(core.matches(c, query)[0] for c in cards[1:])
-        if not ok:
+        hit, why = None, ""
+        for card in cards:   # на другом сайте могли указать зарплату или удалёнку
+            hit, reason = match_any(card, checks)
+            why = why or reason
+            if hit is not None:
+                break
+        if hit is None:
             db.add(JrMatch(filter_id=f.id, fingerprint=fp, vacancy_id=rows[cards[0].uid].id, status="skipped",
                            reason=why, sources=sorted({c.source for c in cards})))
             result.skipped += 1
             continue
-        fresh.append(cards)
+        by_query[str(query_rows[hit].id)]["passed"] += 1
+        fresh.append((cards, hit))
     result.matched = len(fresh)
+    result.by_query = by_query
     await db.commit()
 
     scores: dict[str, tuple[int, str]] = {}
     if f.ai_min_score and fresh:
-        scores = await scoring.score(db, f.id, f.profile or "", [g[0] for g in fresh], workspace_id=f.workspace_id,
+        scores = await scoring.score(db, f.id, f.profile or "", [g[0] for g, _ in fresh], workspace_id=f.workspace_id,
                                      complete=complete)
     hh_settings = {}
-    if f.mode == "leads" and "hh" in REGISTRY:
+    if acts["companies"]["enabled"] and "hh" in REGISTRY:
         hh_row = (await platforms.ensure(db)).get("hh")
         hh_settings = platforms.plain(REGISTRY["hh"], hh_row.settings) if hh_row and hh_row.enabled else {}
+    tg_chat = acts["telegram"]["chat_id"] if acts["telegram"]["enabled"] else None
+    to_companies = acts["companies"]["enabled"] and not f.project_id
+    to_crm = acts["client_crm"]["enabled"] and bool(f.project_id)
     posted = 0
-    for cards in fresh:
+    for cards, hit in fresh:
         main = cards[0]
+        q = query_rows[hit]
         fp = fingerprint(main.title, main.company)
         names = sorted({c.source for c in cards}, key=lambda s: core.PRIORITY.get(s, 9))
         value, why = scores.get(main.uid, (None, ""))
         match = JrMatch(filter_id=f.id, fingerprint=fp, vacancy_id=rows[main.uid].id, status="pending", score=value,
-                        why=why or None, sources=names)
+                        why=why or None, sources=names, query_id=q.id, company_key=crm.company_key(main) or None)
         if value is not None and value < f.ai_min_score:
             match.status, match.reason = "ai_low", f"ИИ: {value}/100 — ниже порога {f.ai_min_score}"
             result.ai_low += 1
             db.add(match)
             await db.commit()
             continue
-        lead = False
-        if f.mode == "leads":
-            company_id, action = await leads.add_company(db, f.workspace_id, cards, ctx, hh_settings, now=moment)
+        lead = deal = False
+        blocked = None
+        if to_companies:
+            company_id, action = await leads.add_company(
+                db, f.workspace_id, cards, ctx, hh_settings, now=moment,
+                list_name=acts["companies"].get("list_name") or leads.LIST_NAME,
+                signal=acts["companies"].get("signal") or leads.SIGNAL)
             match.company_id = company_id
             if action in ("added", "known"):
                 lead, match.status = True, "lead"
                 result.leads += 1
             else:
-                match.status, match.reason = "skipped", {"blocked": "компания в стоп-листе",
-                                                          "skipped": "не удалось определить компанию"}[action]
-                result.skipped += 1
-                db.add(match)
-                await db.commit()
-                continue
-        if not f.chat_id or posted >= MAX_POSTS:
-            if match.status == "pending":   # некуда слать / лимит прохода — вернёмся в следующий раз
-                result.failed += posted >= MAX_POSTS
-                continue
+                blocked = {"blocked": "компания в стоп-листе", "skipped": "не удалось определить компанию"}[action]
+        if to_crm:
+            deal_id, action = await crm.push(db, f, cards, responsible_user_id=acts["client_crm"].get("responsible_user_id"),
+                                             query_name=q.name, score=value, why=why, now=moment)
+            if deal_id:
+                deal, match.deal_id, match.status = True, deal_id, "deal"
+                result.deals += 1
+            elif action == "no_contact":   # сигнал не теряем: остаётся в ленте, сделку можно завести вручную
+                match.reason = "нет телефона и почты компании — в CRM не передано"
+            else:
+                blocked = blocked or "не удалось определить компанию"
+        if blocked and not lead and not deal and not tg_chat:
+            match.status, match.reason = "skipped", blocked
+            result.skipped += 1
+            db.add(match)
+            await db.commit()
+            continue
+        if not tg_chat or posted >= MAX_POSTS:
+            if match.status == "pending":
+                if tg_chat:   # лимит прохода — дошлём в следующий раз
+                    result.failed += 1
+                    continue
+                match.status = "found"   # действий для отправки нет — находка остаётся в ленте сканера
             db.add(match)
             await db.commit()
             continue
@@ -317,9 +379,9 @@ async def run_filter(db: AsyncSession, f: JrFilter, *, moment: datetime | None =
         try:
             if posted:
                 await sleep(POST_GAP)
-            text = posting.render(main, score=value, why=why, sources=names, lead=lead)
-            match.message_id = await send(f.chat_id, text, posting.keyboard(match.id))
-            match.chat_id, match.sent_at = str(f.chat_id), now()
+            text = posting.render(main, score=value, why=why, sources=names, lead=lead, deal=deal)
+            match.message_id = await send(tg_chat, text, posting.keyboard(match.id))
+            match.chat_id, match.sent_at = str(tg_chat), now()
             if match.status == "pending":
                 match.status = "sent"
             posted += 1
@@ -398,6 +460,9 @@ async def run_worker() -> None:
             async with session_factory() as db:
                 await ensure_starter(db, app_settings.agency_workspace_id)
                 await platforms.ensure(db)
+                await scanners.ensure_templates(db)
+                for f in (await db.scalars(select(JrFilter))).all():   # старые фильтры -> сканеры с одним запросом
+                    await scanners.ensure_queries(db, f)
                 await db.commit()
         except Exception:
             logger.exception("jobradar seed failed")

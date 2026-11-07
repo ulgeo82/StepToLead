@@ -24,12 +24,14 @@ SIGNAL = "hh_marketing"     # «Ищут маркетолога» — сигна
 SOURCE = "jobradar"
 
 
-async def hiring_list(db: AsyncSession, workspace_id: int) -> LgList:
+async def hiring_list(db: AsyncSession, workspace_id: int, name: str = LIST_NAME) -> LgList:
+    """Список в «Базе компаний» с названием из сканера (у каждого сканера может быть свой)."""
+    name = (name or LIST_NAME).strip()[:180]
     lst = await db.scalar(select(LgList).where(LgList.workspace_id == workspace_id, LgList.kind == LIST_KIND,
-                                               LgList.archived_at.is_(None)).limit(1))
+                                               LgList.name == name, LgList.archived_at.is_(None)).limit(1))
     if lst is None:
-        lst = LgList(workspace_id=workspace_id, name=LIST_NAME, kind=LIST_KIND,
-                     note="Радар вакансий: компании, которые ищут маркетолога, директолога или РОПа")
+        lst = LgList(workspace_id=workspace_id, name=name, kind=LIST_KIND,
+                     note="Радар вакансий: компании, которые сейчас нанимают")
         db.add(lst)
         await db.flush()
     return lst
@@ -62,7 +64,7 @@ async def _legal(db: AsyncSession, company: LgCompany, now: datetime) -> None:
 
 
 async def add_company(db: AsyncSession, workspace_id: int, cards: list[Vacancy], ctx: Context, hh_settings: dict, *,
-                      now: datetime) -> tuple[int | None, str]:
+                      now: datetime, list_name: str = LIST_NAME, signal: str = SIGNAL) -> tuple[int | None, str]:
     """(id компании, что сделали) — что сделали: added / known / blocked / skipped."""
     main = next((c for c in cards if c.employer.get("id")), cards[0])
     if not (main.company or "").strip():
@@ -88,16 +90,16 @@ async def add_company(db: AsyncSession, workspace_id: int, cards: list[Vacancy],
     if await _company_blocked(db, company, now):
         return company.id, "blocked"
     for card in cards:
-        exists = await db.scalar(select(LgSignal.id).where(LgSignal.company_id == company.id, LgSignal.kind == SIGNAL,
+        exists = await db.scalar(select(LgSignal.id).where(LgSignal.company_id == company.id, LgSignal.kind == signal,
                                                            LgSignal.key == card.uid).limit(1))
         if not exists:
-            await service.add_signal(db, company, SIGNAL, key=card.uid, now=now, recalc=False,
+            await service.add_signal(db, company, signal, key=card.uid, now=now, recalc=False,
                                      payload={"title": card.title, "url": card.url, "source": card.source,
                                               "employer_url": card.employer.get("url")})
     if result.created and company.inn and not company.legal_name:
         await _legal(db, company, now)   # юрлицо по ИНН — через DaData, как при поиске компаний
     await service.recalc_score(db, company, now=now)
-    lst = await hiring_list(db, workspace_id)
+    lst = await hiring_list(db, workspace_id, list_name)
     if not await db.get(LgListItem, (lst.id, company.id)):
         db.add(LgListItem(list_id=lst.id, company_id=company.id, is_new=True))
     await db.flush()

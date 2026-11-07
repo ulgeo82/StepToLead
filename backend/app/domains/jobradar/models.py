@@ -10,11 +10,19 @@ from app.db import Base
 
 
 class JrFilter(Base):
+    """Сканер (раньше «фильтр»): для кого, площадки, действия, ИИ. Условия поиска — в его запросах (JrQuery).
+    Поля keywords…experience ниже — условия первого запроса для старого API /filters."""
     __tablename__ = "jr_filters"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     workspace_id: Mapped[int] = mapped_column(ForeignKey("client_workspaces.id", ondelete="CASCADE"), index=True)
     name: Mapped[str] = mapped_column(String(160))
+    project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id", ondelete="SET NULL"), index=True)  # клиент
+    kind: Mapped[str] = mapped_column(String(16), default="jobs")            # тип находок: jobs (вакансии и проекты)
+    template: Mapped[str | None] = mapped_column(String(40))
+    # {"telegram": {"enabled", "chat_id"}, "companies": {"enabled", "list_name", "signal"},
+    #  "client_crm": {"enabled", "responsible_user_id"}}
+    actions: Mapped[dict] = mapped_column(JSON, default=dict)
     mode: Mapped[str] = mapped_column(String(8), default="work")          # work — вакансии себе, leads — компании в базу
     keywords: Mapped[list] = mapped_column(JSON, default=list)            # хотя бы одно — в названии вакансии
     exclude: Mapped[list] = mapped_column(JSON, default=list)             # любое — в названии, и вакансия отсеивается
@@ -78,6 +86,9 @@ class JrMatch(Base):
     why: Mapped[str | None] = mapped_column(String(240))                 # объяснение ИИ
     sources: Mapped[list] = mapped_column(JSON, default=list)            # все сайты, где нашлась вакансия
     company_id: Mapped[int | None] = mapped_column(Integer)              # режим «лиды»: компания в базе
+    query_id: Mapped[int | None] = mapped_column(Integer, index=True)    # какой запрос сканера нашёл
+    deal_id: Mapped[int | None] = mapped_column(Integer)                 # сделка в CRM клиента
+    company_key: Mapped[str | None] = mapped_column(String(200), index=True)   # для дописывания в открытую сделку
     chat_id: Mapped[str | None] = mapped_column(String(32))
     message_id: Mapped[int | None] = mapped_column(Integer)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
@@ -112,3 +123,36 @@ class JrTgChannel(Base):
     last_post_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     error: Mapped[str | None] = mapped_column(String(200))
     checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class JrQuery(Base):
+    """Запрос сканера: слова, исключения, города, удалёнка, зарплата, опыт. Запросов в сканере — сколько угодно."""
+    __tablename__ = "jr_queries"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    filter_id: Mapped[int] = mapped_column(ForeignKey("jr_filters.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(120), default="Запрос")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    keywords: Mapped[list] = mapped_column(JSON, default=list)
+    exclude: Mapped[list] = mapped_column(JSON, default=list)
+    regions: Mapped[list] = mapped_column(JSON, default=list)
+    remote_only: Mapped[bool] = mapped_column(Boolean, default=False)
+    salary_from: Mapped[int] = mapped_column(Integer, default=0)
+    allow_no_salary: Mapped[bool] = mapped_column(Boolean, default=True)
+    experience: Mapped[list] = mapped_column(JSON, default=list)
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class JrTemplate(Base):
+    """Шаблон сканера: заготовка запросов, площадок и действий. Новый шаблон — одна запись, без правки кода."""
+    __tablename__ = "jr_templates"
+
+    code: Mapped[str] = mapped_column(String(40), primary_key=True)
+    name: Mapped[str] = mapped_column(String(120))
+    description: Mapped[str | None] = mapped_column(Text)
+    icon: Mapped[str | None] = mapped_column(String(8))
+    kind: Mapped[str] = mapped_column(String(16), default="jobs")
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    # {"profile", "ai_min_score", "sources", "source_settings", "actions", "queries": [{name, keywords, ...}]}
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)

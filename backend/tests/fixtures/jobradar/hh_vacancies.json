@@ -1,17 +1,98 @@
-{"found": 3, "pages": 1, "page": 0, "per_page": 100, "items": [
- {"id": "101", "name": "Интернет-маркетолог", "area": {"id": "78", "name": "Самара"},
-  "salary": {"from": 60000, "to": 80000, "currency": "RUR"}, "schedule": {"id": "remote"},
-  "experience": {"id": "between1And3"}, "alternate_url": "https://hh.ru/vacancy/101",
-  "published_at": "2026-11-06T10:00:00+0300",
-  "employer": {"id": "555", "name": "ООО Ромашка", "alternate_url": "https://hh.ru/employer/555"},
-  "snippet": {"requirement": "Опыт с <highlighttext>Яндекс Директ</highlighttext>", "responsibility": "Вести рекламу &amp; аналитику"}},
- {"id": "102", "name": "Senior маркетолог", "area": {"id": "1", "name": "Москва"},
-  "salary": {"from": 200000, "to": null, "currency": "RUR"}, "work_format": [{"id": "REMOTE"}],
-  "experience": {"id": "between3And6"}, "alternate_url": "https://hh.ru/vacancy/102",
-  "published_at": "2026-11-06T09:00:00+0300",
-  "employer": {"id": "777", "name": "Бета", "alternate_url": "https://hh.ru/employer/777"}, "snippet": {}},
- {"id": "103", "name": "Директолог", "area": {"id": "1", "name": "Москва"}, "salary": null,
-  "schedule": {"id": "fullDay"}, "experience": {"id": "noExperience"}, "alternate_url": "https://hh.ru/vacancy/103",
-  "published_at": "2026-11-06T08:00:00+0300",
-  "employer": {"id": "888", "name": "Гамма", "alternate_url": "https://hh.ru/employer/888"}, "snippet": {}}
-]}
+{
+  "found": 3,
+  "pages": 1,
+  "page": 0,
+  "per_page": 100,
+  "items": [
+    {
+      "id": "101",
+      "name": "Интернет-маркетолог",
+      "area": {
+        "id": "78",
+        "name": "Самара"
+      },
+      "salary": {
+        "from": 60000,
+        "to": 80000,
+        "currency": "RUR"
+      },
+      "schedule": {
+        "id": "remote"
+      },
+      "experience": {
+        "id": "between1And3"
+      },
+      "alternate_url": "https://hh.ru/vacancy/101",
+      "published_at": "2026-11-06T10:00:00+0300",
+      "employer": {
+        "id": "555",
+        "name": "ООО Ромашка",
+        "alternate_url": "https://hh.ru/employer/555"
+      },
+      "snippet": {
+        "requirement": "Опыт с <highlighttext>Яндекс Директ</highlighttext>",
+        "responsibility": "Вести рекламу &amp; аналитику"
+      },
+      "contacts": {
+        "email": "hr@romashka.example",
+        "phones": [
+          {
+            "formatted": "+7 (846) 200-00-00"
+          }
+        ]
+      }
+    },
+    {
+      "id": "102",
+      "name": "Senior маркетолог",
+      "area": {
+        "id": "1",
+        "name": "Москва"
+      },
+      "salary": {
+        "from": 200000,
+        "to": null,
+        "currency": "RUR"
+      },
+      "work_format": [
+        {
+          "id": "REMOTE"
+        }
+      ],
+      "experience": {
+        "id": "between3And6"
+      },
+      "alternate_url": "https://hh.ru/vacancy/102",
+      "published_at": "2026-11-06T09:00:00+0300",
+      "employer": {
+        "id": "777",
+        "name": "Бета",
+        "alternate_url": "https://hh.ru/employer/777"
+      },
+      "snippet": {}
+    },
+    {
+      "id": "103",
+      "name": "Директолог",
+      "area": {
+        "id": "1",
+        "name": "Москва"
+      },
+      "salary": null,
+      "schedule": {
+        "id": "fullDay"
+      },
+      "experience": {
+        "id": "noExperience"
+      },
+      "alternate_url": "https://hh.ru/vacancy/103",
+      "published_at": "2026-11-06T08:00:00+0300",
+      "employer": {
+        "id": "888",
+        "name": "Гамма",
+        "alternate_url": "https://hh.ru/employer/888"
+      },
+      "snippet": {}
+    }
+  ]
+}

@@ -71,3 +71,5 @@ from app.domains.leadgen import routes as leadgen_routes  # noqa: E402
 api_router.include_router(leadgen_routes.router)
 from app.domains.jobradar import routes as jobradar_routes  # noqa: E402
 api_router.include_router(jobradar_routes.router)
+from app.domains.jobradar import scanner_routes as jobradar_scanners  # noqa: E402
+api_router.include_router(jobradar_scanners.router)

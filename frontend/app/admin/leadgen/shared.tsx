@@ -44,6 +44,7 @@ export const signalLabels: Record<string, string> = {
   no_crm: "Нет CRM на сайте",
   legal_active: "Действующее юрлицо",
   hh_marketing: "Ищут маркетолога",
+  hiring: "Нанимает (радар вакансий)",
   twogis_card: "Есть в 2ГИС",
   slow_response: "Медленно отвечают на заявки",
   chain: "Федеральная сеть",

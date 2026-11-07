@@ -22,8 +22,8 @@ from app.models.system import AppSetting
 
 router = APIRouter(prefix="/admin/jobradar", tags=["admin-jobradar"])
 EXPERIENCE = ("noExperience", "between1And3", "between3And6", "moreThan6")
-STATUS_NAMES = {"sent": "Отправлено", "lead": "В базе компаний", "skipped": "Отсеяно", "ai_low": "Отсеял ИИ",
-                "failed": "Не отправилось"}
+STATUS_NAMES = {"sent": "Отправлено", "lead": "В базе компаний", "deal": "В CRM клиента", "found": "Найдено",
+                "skipped": "Отсеяно", "ai_low": "Отсеял ИИ", "failed": "Не отправилось"}
 _tasks: set[asyncio.Task] = set()
 
 
@@ -315,6 +315,7 @@ class ChannelIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     channel: str = Field(min_length=2, max_length=200)
     filter_id: int | None = None
+    scanner_id: int | None = None
 
 
 @router.get("/channels")
@@ -327,8 +328,9 @@ async def list_channels(db: AsyncSession = Depends(get_db), admin: AdminUser = D
     for f in filters:
         for name in ((f.source_settings or {}).get("telegram") or {}).get("channels") or []:
             item = out.setdefault(name, {"channel": name, "status": "unknown", "last_post_at": None, "error": None,
-                                         "passed_24h": 0, "filters": []})
+                                         "passed_24h": 0, "filters": [], "scanners": []})
             item["filters"].append({"id": f.id, "name": f.name})
+            item["scanners"].append({"id": f.id, "name": f.name})
             st = states.get((f.id, name))
             if st is not None:
                 if st.status != "unknown" and (item["status"] in ("unknown", "ok") or st.status == "ok"):
@@ -365,9 +367,10 @@ async def check_channel(payload: ChannelIn, db: AsyncSession = Depends(get_db), 
 @router.post("/channels")
 async def add_channel(payload: ChannelIn, db: AsyncSession = Depends(get_db), admin: AdminUser = Depends(require_admin)):
     name = _channel_name(payload.channel)
-    if not payload.filter_id:
-        raise HTTPException(422, "Выберите фильтр, в который добавить канал")
-    row = await filter_or_404(db, payload.filter_id)
+    target = payload.scanner_id or payload.filter_id
+    if not target:
+        raise HTTPException(422, "Выберите сканер, в который добавить канал")
+    row = await filter_or_404(db, target)
     settings = dict(row.source_settings or {})
     tg = dict(settings.get("telegram") or {})
     channels = list(tg.get("channels") or [])
@@ -385,9 +388,11 @@ async def add_channel(payload: ChannelIn, db: AsyncSession = Depends(get_db), ad
 
 
 @router.delete("/channels/{name}")
-async def delete_channel(name: str, filter_id: int = Query(...), db: AsyncSession = Depends(get_db),
-                         admin: AdminUser = Depends(require_admin)):
-    row = await filter_or_404(db, filter_id)
+async def delete_channel(name: str, filter_id: int | None = None, scanner_id: int | None = None,
+                         db: AsyncSession = Depends(get_db), admin: AdminUser = Depends(require_admin)):
+    if not (scanner_id or filter_id):
+        raise HTTPException(422, "Укажите сканер")
+    row = await filter_or_404(db, scanner_id or filter_id)
     settings = dict(row.source_settings or {})
     tg = dict(settings.get("telegram") or {})
     tg["channels"] = [c for c in tg.get("channels") or [] if c.lower() != name.lower().lstrip("@")]

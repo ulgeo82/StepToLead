@@ -9,9 +9,9 @@ import {
   base, Channel, CheckResult, list, normalizeValues, Previews, SchemaFields, send, Settings, shortMessage, Source,
 } from "./source-settings";
 
-type FilterRef = { id: number; name: string };
+type ScannerRef = { id: number; name: string };
 
-export function FilterSourceOptions({ sources, selected, settings, channels, toggle, onChange }: {
+export function ScannerSourceOptions({ sources, selected, settings, channels, toggle, onChange }: {
   sources: Source[]; selected: string[]; settings: Record<string, Settings>; channels: Channel[];
   toggle: (code: string) => void; onChange: (value: Record<string, Settings>) => void;
 }) {
@@ -30,7 +30,7 @@ export function FilterSourceOptions({ sources, selected, settings, channels, tog
           <span aria-hidden="true">{source.icon}</span>{source.title}
         </button>
         {active && <fieldset disabled={disabled} className={styles.formFieldset}>
-          <SchemaFields schema={source.filter_schema} values={values} prefix={`filter-${source.code}`}
+          <SchemaFields schema={source.filter_schema} values={values} prefix={`scanner-${source.code}`}
             onChange={update}/>
           {source.code === "telegram" && <>
             <div className={styles.listChips}>{list(values.channels).map(channel =>
@@ -58,17 +58,17 @@ function sourceStatus(source: Source) {
   return "⚪ ещё не проверена";
 }
 
-export function SourcesPanel({ sources, channels, filters, refresh }: {
-  sources: Source[]; channels: Channel[]; filters: FilterRef[]; refresh: () => void;
+export function SourcesPanel({ sources, channels, scanners, refresh }: {
+  sources: Source[]; channels: Channel[]; scanners: ScannerRef[]; refresh: () => void;
 }) {
   return <section aria-label="Площадки радара" className={local.platforms}>
     {sources.map(source => <SourceCard key={source.code} source={source} channels={channels}
-      filters={filters} refresh={refresh}/>)}
+      scanners={scanners} refresh={refresh}/>)}
   </section>;
 }
 
-function SourceCard({ source, channels, filters, refresh }: {
-  source: Source; channels: Channel[]; filters: FilterRef[]; refresh: () => void;
+function SourceCard({ source, channels, scanners, refresh }: {
+  source: Source; channels: Channel[]; scanners: ScannerRef[]; refresh: () => void;
 }) {
   const [draft, setDraft] = useState<Settings>({});
   const [busy, setBusy] = useState(false);
@@ -120,16 +120,16 @@ function SourceCard({ source, channels, filters, refresh }: {
     {error && <p className={styles.error} role="alert">{error}</p>}
     {notice && <p className={styles.muted} role="status">{notice}</p>}
     {result && <Previews result={result}/>}
-    {source.code === "telegram" && <Channels channels={channels} filters={filters} refresh={refresh}/>}
+    {source.code === "telegram" && <Channels channels={channels} scanners={scanners} refresh={refresh}/>}
   </article>;
 }
 
-function Channels({ channels, filters, refresh }: {
-  channels: Channel[]; filters: FilterRef[]; refresh: () => void;
+export function Channels({ channels, scanners, refresh }: {
+  channels: Channel[]; scanners: ScannerRef[]; refresh: () => void;
 }) {
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
-  const [filterId, setFilterId] = useState("");
+  const [scannerId, setScannerId] = useState(scanners.length === 1 ? String(scanners[0].id) : "");
   const [checkedName, setCheckedName] = useState("");
   const [result, setResult] = useState<CheckResult | null>(null);
   const [busy, setBusy] = useState(false);
@@ -146,19 +146,19 @@ function Channels({ channels, filters, refresh }: {
   }
   async function add(event: FormEvent) {
     event.preventDefault();
-    if (!result?.ok || checkedName !== name.trim() || !filterId) return;
+    if (!result?.ok || checkedName !== name.trim() || !scannerId) return;
     setBusy(true); setError("");
     try {
-      await send("/channels", { channel: result.channel || name.trim(), filter_id: Number(filterId) });
+      await send("/channels", { channel: result.channel || name.trim(), scanner_id: Number(scannerId) });
       setAdding(false); setName(""); setCheckedName(""); setResult(null); refresh();
     } catch (reason) { setError(shortMessage(reason)); }
     finally { setBusy(false); }
   }
-  async function remove(channel: Channel, filter: FilterRef) {
-    if (!window.confirm(`Убрать @${channel.channel} из фильтра «${filter.name}»?`)) return;
+  async function remove(channel: Channel, scanner: ScannerRef) {
+    if (!window.confirm(`Убрать @${channel.channel} из сканера «${scanner.name}»?`)) return;
     setBusy(true); setError("");
     try {
-      await api(`${base}/channels/${encodeURIComponent(channel.channel)}?filter_id=${filter.id}`, { method: "DELETE" });
+      await api(`${base}/channels/${encodeURIComponent(channel.channel)}?scanner_id=${scanner.id}`, { method: "DELETE" });
       refresh();
     } catch (reason) { setError(shortMessage(reason)); }
     finally { setBusy(false); }
@@ -170,9 +170,9 @@ function Channels({ channels, filters, refresh }: {
       {channel.error && <small>{shortMessage(new Error(channel.error))}</small>}
       <button type="button" className={styles.secondary} disabled={busy}
         onClick={() => check(channel.channel)}>Проверить канал</button>
-      {channel.filters.map(filter => <div key={filter.id} className={styles.row}>
-        <small>{filter.name}</small><button type="button" disabled={busy} className={styles.secondary}
-          aria-label={`Удалить @${channel.channel} из ${filter.name}`} onClick={() => remove(channel, filter)}>Удалить</button>
+      {(channel.scanners || []).map(scanner => <div key={scanner.id} className={styles.row}>
+        <small>{scanner.name}</small><button type="button" disabled={busy} className={styles.secondary}
+          aria-label={`Удалить @${channel.channel} из ${scanner.name}`} onClick={() => remove(channel, scanner)}>Удалить</button>
       </div>)}
     </div>)}
     <button type="button" disabled={busy} className={styles.secondary}
@@ -180,16 +180,16 @@ function Channels({ channels, filters, refresh }: {
     {adding && <form className={local.channelForm} onSubmit={add}>
       <label className={styles.field}>Канал<input required value={name} disabled={busy} placeholder="@имя"
         onChange={e => { setName(e.target.value); setResult(null); setCheckedName(""); }}/></label>
-      <label className={styles.field}>Фильтр<select required disabled={busy} value={filterId}
-        onChange={e => setFilterId(e.target.value)}><option value="">Выберите фильтр</option>
-        {filters.map(filter => <option key={filter.id} value={filter.id}>{filter.name}</option>)}
+      <label className={styles.field}>Сканер<select required disabled={busy} value={scannerId}
+        onChange={e => setScannerId(e.target.value)}><option value="">Выберите сканер</option>
+        {scanners.map(scanner => <option key={scanner.id} value={scanner.id}>{scanner.name}</option>)}
       </select></label>
-      {!filters.length && <small className={styles.muted}>Сначала создайте фильтр.</small>}
+      {!scanners.length && <small className={styles.muted}>Сначала создайте сканер.</small>}
       <div className={styles.row}>
         <button type="button" className={styles.secondary} disabled={busy || !name.trim()}
           onClick={() => check(name, true)}>Проверить перед добавлением</button>
         <button type="submit" className={styles.primary}
-          disabled={busy || !filterId || !result?.ok || checkedName !== name.trim()}>Добавить</button>
+          disabled={busy || !scannerId || !result?.ok || checkedName !== name.trim()}>Добавить</button>
       </div>
     </form>}
     {busy && <small role="status">Подождите…</small>}

@@ -28,6 +28,27 @@ def is_direct(v: dict) -> bool:
     return "интернет" not in source and not company.get("hr-agency")
 
 
+def contacts(v: dict) -> dict:
+    """Контакты, которые работодатель сам указал в вакансии (телефон, почта). ФИО не берём."""
+    phones, emails = [], []
+    for c in v.get("contact_list") or []:
+        kind, value = norm(c.get("contact_type")), str(c.get("contact_value") or "").strip()
+        if not value:
+            continue
+        if "почт" in kind or "mail" in kind or "@" in value:
+            emails.append(value)
+        elif "телефон" in kind or "phone" in kind:
+            phones.append(value)
+    if v.get("email"):
+        emails.append(str(v["email"]).strip())
+    out = {}
+    if phones:
+        out["phones"] = list(dict.fromkeys(phones))[:3]
+    if emails:
+        out["emails"] = list(dict.fromkeys(emails))[:3]
+    return out
+
+
 def parse(data: dict) -> list[Vacancy]:
     if not isinstance(data, dict) or ("results" not in data and "meta" not in data):
         raise SourceFormatError()
@@ -53,7 +74,7 @@ def parse(data: dict) -> list[Vacancy]:
             published=parse_dt(v.get("date_modify") or v.get("modified") or v.get("creation-date")),
             # company.url — страница компании на trudvsem.ru, не сайт; сайт только из site
             employer={"inn": company.get("inn") or None, "site": company.get("site") or None,
-                      "url": company.get("url") or None},
+                      "url": company.get("url") or None, **contacts(v)},
             extra={"direct": is_direct(v), "category": (v.get("category") or {}).get("specialisation")},
         ))
     return out

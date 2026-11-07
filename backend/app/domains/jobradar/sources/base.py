@@ -47,6 +47,10 @@ class Vacancy:
     employer: dict = field(default_factory=dict)   # id, url (страница работодателя), inn, site — для режима «лиды»
     extra: dict = field(default_factory=dict)      # стек, формат работы, бюджет, срок, канал…
 
+    def __post_init__(self):   # «ФГБУЗ   МРЦ» -> «ФГБУЗ МРЦ»: лишние пробелы с площадок не тащим в посты, базу и CRM
+        self.title = " ".join((self.title or "").split())
+        self.company = " ".join((self.company or "").split())
+
     @property
     def uid(self) -> str:
         return f"{self.source}:{self.ext_id}"[:200]

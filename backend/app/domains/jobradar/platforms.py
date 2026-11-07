@@ -5,6 +5,7 @@ import logging
 from datetime import datetime, timezone
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.crypto import decrypt_secret, encrypt_secret
@@ -32,9 +33,13 @@ async def ensure(db: AsyncSession) -> dict[str, JrSource]:
         settings = adapter.defaults()
         if code == "hh" and legacy and isinstance(legacy.value, dict) and legacy.value.get("hh_token_encrypted"):
             settings["token_encrypted"] = legacy.value["hh_token_encrypted"]   # токен из старых настроек радара
-        rows[code] = JrSource(code=code, enabled=adapter.default_enabled, settings=settings)
-        db.add(rows[code])
-    await db.flush()
+        row = JrSource(code=code, enabled=adapter.default_enabled, settings=settings)
+        try:
+            async with db.begin_nested():   # гонка с параллельным запросом или воркером — не падаем
+                db.add(row)
+            rows[code] = row
+        except IntegrityError:
+            rows[code] = await db.scalar(select(JrSource).where(JrSource.code == code))
     return rows
 
 

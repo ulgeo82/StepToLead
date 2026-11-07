@@ -33,7 +33,7 @@ def salary(v: Vacancy) -> str:
 
 
 def render(v: Vacancy, *, score: int | None = None, why: str = "", sources: list[str] | None = None,
-           lead: bool = False) -> str:
+           lead: bool = False, deal: bool = False) -> str:
     e = html.escape
     extra = v.extra or {}
     lines = [f"🧩 Проект: <b>{e(v.title)}</b>" if v.kind == "project" else f"<b>{e(v.title)}</b>"]
@@ -53,6 +53,8 @@ def render(v: Vacancy, *, score: int | None = None, why: str = "", sources: list
         lines.append(f"🎯 {score}/100" + (f" — {e(why)}" if why else ""))
     if lead:
         lines.append("📇 Компания добавлена в «Базу компаний» лидогенерации")
+    if deal:
+        lines.append("🧲 Лид передан в CRM клиента")
     if v.snippet:
         text = v.snippet if len(v.snippet) <= SNIPPET else v.snippet[:SNIPPET - 1].rstrip() + "…"
         lines.append(f"\n<i>{e(text)}</i>")

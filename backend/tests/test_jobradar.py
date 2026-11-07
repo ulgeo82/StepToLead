@@ -95,6 +95,18 @@ class FilterTests(unittest.TestCase):
         self.assertTrue(core.matches(V(remote=True, city="Москва"), city)[0])                     # удалёнка — любой город
         self.assertFalse(core.matches(V(remote=True, city="Москва"), {**city, "strict_city": True})[0])   # лиды — город компании
 
+    def test_spaces_word_order_and_region_code(self):
+        q = {**F, "remote_only": False, "keywords": ["руководитель отдела продаж", "менеджер по маркетингу"]}
+        self.assertTrue(core.matches(V(title="Руководитель  отдела  продаж", remote=False), q)[0])        # двойные пробелы
+        self.assertTrue(core.matches(V(title="Менеджер (в подразделениях (службах) по маркетингу", remote=False), q)[0])
+        self.assertFalse(core.matches(V(title="Менеджер по продажам", remote=False), q)[0])
+        self.assertTrue(core.matches(V(title="Интернет маркетолог", remote=False), {**q, "keywords": ["интернет-маркетолог"]})[0])
+        lead = {**q, "regions": ["Самара", "Тольятти"], "strict_city": True}
+        self.assertTrue(core.matches(V(title="Руководитель отдела продаж", city="Самарская область", region_code=63,
+                                       remote=False), lead)[0])                                     # регион по коду
+        self.assertEqual(core.matches(V(title="Руководитель отдела продаж", city="Москва", region_code=77,
+                                        remote=False), lead)[1], "не тот город")
+
     def test_unknown_salary_is_not_filtered(self):
         strict = {**F, "allow_no_salary": False, "salary_from": 100000}
         habr_card = V(source="habr", salary_from=None, salary_known=False, experience="")

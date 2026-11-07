@@ -12,6 +12,20 @@ PAGES = 5
 TOKEN_HINT = "нужен токен приложения (dev.hh.ru)"
 
 
+def contacts(item: dict) -> dict:
+    """Контакты из вакансии, если работодатель открыл их (обычно скрыты). ФИО не берём."""
+    c = item.get("contacts") or {}
+    phones = [p.get("formatted") or "".join(str(p.get(k) or "") for k in ("country", "city", "number"))
+              for p in (c.get("phones") or []) if isinstance(p, dict)]
+    phones = [x for x in phones if x]
+    out = {}
+    if phones:
+        out["phones"] = phones[:3]
+    if c.get("email"):
+        out["emails"] = [str(c["email"]).strip()]
+    return out
+
+
 def parse_item(item: dict) -> Vacancy:
     salary = item.get("salary") or item.get("salary_range") or {}
     schedule = (item.get("schedule") or {}).get("id", "")
@@ -28,7 +42,8 @@ def parse_item(item: dict) -> Vacancy:
         url=item.get("alternate_url") or "",
         snippet=strip_tags(" ".join(filter(None, [snippet.get("requirement"), snippet.get("responsibility")]))),
         published=parse_dt(item.get("published_at")),
-        employer={"id": str(employer["id"]) if employer.get("id") else None, "url": employer.get("alternate_url") or None},
+        employer={"id": str(employer["id"]) if employer.get("id") else None, "url": employer.get("alternate_url") or None,
+                  **contacts(item)},
     )
 
 

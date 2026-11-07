@@ -17,6 +17,39 @@
 .sourceOption > button { width: fit-content; }
 .disabled { opacity: .5; }
 .breakdown { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; color: #8391ad; font-size: 12px; }
+.breakdown > span + span::before { content: "· "; }
+.scannerList { display: grid; gap: 14px; margin: 16px 0; }
+.scannerList > article { margin-bottom: 0; }
+.templateGrid, .actionGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.templateCard { display: grid; gap: 12px; padding: 20px; border: 1px solid #26324d; border-radius: 14px;
+  background: #141e33; color: #c9d2e3; text-align: left; cursor: pointer; min-width: 0; }
+.templateCard:hover { border-color: #7fa4ff; background: #162544; }
+.queryCard { min-width: 0; border: 1px solid #26324d; border-radius: 14px; padding: 18px; margin: 14px 0; }
+.queryCard h3 { margin: 0 0 12px; }
+.queryCard small { display: block; margin: 8px 0; color: #8391ad; }
+.queryFacts { display: grid; grid-template-columns: minmax(90px, 120px) minmax(0, 1fr); gap: 8px 12px; }
+.queryFacts dt { color: #8391ad; }
+.queryFacts dd { margin: 0; overflow-wrap: anywhere; }
+.scannerTabs { overflow-x: auto; margin: 20px 0; flex-wrap: nowrap; }
+.scannerTabs > button { flex-shrink: 0; min-height: 44px; }
+.scannerTabs [aria-selected="true"] { background: #162544; color: #7fa4ff; }
+.panelFieldset { min-width: 0; border: 0; padding: 0; margin: 0; }
+.preview { margin-top: 20px; }
+.actionGrid .queryCard { margin-top: 0; }
+.actionGrid .queryCard input, .actionGrid .queryCard select { max-width: 100%; }
+.templateCard:focus-visible, .scannerTabs button:focus-visible, .queryCard :focus-visible {
+  outline: 2px solid #7fa4ff; outline-offset: 3px;
+}
+.wrapForm { flex-wrap: wrap; }
+@media (max-width: 720px) {
+  .templateGrid, .actionGrid { grid-template-columns: 1fr; }
+  .scannerTabs { max-width: calc(100vw - 32px); }
+  .wrapForm > label:first-child { flex: 1 1 100%; }
+  .wrapForm input { min-width: 0; width: 100%; }
+  .head { flex-wrap: wrap; }
+  .queryCard { padding: 12px; }
+  .queryFacts { grid-template-columns: 90px minmax(0, 1fr); }
+}
 .platform input, .platform select, .platform textarea { max-width: 100%; }
 .platform :focus-visible, .sourceOption :focus-visible { outline: 2px solid #7fa4ff; outline-offset: 3px; }
 @media (max-width: 1450px) { .platforms { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
