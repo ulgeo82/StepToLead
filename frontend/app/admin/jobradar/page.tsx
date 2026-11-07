@@ -14,18 +14,31 @@ type Filter = {
   id: number; name: string; mode: "work" | "leads"; keywords: string[]; exclude: string[]; remote_only: boolean;
   regions: string[]; salary_from: number; allow_no_salary: boolean; experience: string[]; sources: string[];
   chat_id: string | null; ai_min_score: number; profile: string | null; enabled: boolean; last_run_at: string | null;
-  last_result: { found?: number; sent?: number; leads?: number; skipped?: number; ai_low?: number; errors?: Record<string, string> };
+  last_result: { found?: number; sent?: number; leads?: number; skipped?: number; ai_low?: number; errors?: Record<string, string>;
+    by_source?: Record<string, BySource> };
   stats: { sent_7d: number; leads_7d: number; rated: number; liked_share: number | null };
 };
+type BySource = { state: "ok" | "skipped" | "error"; found?: number; passed?: number; dropped?: number; reason?: string;
+  note?: string; error?: string };
+const SOURCE_NAMES: Record<string, string> = { hh: "hh.ru", trudvsem: "Работа России", habr: "Хабр" };
+function sourceLine(id: string, b: BySource): string {
+  const name = SOURCE_NAMES[id] || id;
+  if (b.state === "skipped") return `${name}: пропущен — ${b.note}`;
+  if (b.state === "error") return `${name}: ошибка ${b.error}`;
+  const found = b.found || 0;
+  if (!found) return `${name}: 0 найдено`;
+  return `${name}: найдено ${found}, прошло ${b.passed || 0}, отсеяно ${b.dropped || 0}${b.reason ? ` (чаще всего: ${b.reason})` : ""}`;
+}
 type Overview = {
   bot_configured: boolean; ai_available: boolean;
   settings: { interval_minutes: number; hh_token_set: boolean };
-  sources: { id: string; name: string; ok_at?: string | null; error?: string | null; error_at?: string | null }[];
+  sources: { id: string; name: string; state?: "ok" | "skipped" | "error"; note?: string | null; ok_at?: string | null;
+    error?: string | null; error_at?: string | null }[];
   chats: { id: string; title: string }[];
 };
 type Preview = {
   days: number; total: number; matched: number; companies: number;
-  sources: { name: string; found?: number; error?: string }[];
+  sources: { name: string; found?: number; error?: string; skipped?: string }[];
   items: { title: string; company: string; city: string; remote: boolean; salary_from: number | null; salary_to: number | null;
     url: string; employer_url: string | null; sources: string[]; ok: boolean; reason: string | null }[];
 };
@@ -102,7 +115,9 @@ export default function JobRadarPage() {
                     <td>{f.stats.liked_share == null ? "—" : `${f.stats.liked_share}%`}<small>{f.stats.rated ? `оценок ${f.stats.rated}` : ""}</small></td>
                     <td>{date(f.last_run_at)}
                       <small>{f.last_result.found != null ? `найдено ${f.last_result.found}, ${f.mode === "leads" ? `в базу ${f.last_result.leads ?? 0}` : `отправлено ${f.last_result.sent ?? 0}`}` : ""}</small>
-                      {f.last_result.errors && Object.keys(f.last_result.errors).length > 0 && <small className={styles.errorText}>Ошибки: {Object.keys(f.last_result.errors).join(", ")}</small>}</td>
+                      {f.last_result.by_source ? Object.entries(f.last_result.by_source).map(([id, b]) => (
+                        <small key={id} className={b.state === "error" ? styles.errorText : ""}>{sourceLine(id, b)}</small>))
+                        : f.last_result.errors && Object.keys(f.last_result.errors).length > 0 && <small className={styles.errorText}>Ошибки: {Object.keys(f.last_result.errors).join(", ")}</small>}</td>
                     <td><div className={styles.rowActions}>
                       <button type="button" className={styles.secondary} onClick={() => setEditing(f)}>Изменить</button>
                       <button type="button" className={styles.secondary} disabled={busy || !f.chat_id} onClick={() => act(f, "test")}>Тестовый пост</button>
@@ -142,16 +157,18 @@ function Sources({ overview, onSaved }: { overview: Overview; onSaved: () => voi
       <dl className={styles.metrics}>
         {overview.sources.map((s) => (
           <div key={s.id}><dt>{s.name}</dt>
-            <dd className={s.error ? styles.errorText : ""}>{s.error ? "ошибка" : s.ok_at ? "работает" : "ещё не проверялся"}</dd>
-            <small className={styles.muted}>{s.ok_at ? `ответ ${date(s.ok_at)}` : ""}{s.error ? ` · ${s.error}` : ""}</small></div>
+            <dd className={s.state === "error" || (!s.state && s.error) ? styles.errorText : ""}>
+              {s.state === "skipped" ? "пропущен" : s.state === "error" || (!s.state && s.error) ? "ошибка" : s.ok_at ? "работает" : "ещё не проверялся"}</dd>
+            <small className={styles.muted}>{s.state === "skipped" ? s.note
+              : <>{s.ok_at ? `ответ ${date(s.ok_at)}` : ""}{s.error ? ` · ${s.error}` : ""}</>}</small></div>
         ))}
       </dl>
       <form className={styles.inlineForm} onSubmit={save}>
         <label className={styles.field}>Проверять каждые, мин
           <input type="number" min={5} max={1440} value={every} onChange={(e) => setEvery(Number(e.target.value))} />
         </label>
-        <label className={styles.field}>Токен приложения hh.ru {overview.settings.hh_token_set ? "(сохранён)" : "(необязательно)"}
-          <input type="password" autoComplete="off" placeholder={overview.settings.hh_token_set ? "••••••• — введите новый, чтобы заменить" : "если hh.ru начнёт отказывать без токена"} value={token} onChange={(e) => setToken(e.target.value)} />
+        <label className={styles.field}>Токен приложения hh.ru {overview.settings.hh_token_set ? "(сохранён)" : "— без него hh.ru пропускается"}
+          <input type="password" autoComplete="off" placeholder={overview.settings.hh_token_set ? "••••••• — введите новый, чтобы заменить" : "токен из dev.hh.ru → «Мои приложения»"} value={token} onChange={(e) => setToken(e.target.value)} />
         </label>
         <button type="submit" className={styles.secondary}>Сохранить</button>
       </form>
@@ -222,9 +239,10 @@ function FilterForm({ value, chats, aiAvailable, close, saved }: {
         </label>
         <label className={styles.check}><input type="checkbox" checked={f.remote_only} onChange={(e) => setF({ ...f, remote_only: e.target.checked })} />Только удалёнка</label>
         <label className={styles.field}>Города<input value={regions} onChange={(e) => setRegions(e.target.value)} placeholder="пусто — вся Россия; например: Самара, Казань" /></label>
-        <div className={styles.inlineForm}>
+        <div className={styles.field}>
           <label className={styles.field}>Зарплата от, ₽<input type="number" min={0} step={1000} value={f.salary_from} onChange={(e) => setF({ ...f, salary_from: Number(e.target.value) })} /></label>
-          <label className={styles.check}><input type="checkbox" checked={f.allow_no_salary} onChange={(e) => setF({ ...f, allow_no_salary: e.target.checked })} />Присылать вакансии без зарплаты</label>
+          <label className={styles.check}><input type="checkbox" checked={f.allow_no_salary} onChange={(e) => setF({ ...f, allow_no_salary: e.target.checked })} />Брать вакансии без зарплаты</label>
+          <small>0 — зарплата не важна.</small>
         </div>
         <fieldset className={styles.formFieldset}><legend className={styles.legend}>Опыт (hh.ru)</legend>
           {EXPERIENCE.map(([id, name]) => <label key={id} className={styles.check}><input type="checkbox" checked={f.experience.includes(id)} onChange={() => toggle("experience", id)} />{name}</label>)}
@@ -266,8 +284,8 @@ function FilterForm({ value, chats, aiAvailable, close, saved }: {
         <small className={styles.hint}>Пробный поиск по условиям выше: ничего не сохраняет, в базу и в Telegram ничего не уходит.</small>
         {preview && <>
           <p><b>Подходит {preview.matched} из {preview.total}</b>{f.mode === "leads" ? ` · компаний: ${preview.companies}` : ""}
-            {" · "}{preview.sources.map((s) => s.error ? `${s.name}: ошибка` : `${s.name}: ${s.found}`).join(" · ")}</p>
-          {preview.sources.filter((s) => s.error).map((s) => <p key={s.name} className={styles.errorText}>{s.name}: {s.error}</p>)}
+            {" · "}{preview.sources.map((s) => s.skipped ? `${s.name}: пропущен` : s.error ? `${s.name}: ошибка` : `${s.name}: ${s.found}`).join(" · ")}</p>
+          {preview.sources.filter((s) => s.error || s.skipped).map((s) => <p key={s.name} className={s.error ? styles.errorText : styles.muted}>{s.name}: {s.error || s.skipped}</p>)}
           <div className={styles.scroll} style={{ maxHeight: 360 }}>
             <table className={styles.table}>
               <tbody>{preview.items.filter((i) => showAll || i.ok).map((i, n) => (

@@ -19,7 +19,9 @@ from app.core.crypto import decrypt_secret
 from app.db import SessionLocal
 from app.domains.jobradar import core, leads, posting, scoring
 from app.domains.jobradar.models import JrFilter, JrMatch, JrVacancy
-from app.domains.jobradar.sources import ALL, Client, Vacancy, fingerprint
+from collections import Counter
+
+from app.domains.jobradar.sources import ALL, Client, SourceSkipped, Vacancy, fingerprint, short_error
 from app.models.system import AppSetting
 
 logger = logging.getLogger("uvicorn.error.jobradar")
@@ -91,14 +93,18 @@ async def ensure_starter(db: AsyncSession, workspace_id: int) -> None:
     await db.flush()
 
 
-async def _status(db: AsyncSession, source: str, error: str | None, moment: datetime) -> None:
+async def _status(db: AsyncSession, source: str, error: str | None, moment: datetime, *,
+                  skipped: str | None = None) -> None:
+    """Статус источника для экрана: работает / пропущен (нужна настройка) / ошибка — коротко, без адресов."""
     row = await db.get(AppSetting, STATUS_KEY)
     value = dict(row.value) if row and isinstance(row.value, dict) else {}
     item = dict(value.get(source) or {})
-    if error:
-        item.update(error=error[:300], error_at=moment.isoformat())
+    if skipped:
+        item.update(state="skipped", note=skipped[:160], error=None, checked_at=moment.isoformat())
+    elif error:
+        item.update(state="error", error=error[:160], error_at=moment.isoformat(), note=None)
     else:
-        item.update(ok_at=moment.isoformat(), error=None)
+        item.update(state="ok", ok_at=moment.isoformat(), error=None, note=None)
     value[source] = item
     if row:
         row.value = value
@@ -136,6 +142,7 @@ class Result:
     ai_low: int = 0
     failed: int = 0
     errors: dict = field(default_factory=dict)
+    by_source: dict = field(default_factory=dict)   # hh: {state, found, passed, dropped, reason, note|error}
 
 
 async def run_filter(db: AsyncSession, f: JrFilter, *, moment: datetime | None = None) -> Result:
@@ -150,19 +157,38 @@ async def run_filter(db: AsyncSession, f: JrFilter, *, moment: datetime | None =
     query = as_dict(f)
     found: list[Vacancy] = []
     ok_sources = 0
+    by_source: dict[str, dict] = {}
     for source in [s for s in f.sources or [] if s in ALL]:
         try:
             got = await client.fetch(source, query, since)
             found += got
             ok_sources += 1
+            by_source[source] = {"state": "ok"}
             await _status(db, source, None, moment)
+        except SourceSkipped as skip:   # не ошибка: источник ждёт настройки
+            by_source[source] = {"state": "skipped", "note": str(skip)}
+            await _status(db, source, None, moment, skipped=str(skip))
         except Exception as exc:  # noqa: BLE001 — один сайт упал, остальные работают
-            text = f"{type(exc).__name__}: {str(exc)[:200]}"
+            text = short_error(exc)
             result.errors[source] = text
+            by_source[source] = {"state": "error", "error": text}
             logger.warning("jobradar source %s failed: %s", source, text)
             await _status(db, source, text, moment)
     found = list({v.uid: v for v in found}.values())   # одно и то же по разным ключевым словам
     result.found = len(found)
+    reasons: dict[str, Counter] = {}
+    for v in found:   # по каждому сайту: найдено / прошло фильтр / отсеяно и главная причина — видно, почему 0
+        item = by_source.setdefault(v.source, {"state": "ok"})
+        item["found"] = item.get("found", 0) + 1
+        ok, why = core.matches(v, query)
+        if ok:
+            item["passed"] = item.get("passed", 0) + 1
+        else:
+            item["dropped"] = item.get("dropped", 0) + 1
+            reasons.setdefault(v.source, Counter())[why] += 1
+    for source, counter in reasons.items():
+        by_source[source]["reason"] = counter.most_common(1)[0][0]
+    result.by_source = by_source
     rows = await save_vacancies(db, found)
     groups = core.group(found)
     known = set((await db.scalars(select(JrMatch.fingerprint).where(

@@ -25,6 +25,30 @@ NAMES = {"hh": "hh.ru", "trudvsem": "Работа России", "habr": "Хаб
 ALL = tuple(NAMES)
 
 
+HH_TOKEN_HINT = "нужен токен приложения (dev.hh.ru)"
+HTTP_TEXT = {400: "неверный запрос", 401: "токен не принят", 403: "доступ запрещён", 404: "не найдено",
+             429: "слишком много запросов", 500: "ошибка сайта", 502: "сайт недоступен", 503: "сайт недоступен",
+             504: "сайт не ответил"}
+
+
+class SourceSkipped(Exception):
+    """Источник не опрашиваем и это не ошибка (например, hh без токена приложения)."""
+
+
+def short_error(exc: BaseException) -> str:
+    """Код и короткий текст — без адресов и параметров запроса."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        code = exc.response.status_code
+        return f"{code}: {HTTP_TEXT.get(code, 'ошибка сайта')}"
+    if isinstance(exc, (httpx.TimeoutException, TimeoutError)):
+        return "таймаут: сайт не ответил"
+    if isinstance(exc, httpx.ConnectError):
+        return "нет соединения с сайтом"
+    if isinstance(exc, (ValueError, ET.ParseError)):
+        return "сайт ответил непонятно (формат изменился?)"
+    return type(exc).__name__
+
+
 @dataclass
 class Vacancy:
     source: str
@@ -110,6 +134,8 @@ class Client:
 
     # ------------------------------------------------------------ hh.ru
     async def hh(self, f: dict, since: datetime) -> list[Vacancy]:
+        if not self.hh_token:   # с апреля 2026 hh отвечает 403 на /vacancies без авторизации приложения
+            raise SourceSkipped(HH_TOKEN_HINT)
         params: list[tuple[str, str]] = [
             ("text", " OR ".join(f'"{k}"' for k in f["keywords"])), ("search_field", "name"),
             ("area", "113"), ("order_by", "publication_time"), ("per_page", "100"),
@@ -131,6 +157,8 @@ class Client:
         return out
 
     async def hh_employer_site(self, employer_id: str) -> str | None:
+        if not self.hh_token:
+            return None
         async with self.session() as http:
             response = await http.get(HH_EMPLOYER_URL.format(id=employer_id), headers=self.hh_headers())
             response.raise_for_status()

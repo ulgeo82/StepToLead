@@ -91,7 +91,7 @@ class FilterTests(unittest.TestCase):
 
 class ParseTests(unittest.TestCase):
     def test_sources_from_fixtures(self):
-        client = Client(transport=transport())
+        client = Client(transport=transport(), hh_token="test")
         since = datetime(2026, 11, 1, tzinfo=timezone.utc)
         hh = asyncio.run(client.hh(F, since))
         self.assertEqual([v.ext_id for v in hh], ["101", "102", "103"])
@@ -122,7 +122,8 @@ class RunTests(FlowBase):
         settings.agency_workspace_id = 7
         runner.session_factory = self.sessions
         self.down: set[str] = set()
-        runner.client_factory = lambda: Client(transport=transport(self.down))
+        self.token = "test"
+        runner.client_factory = lambda: Client(transport=transport(self.down), hh_token=self.token)
         self.sent: list[tuple] = []
 
         async def send(chat_id, text, markup=None):
@@ -160,6 +161,9 @@ class RunTests(FlowBase):
         fid = self.make_filter()
         result = self.run_filter(fid)
         self.assertEqual((result.sent, result.found), (2, 6))
+        hh = result.by_source["hh"]
+        self.assertEqual((hh["state"], hh["found"], hh["passed"], hh["dropped"]), ("ok", 3, 1, 2))
+        self.assertIn(hh["reason"], {"исключение «senior»", "не удалёнка"})
         romashka = next(t for _, t, _ in self.sent if "Ромашка" in t)
         self.assertIn("hh.ru, Работа России", romashka)          # одна вакансия с двух сайтов — один пост
         self.assertEqual(self.sent[0][2]["inline_keyboard"][0][0]["callback_data"].split(":")[0], "jr")
@@ -190,6 +194,32 @@ class RunTests(FlowBase):
         value = self.run_db(status)
         self.assertTrue(value["habr"]["error"])
         self.assertTrue(value["hh"]["ok_at"])
+
+    def test_hh_without_token_is_skipped_quietly(self):
+        self.token = None
+        calls = []
+        runner.client_factory = lambda: Client(transport=transport(calls=calls))
+        fid = self.make_filter()
+        result = self.run_filter(fid)
+        self.assertNotIn("hh", result.errors)                       # не ошибка прохода
+        self.assertEqual(result.by_source["hh"], {"state": "skipped", "note": "нужен токен приложения (dev.hh.ru)"})
+        self.assertFalse([c for c in calls if c.url.host == "api.hh.ru"])   # в hh без токена не ходим
+        self.assertEqual(result.sent, 2)                              # остальные источники работают
+
+        async def status(db):
+            from app.models.system import AppSetting
+            return (await db.get(AppSetting, runner.STATUS_KEY)).value["hh"]
+        self.assertEqual(self.run_db(status)["state"], "skipped")
+
+    def test_source_error_is_short(self):
+        from app.domains.jobradar.sources import short_error
+        self.down = {"career.habr.com"}
+        result = self.run_filter(self.make_filter())
+        self.assertEqual(result.errors["habr"], "500: ошибка сайта")
+        self.assertNotIn("http", json.dumps(result.by_source))
+        request = httpx.Request("GET", "https://api.hh.ru/vacancies?text=x")
+        self.assertEqual(short_error(httpx.HTTPStatusError("x", request=request, response=httpx.Response(403, request=request))),
+                         "403: доступ запрещён")
 
     def test_telegram_failure_keeps_window(self):
         fid = self.make_filter()
@@ -341,6 +371,10 @@ class RunTests(FlowBase):
         self.assertEqual(s, {"interval_minutes": 30, "hh_token_set": True})
         over = client.get(f"{b}/overview").json()
         self.assertNotIn("secret", json.dumps(over))
+        self.assertEqual(over["sources"][0].get("state"), None)          # токен задан, hh ещё не проверялся
+        client.patch(f"{b}/settings", headers=ORIGIN, json={"hh_token": ""})
+        hh = client.get(f"{b}/overview").json()["sources"][0]
+        self.assertEqual((hh["state"], hh["note"]), ("skipped", "нужен токен приложения (dev.hh.ru)"))
         self.assertEqual([x["id"] for x in over["sources"]], ["hh", "trudvsem", "habr"])
         self.assertEqual(client.get(f"{b}/vacancies").json()["total"], 0)
         pv = client.post(f"{b}/preview", headers=ORIGIN, json={

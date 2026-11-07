@@ -16,7 +16,7 @@ from app.core.crypto import encrypt_secret
 from app.db import get_db
 from app.domains.jobradar import posting, runner, scoring
 from app.domains.jobradar.models import JrFilter, JrMatch, JrVacancy
-from app.domains.jobradar.sources import ALL, NAMES, Vacancy
+from app.domains.jobradar.sources import ALL, HH_TOKEN_HINT, NAMES, SourceSkipped, Vacancy, short_error
 from app.models.access import AdminUser
 from app.models.system import AppSetting
 
@@ -142,8 +142,18 @@ async def overview(db: AsyncSession = Depends(get_db), admin: AdminUser = Depend
     chats += [{"id": c, "title": f"Канал / чат {c}"} for c in used if c not in {x["id"] for x in chats}]
     return {"bot_configured": telegram_configured(), "ai_available": scoring.available(),
             "settings": {"interval_minutes": cfg["interval_minutes"], "hh_token_set": bool(cfg.get("hh_token_encrypted"))},
-            "sources": [{"id": s, "name": NAMES[s], **((status.value or {}).get(s, {}) if status else {})} for s in ALL],
+            "sources": [_source_out(s, (status.value or {}).get(s, {}) if status else {}, bool(cfg.get("hh_token_encrypted")))
+                        for s in ALL],
             "chats": chats}
+
+
+def _source_out(source: str, item: dict, hh_token: bool) -> dict:
+    out = {"id": source, "name": NAMES[source], **item}
+    if out.get("error"):   # старые записи могли хранить полный URL с параметрами
+        out["error"] = re.sub(r"\s*for url\s.*$", "", str(out["error"]), flags=re.S)[:160]
+    if source == "hh" and not hh_token:
+        out.update(state="skipped", note=HH_TOKEN_HINT, error=None)
+    return out
 
 
 @router.patch("/settings")
@@ -265,8 +275,11 @@ async def preview(payload: PreviewIn, db: AsyncSession = Depends(get_db), admin:
             got = await asyncio.wait_for(client.fetch(source, query, since), 60)
             sources[source] = {"name": NAMES[source], "found": len(got)}
             return got
+        except SourceSkipped as skip:
+            sources[source] = {"name": NAMES[source], "skipped": str(skip)}
+            return []
         except Exception as exc:  # noqa: BLE001
-            sources[source] = {"name": NAMES[source], "error": f"{type(exc).__name__}: {str(exc)[:150]}"}
+            sources[source] = {"name": NAMES[source], "error": short_error(exc)}
             return []
     for got in await asyncio.gather(*(one(s) for s in row.sources)):
         found += got
