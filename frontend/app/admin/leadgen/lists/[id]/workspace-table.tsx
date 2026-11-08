@@ -5,7 +5,8 @@ import { api } from "@/lib/api";
 import { base, date, Fit, fitLabels, money, safeUrl, Score, stages } from "../../shared";
 import { EmailStatus } from "../../email-status";
 import { shortError } from "../../sources/source-types";
-import { Column, TableRow, validInn, valueOf, View } from "./workspace-utils";
+import { Column, reviewLabel, TableRow, validInn, valueOf, View } from "./workspace-utils";
+import { Popover } from "./popover";
 import css from "./workspace.module.css";
 
 const editable: Record<string, string> = {
@@ -27,7 +28,9 @@ export function ColumnFilter({ column, value, changed, labels, sourceLabels = {}
     : column.key === "email_status" ? emailLabels : /^(signal|signals)$/.test(column.key) ? labels
       : column.key === "messengers" ? { whatsapp: "WhatsApp", telegram: "Telegram", vk: "VK" }
         : column.key === "source" ? sourceLabels : {};
-  return <div className={css.filter} onClick={e => e.stopPropagation()}>
+  return <Popover label={`Фильтр колонки: ${column.label}`} trigger="▾"
+    buttonClass={`${css.filterButton} ${value ? css.activeFilter : ""}`} align="end">
+    {close => <div className={css.filter} onClick={e => e.stopPropagation()}>
     <select aria-label={`Условие: ${column.label}`} value={localMode} onChange={e => {
       setLocalMode(e.target.value);
       changed(["empty", "notempty"].includes(e.target.value) ? e.target.value : "");
@@ -48,11 +51,16 @@ export function ColumnFilter({ column, value, changed, labels, sourceLabels = {}
       </select> : <input aria-label={`Фильтр: ${column.label}`} value={value.replace(/^(contains:|in:)/, "")}
         placeholder={localMode === "in" ? "Значения через запятую" : "Содержит…"}
         onChange={e => changed(e.target.value ? `${localMode}:${e.target.value}` : "")}/>)}
-  </div>;
+      <button type="button" className={css.smallButton} onClick={() => { changed(""); close(); }}>Сбросить фильтр</button>
+    </div>}
+  </Popover>;
 }
 
 function Cell({ row, column, labels }: { row: TableRow; column: Column; labels: Record<string, string> }) {
   const value = valueOf(row, column.key);
+  if (["company", "display_name"].includes(column.key)) return <>{value || "Без названия"}
+    {row.needs_review && <span className={css.review} title={reviewLabel(row.needs_review)}
+      aria-label={reviewLabel(row.needs_review)}>⚑</span>}</>;
   if (column.key === "domain" && row.domain && safeUrl(row.domain)) return <a
     onClick={e => e.stopPropagation()} href={safeUrl(row.domain)} target="_blank" rel="noopener noreferrer">
     {row.domain_display || row.domain} ↗</a>;
@@ -68,6 +76,23 @@ function Cell({ row, column, labels }: { row: TableRow; column: Column; labels: 
   if (column.key === "revenue_rub") return <>{money(row.revenue_rub)}</>;
   if (column.key === "added_at") return <>{date(row.added_at)}</>;
   return <>{value || "—"}</>;
+}
+
+function cellTitle(row: TableRow, column: Column, labels: Record<string, string>, sources: Record<string, string>) {
+  if (["company", "display_name"].includes(column.key)) {
+    return [valueOf(row, column.key), reviewLabel(row.needs_review)].filter(Boolean).join(" · ");
+  }
+  if (["signal", "signals"].includes(column.key)) return row.signals.map(code => labels[code] || code).join(", ");
+  if (["fit", "fit_label"].includes(column.key)) return fitLabels[row.fit_label || ""] || "Не оценена";
+  if (column.key === "stage") return stages[row.stage] || row.stage;
+  if (column.key === "source") return sources[row.source || ""] || row.source || "";
+  if (column.key === "revenue_rub") return money(row.revenue_rub);
+  if (column.key === "added_at") return date(row.added_at);
+  if (column.key === "email_status") return emailLabels[row.best_email?.verify_status || "none"] || "Не проверена";
+  if (["email", "best_email"].includes(column.key) && row.best_email) {
+    return `${row.best_email.value} · ${emailLabels[row.best_email.verify_status] || "Не проверена"}`;
+  }
+  return valueOf(row, column.key);
 }
 
 export function WorkspaceTable({ rows, columns, view, setView, selected, allSelected, toggle,
@@ -86,6 +111,8 @@ export function WorkspaceTable({ rows, columns, view, setView, selected, allSele
   const picked = rows.filter(row => allSelected || selected.includes(row.id)).length;
   useEffect(() => { if (check.current) check.current.indeterminate = picked > 0 && picked < rows.length; },
     [picked, rows.length]);
+  const hasCompany = columns.some(column => ["company", "display_name"].includes(column.key));
+  const otherWidth = columns.filter(column => !["company", "display_name"].includes(column.key)).length * 170 + 36;
   function begin(row: TableRow, column: Column) {
     if (pending.current) clearTimeout(pending.current);
     if (locked || saving || !editable[column.key]) return;
@@ -117,19 +144,26 @@ export function WorkspaceTable({ rows, columns, view, setView, selected, allSele
     finally { setSaving(false); }
   }
   return <div className={css.scroll} role="region" aria-label="Таблица компаний" tabIndex={0}>
-    <table className={`${css.table} ${wrap ? css.wrap : ""}`}>
+    <table className={`${css.table} ${wrap ? css.wrap : ""}`}
+      style={{ width: hasCompany ? `calc(${otherWidth}px + var(--company-width, 220px))` : otherWidth }}>
+      <colgroup><col style={{ width: 36 }}/>{columns.map(column => <col key={column.key}
+        style={{ width: ["company", "display_name"].includes(column.key) ? "var(--company-width, 220px)" : 170 }}/>)}</colgroup>
       <thead><tr>
-        <th scope="col"><input ref={check} type="checkbox" aria-label="Выбрать все на странице"
+        <th scope="col" className={css.checkboxCol}><input ref={check} type="checkbox" aria-label="Выбрать все на странице"
           disabled={locked || !rows.length} checked={rows.length > 0 && picked === rows.length}
           onChange={e => selectPage(e.target.checked)}/></th>
         {columns.map(column => <th scope="col" key={column.key}
+          className={`${["company", "display_name"].includes(column.key) ? css.companyCol : ""} ${
+            view.filters[column.key] ? css.activeFilter : ""}`}
           aria-sort={view.sort === column.key ? view.dir === "asc" ? "ascending" : "descending" : "none"}>
-          <button type="button" onClick={() => setView({ ...view, page: 1, sort: column.key,
+          <div className={css.thContent}>
+          <button type="button" className={css.sortButton} onClick={() => setView({ ...view, page: 1, sort: column.key,
             dir: view.sort === column.key && view.dir === "asc" ? "desc" : "asc" })}>
             {column.label} {view.sort === column.key ? view.dir === "asc" ? "↑" : "↓" : "↕"}
           </button>
           <ColumnFilter column={column} value={view.filters[column.key] || ""} labels={labels} sourceLabels={sourceLabels}
             changed={value => setView({ ...view, page: 1, filters: { ...view.filters, [column.key]: value } })}/>
+          </div>
         </th>)}
       </tr></thead>
       <tbody>{rows.map(row => <tr key={row.id} tabIndex={0}
@@ -140,10 +174,12 @@ export function WorkspaceTable({ rows, columns, view, setView, selected, allSele
           if (pending.current) clearTimeout(pending.current);
           pending.current = setTimeout(() => open(row.id), 250);
         }} onKeyDown={e => { if (e.target === e.currentTarget && e.key === "Enter") open(row.id); }}>
-        <td onClick={e => e.stopPropagation()}><input type="checkbox" disabled={locked}
+        <td className={css.checkboxCol} onClick={e => e.stopPropagation()}><input type="checkbox" disabled={locked}
           aria-label={`Выбрать ${row.display_name || row.id}`} checked={allSelected || selected.includes(row.id)}
           onChange={e => toggle(row.id, e.target.checked)}/></td>
-        {columns.map(column => <td key={column.key} onDoubleClick={e => {
+        {columns.map(column => <td key={column.key}
+          className={["company", "display_name"].includes(column.key) ? css.companyCol : ""}
+          title={cellTitle(row, column, labels, sourceLabels || {})} onDoubleClick={e => {
           e.stopPropagation();
           begin(row, column);
         }}>
@@ -156,7 +192,7 @@ export function WorkspaceTable({ rows, columns, view, setView, selected, allSele
               <div><button type="submit" disabled={saving}>Сохранить</button>{" "}
                 <button type="button" disabled={saving} onClick={() => setEdit(null)}>Отмена</button></div>
               {edit.error && <span role="alert" className={css.cellError}>{edit.error}</span>}
-            </form> : <Cell row={row} column={column} labels={labels}/>}
+            </form> : <span className={css.cellText}><Cell row={row} column={column} labels={labels}/></span>}
         </td>)}
       </tr>)}</tbody>
     </table>

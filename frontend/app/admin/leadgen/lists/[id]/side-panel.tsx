@@ -18,9 +18,10 @@ const cleanupRules: Record<string, string> = {
   not_fit: "Скрыть «не подходит» по ИИ", chains: "Скрыть сети", duplicates: "Отправить дубли на проверку",
 };
 
-export function SidePanel({ id, revision, locked, changed, filter, labels }: {
+export function SidePanel({ id, revision, locked, changed, filter, labels, close }: {
   id: number; revision: number; locked: boolean; changed: () => void;
   filter: (column: string, value: string) => void; labels: Record<string, string>;
+  close: () => void;
 }) {
   const [column, setColumn] = useState("city");
   const [summary, setSummary] = useState<Summary | null>(null);
@@ -67,8 +68,11 @@ export function SidePanel({ id, revision, locked, changed, filter, labels }: {
   }
   const valueLabels = column === "fit" ? fitLabels : column === "stage" ? stages
     : column === "signal" ? labels : column === "email_status" ? emailLabels : {};
-  return <aside className={css.aside} aria-label="Сводка и очистка">
-    <section className={styles.card}><h2>Сводка</h2>
+  return <aside id="list-side-panel" className={css.aside} aria-label="Сводка и очистка">
+    <div className={css.sideHeading}><span>Сводка и очистка</span>
+      <button type="button" className={css.smallButton} aria-label="Закрыть панель" onClick={close}>×</button>
+    </div>
+    <section className={css.sideSection}><h2>Сводка</h2>
       <label className={styles.field}>Колонка<select value={column} onChange={e => setColumn(e.target.value)}>
         {Object.entries(summaryColumns).map(([key, name]) => <option key={key} value={key}>{name}</option>)}
       </select></label>
@@ -84,7 +88,7 @@ export function SidePanel({ id, revision, locked, changed, filter, labels }: {
             <b>{item.count}</b></button>)}</div>
         </>}
     </section>
-    <section className={styles.card}><h2>Очистка</h2>
+    <section className={css.sideSection}><h2>Очистка</h2>
       <p className={css.hint}>Применяется ко всей базе, независимо от фильтров таблицы.</p>
       <div className={css.cleanup}>
         <label className={styles.field}>Набор<select value={rule} disabled={busy || locked}

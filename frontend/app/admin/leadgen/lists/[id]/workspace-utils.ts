@@ -9,7 +9,8 @@ export const stepNames: Record<string, string> = {
   name_clean: "Чистка названий", site_tech: "Проверка сайтов", dadata: "DaData",
   fns_revenue: "Доходы ФНС", fit_ai: "Оценка ЦА", personalize: "Персонализация",
 };
-export type TableRow = Company & {
+export type TableRow = Omit<Company, "needs_review"> & {
+  needs_review: boolean | string | null;
   best_email: { value: string; verify_status: string } | null;
   emails: number;
   phone: string | null;
@@ -65,7 +66,21 @@ export function columnPreferences(columns: Column[], saved: unknown): ColumnPref
     output.push({ key: column.key, visible: column.key !== "personal_line" });
   }
   if (output.length && !output.some(item => item.visible)) output[0].visible = true;
+  const company = output.find(item => ["display_name", "company"].includes(item.key));
+  if (company) return [{ ...company, visible: true }, ...output.filter(item => item !== company)];
   return output;
+}
+export function reviewLabel(value: unknown): string {
+  if (!value) return "";
+  if (typeof value !== "string") return "На проверке";
+  if (value.startsWith("inn_mismatch:")) return "ИНН на сайте другой";
+  if (value === "find_site:duplicate") return "Сайт или ИНН уже у другой компании";
+  if (value === "name_clean:ip") return "ИП — укажите название бренда";
+  if (value.startsWith("manual:")) return value.slice(7).trim() ? `На проверке: ${value.slice(7).trim()}` : "На проверке";
+  return "На проверке";
+}
+export function scopeForSelection(count: number): "all" | "selected" {
+  return count > 0 ? "selected" : "all";
 }
 export function validInn(value: string): boolean {
   if (!/^\d{10}$|^\d{12}$/.test(value) || /^0+$/.test(value)) return false;
@@ -83,6 +98,7 @@ export function valueOf(row: TableRow, key: string): string {
     case "email_status": return row.best_email?.verify_status || "unknown";
     case "signal": case "signals": return row.signals.join(", ");
     case "fit": return row.fit_label || "";
+    case "needs_review": return reviewLabel(row.needs_review);
     default: {
       const value = row[key as keyof TableRow];
       return value == null ? "" : Array.isArray(value) ? value.join(", ") : String(value);

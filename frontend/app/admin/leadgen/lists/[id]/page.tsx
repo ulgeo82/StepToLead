@@ -8,10 +8,12 @@ import AddToCampaignDialog from "../../../outreach/campaigns/AddToCampaignDialog
 import { AddToListDialog, CompanyAction, CompanyCard } from "../../company-dialogs";
 import ExportDialog from "../../ExportDialog";
 import ImportDialog from "../../ImportDialog";
-import { base, LeadList, PageHeader, Pipeline, post, signalLabels, stages } from "../../shared";
+import { base, LeadList, Pipeline, post, signalLabels, stages } from "../../shared";
 import { CompanySource, shortError } from "../../sources/source-types";
 import styles from "../../leadgen.module.css";
 import css from "./workspace.module.css";
+import { CompactActions, WorkspaceAction } from "./compact-actions";
+import { Popover } from "./popover";
 import { FunctionPanel } from "./function-panel";
 import { SidePanel } from "./side-panel";
 import { WorkspaceTable } from "./workspace-table";
@@ -37,9 +39,10 @@ function Workspace({ id }: { id: number }) {
   const [view, setView] = useState<View>(initialView);
   const [revision, setRevision] = useState(0);
   const [columns, setColumns] = useState<ColumnPreference[]>([]);
-  const [wrap, setWrap] = useState(true);
+  const [wrap, setWrap] = useState(false);
   const [duplicates, setDuplicates] = useState(false);
-  const [aside, setAside] = useState(true);
+  const [aside, setAside] = useState(false);
+  const workspace = useRef<HTMLDivElement>(null);
   const [selected, setSelected] = useState<number[]>([]);
   const [allSelected, setAllSelected] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -73,9 +76,26 @@ function Workspace({ id }: { id: number }) {
 
   useEffect(() => () => operation.current?.abort(), []);
   useEffect(() => {
+    const node = workspace.current;
+    if (!node) return;
+    function size() {
+      node?.style.setProperty("--workspace-top", `${Math.max(0, node.getBoundingClientRect().top)}px`);
+    }
+    size();
+    const observer = new ResizeObserver(size);
+    if (node.parentElement) observer.observe(node.parentElement);
+    window.addEventListener("resize", size);
+    return () => { observer.disconnect(); window.removeEventListener("resize", size); };
+  }, []);
+  function togglePanel(value: boolean) {
+    setAside(value);
+    safeWrite(`stl:leadgen:list:${id}:panel`, value);
+  }
+  useEffect(() => {
     setTabs(recentLists(safeRead(recentKey)));
     const value = safeRead(`stl:leadgen:list:${id}:wrap`);
     if (typeof value === "boolean") setWrap(value);
+    setAside(safeRead(`stl:leadgen:list:${id}:panel`) === true);
   }, [id]);
   useEffect(() => {
     const controller = new AbortController();
@@ -252,109 +272,101 @@ function Workspace({ id }: { id: number }) {
   const feedback = <>{error && <p role="alert" className={styles.error}>{error}</p>}
     {notice && <p role="status" className={styles.notice}>{notice}</p>}</>;
 
-  return <div className={`page ${styles.page} ${css.workspace}`}>
-    <PageHeader title="Рабочее место базы" subtitle=""/>
-    <Link href="/admin/leadgen/lists">← Все списки</Link>
-    <nav className={css.tabs} aria-label="Недавно открытые базы">{tabs.map(tab => <span key={tab.id}>
-      <Link href={`/admin/leadgen/lists/${tab.id}`} aria-current={tab.id === id ? "page" : undefined}>{tab.name}</Link>
-      <button type="button" aria-label={`Закрыть вкладку ${tab.name}`} onClick={() => {
-        const next = tabs.filter(item => item.id !== tab.id);
-        setTabs(next);
-        safeWrite(recentKey, next);
-      }}>×</button></span>)}</nav>
-    {metaError && <p role="alert" className={styles.error}>{metaError}</p>}
+
+  const actions: WorkspaceAction[] = [
+    { label: "В кампанию…", disabled: locked || !selectedCount, click: () => { void dialog("campaign"); } },
+    { label: "В CRM", disabled: locked || !selectedCount, click: () => { void bulk("outreach"); } },
+    { label: "В другой список…", disabled: locked || !selectedCount, click: () => { void dialog("list"); } },
+    { label: "На проверку", disabled: locked || !selectedCount, click: () => { void bulk("review"); } },
+    { label: "Скрыть", disabled: locked || !selectedCount, click: () => { void bulk("hide"); } },
+    { label: "Удалить", disabled: locked || !selectedCount, danger: true, click: () => { void bulk("delete"); } },
+    { label: "Excel", disabled: locked, click: () => { void dialog("xlsx"); } },
+    { label: "CSV", disabled: locked, click: () => { void dialog("csv"); } },
+    { label: "Копировать", disabled: locked || !selectedCount, click: () => { void execute(async signal => {
+      const rows = await readRows(signal);
+      await navigator.clipboard.writeText(tsv(allSelected ? rows : rows.filter(row => selected.includes(row.id)),
+        visibleColumns));
+      setNotice("Строки скопированы в буфер как TSV");
+    }); } },
+    { label: "Импорт", disabled: locked, click: () => setImporting(true) },
+  ];
+  return <div ref={workspace} className={`${styles.page} ${css.workspace}`}>
+    <header className={css.header} aria-label="База компаний">
+      <Link className={css.back} href="/admin/leadgen/lists">← Все списки</Link>
+      <nav className={css.tabs} aria-label="Недавно открытые базы">{tabs.map(tab => <span key={tab.id}>
+        <Link href={`/admin/leadgen/lists/${tab.id}`} aria-current={tab.id === id ? "page" : undefined}
+          title={tab.name}>{tab.name}</Link>
+        <button type="button" aria-label={`Закрыть вкладку ${tab.name}`} onClick={() => {
+          const next = tabs.filter(item => item.id !== tab.id);
+          setTabs(next); safeWrite(recentKey, next);
+        }}>×</button>
+      </span>)}</nav>
+      {list && <>
+        {name == null ? <button type="button" className={css.title} disabled={locked}
+          title="Переименовать базу" onClick={() => setName(list.name)}>{list.name} ✎</button>
+          : <form className={css.rename} onSubmit={e => { e.preventDefault(); void rename(); }}>
+            <input autoFocus aria-label="Название базы" maxLength={180} value={name} disabled={locked}
+              onChange={e => setName(e.target.value)} onKeyDown={e => e.key === "Escape" && setName(null)}/>
+            <button type="submit" className={css.smallButton} disabled={locked || !name.trim()}>Сохранить</button>
+            <button type="button" className={css.smallButton} disabled={locked} onClick={() => setName(null)}>Отмена</button>
+          </form>}
+        <div className={css.counters}>
+          <span>Всего: {list.total}</span><span>С почтой: {withEmail ?? "—"}</span>
+          <span title="С проверенной почтой">Проверены: {verified ?? "—"}</span>
+          <span>Подходят (ИИ): {list.fit}</span><span>Не выгружались: {list.not_exported}</span>
+        </div>
+      </>}
+    </header>
+    {metaError && <p role="alert" className={css.cellError}>{metaError}</p>}
     {!list && !metaError && <p role="status">Загружаем базу…</p>}
     {list && <>
-      {name == null ? <button type="button" className={css.title} disabled={locked}
-        title="Переименовать базу" onClick={() => setName(list.name)}>{list.name} ✎</button>
-        : <form className={css.toolbar} onSubmit={e => { e.preventDefault(); void rename(); }}>
-          <input autoFocus aria-label="Название базы" maxLength={180} value={name} disabled={locked}
-            onChange={e => setName(e.target.value)} onKeyDown={e => e.key === "Escape" && setName(null)}/>
-          <button type="submit" className={styles.secondary} disabled={locked || !name.trim()}>Сохранить</button>
-          <button type="button" className={styles.secondary} disabled={locked} onClick={() => setName(null)}>Отмена</button>
-        </form>}
-      <div className={css.counters}>
-        <span>Всего: {list.total}</span>
-        <span title="По сводке доступных строк базы">С почтой: {withEmail ?? "—"}</span>
-        <span>С проверенной почтой: {verified ?? "—"}</span><span>Подходят (ИИ): {list.fit}</span>
-        <span>Не выгружались: {list.not_exported}</span>
-      </div>
-      {feedback}
-      {sourceError && <p role="alert" className={styles.error}>{sourceError}</p>}
+      {(error || notice) && <div className={css.feedback}>{feedback}</div>}
+      {sourceError && <p role="alert" className={css.cellError}>{sourceError}</p>}
       <FunctionPanel listId={id} sources={sources} ids={selected} total={list.total} allSelected={allSelected}
-        locked={busy} changed={changed} running={setRunning}/>
-      <section className={`${styles.card} ${css.panel}`} aria-label="Действия с компаниями">
-        <p>Отмечено: {selectedCount}{allSelected ? " · вся база, без учёта фильтров" : ""}</p>
-        <div className={css.toolbar}>
-          <button type="button" className={styles.secondary} disabled={locked || !selectedCount}
-            onClick={() => dialog("campaign")}>В кампанию…</button>
-          <button type="button" className={styles.secondary} disabled={locked || !selectedCount}
-            onClick={() => bulk("outreach")}>В CRM</button>
-          <button type="button" className={styles.secondary} disabled={locked || !selectedCount}
-            onClick={() => dialog("list")}>В другой список…</button>
-          <button type="button" className={styles.secondary} disabled={locked || !selectedCount}
-            onClick={() => bulk("review")}>На проверку</button>
-          <button type="button" className={styles.secondary} disabled={locked || !selectedCount}
-            onClick={() => bulk("hide")}>Скрыть</button>
-          <button type="button" className={styles.secondary} disabled={locked || !selectedCount}
-            onClick={() => bulk("delete")}>Удалить</button>
-          <button type="button" className={styles.secondary} disabled={locked}
-            onClick={() => dialog("xlsx")}>Excel</button>
-          <button type="button" className={styles.secondary} disabled={locked}
-            onClick={() => dialog("csv")}>CSV</button>
-          <button type="button" className={styles.secondary} disabled={locked || !selectedCount}
-            onClick={() => execute(async signal => {
-              const rows = await readRows(signal);
-              await navigator.clipboard.writeText(tsv(allSelected ? rows : rows.filter(row => selected.includes(row.id)),
-                visibleColumns));
-              setNotice("Строки скопированы в буфер как TSV");
-            })}>Копировать</button>
-          <button type="button" className={styles.secondary} disabled={locked}
-            onClick={() => setImporting(true)}>Импорт в эту базу</button>
-        </div>
-      </section>
+        locked={busy} changed={changed} running={setRunning} actions={<CompactActions items={actions}/>}/>
       <div className={css.controls}>
-        <label>Поиск по всем колонкам <input value={view.q} disabled={locked}
-          onChange={e => updateView({ ...view, page: 1, q: e.target.value })}/></label>
+        <input className={css.search} aria-label="Поиск по всем колонкам" placeholder="Поиск по всем колонкам"
+          value={view.q} disabled={locked} onChange={e => updateView({ ...view, page: 1, q: e.target.value })}/>
         <label><input type="checkbox" checked={duplicates} onChange={e => setDuplicates(e.target.checked)}/>
           Совпадения</label>
         <label><input type="checkbox" checked={wrap} onChange={e => {
-          setWrap(e.target.checked);
-          safeWrite(`stl:leadgen:list:${id}:wrap`, e.target.checked);
+          setWrap(e.target.checked); safeWrite(`stl:leadgen:list:${id}:wrap`, e.target.checked);
         }}/> Перенос строк</label>
-        <button type="button" className={styles.secondary} onClick={() => setAside(value => !value)}
-          aria-expanded={aside}>Сводка и очистка</button>
-        <button type="button" className={styles.secondary} disabled={locked} onClick={() => {
-          setSelected([]); setAllSelected(false); changed();
-        }}>Обновить</button>
-        <button type="button" className={styles.secondary} disabled={locked} onClick={() => updateView(initialView)}>
-          Сбросить фильтры</button>
+        <Popover label="Колонки" trigger="Колонки ▾"><div className={css.columns}>
+          {columns.map((item, index) => {
+            const pinned = ["display_name", "company"].includes(item.key);
+            return <div key={item.key} className={css.column}>
+              <label><input type="checkbox" checked={item.visible}
+                disabled={pinned || item.visible && columns.filter(value => value.visible).length === 1}
+                onChange={e => updateColumns(columns.map(value => value.key === item.key
+                  ? { ...value, visible: e.target.checked } : value))}/>
+                {data?.columns.find(column => column.key === item.key)?.label || item.key}{pinned ? " 🔒" : ""}
+              </label>
+              {[-1, 1].map(direction => <button type="button" key={direction}
+                aria-label={`${direction < 0 ? "Выше" : "Ниже"}: ${item.key}`}
+                disabled={pinned || index + direction <= 0 || index + direction >= columns.length}
+                onClick={() => {
+                  const next = [...columns];
+                  [next[index], next[index + direction]] = [next[index + direction], next[index]];
+                  updateColumns(next);
+                }}>{direction < 0 ? "↑" : "↓"}</button>)}
+            </div>;
+          })}
+        </div></Popover>
+        <button type="button" className={css.smallButton} aria-controls="list-side-panel"
+          onClick={() => togglePanel(!aside)} aria-expanded={aside}>Панель</button>
+        <Popover label="Настройки таблицы" trigger="⋯" align="end">{close => <div className={css.menuItems}>
+          <button type="button" disabled={locked} onClick={() => {
+            close(); setSelected([]); setAllSelected(false); changed();
+          }}>Обновить</button>
+          <button type="button" disabled={locked} onClick={() => { close(); updateView(initialView); }}>
+            Сбросить фильтры</button>
+        </div>}</Popover>
       </div>
-      <details><summary>Колонки</summary><div className={css.columns}>{columns.map((item, index) =>
-        <div key={item.key} className={css.column}>
-          <label><input type="checkbox" checked={item.visible}
-            disabled={item.visible && columns.filter(value => value.visible).length === 1}
-            onChange={e => updateColumns(columns.map(value => value.key === item.key
-              ? { ...value, visible: e.target.checked } : value))}/>
-            {data?.columns.find(column => column.key === item.key)?.label || item.key}</label>
-          {[-1, 1].map(direction => <button type="button" key={direction}
-            aria-label={`${direction < 0 ? "Выше" : "Ниже"}: ${item.key}`}
-            disabled={index + direction < 0 || index + direction >= columns.length} onClick={() => {
-              const next = [...columns];
-              [next[index], next[index + direction]] = [next[index + direction], next[index]];
-              updateColumns(next);
-            }}>{direction < 0 ? "↑" : "↓"}</button>)}
-        </div>)}</div></details>
       <div className={`${css.layout} ${!aside ? css.closed : ""}`}>
         <section className={css.main} aria-label="Компании базы">
-          <div className={css.controls}>
-            <button type="button" className={styles.secondary} disabled={locked || !list.total}
-              onClick={() => { setAllSelected(true); setSelected([]); }}>Выбрать всю базу ({list.total})</button>
-            <button type="button" className={styles.secondary} disabled={locked || !selectedCount}
-              onClick={() => { setAllSelected(false); setSelected([]); }}>Снять выбор</button>
-          </div>
-          {loading && <p role="status">Загружаем таблицу…</p>}
-          {tableError && <p role="alert" className={styles.error}>{tableError}</p>}
+          {loading && <p role="status" className={css.hint}>Загружаем таблицу…</p>}
+          {tableError && <p role="alert" className={css.cellError}>{tableError}</p>}
           {data && !tableError && <WorkspaceTable rows={data.items} columns={visibleColumns} view={view}
             setView={updateView} selected={selected} allSelected={allSelected} toggle={toggle}
             selectPage={checked => {
@@ -362,22 +374,29 @@ function Workspace({ id }: { id: number }) {
                 void execute(async signal => {
                   const ids = await selection(signal);
                   const pageIds = new Set(data.items.map(row => row.id));
-                  setAllSelected(false);
-                  setSelected(ids.filter(value => !pageIds.has(value)));
+                  setAllSelected(false); setSelected(ids.filter(value => !pageIds.has(value)));
                 });
               } else setSelected(current => checked ? [...new Set([...current, ...data.items.map(row => row.id)])]
                 : current.filter(value => !data.items.some(row => row.id === value)));
-            }} open={setCompanyId} changed={changed} labels={labels} sourceLabels={sourceLabels} wrap={wrap}
-            duplicates={duplicates} locked={locked || loading}/>}
-          <div className={css.pagination}>
-            <button type="button" className={styles.secondary} disabled={loading || view.page <= 1}
+            }} open={setCompanyId} changed={changed} labels={labels} sourceLabels={sourceLabels}
+            wrap={wrap} duplicates={duplicates} locked={locked || loading}/>}
+          <footer className={css.pagination}>
+            <span>Отмечено: {selectedCount}{allSelected ? " · вся база" : ""}</span>
+            <button type="button" className={css.smallButton} disabled={locked || !list.total}
+              title="Выбрать всю базу независимо от фильтров"
+              onClick={() => { setAllSelected(true); setSelected([]); }}>Вся база ({list.total})</button>
+            <button type="button" className={css.smallButton} disabled={locked || !selectedCount}
+              onClick={() => { setAllSelected(false); setSelected([]); }}>Снять выбор</button>
+            <button type="button" className={css.smallButton} disabled={loading || view.page <= 1}
               onClick={() => setView(current => ({ ...current, page: current.page - 1 }))}>← Назад</button>
-            <span>Страница {view.page} из {Math.max(1, Math.ceil((data?.total || 0) / 100))} · найдено {data?.total ?? "—"}</span>
-            <button type="button" className={styles.secondary} disabled={loading || view.page * 100 >= (data?.total || 0)}
+            <span>Страница {view.page} из {Math.max(1, Math.ceil((data?.total || 0) / 100))} · {data?.total ?? "—"}</span>
+            <button type="button" className={css.smallButton}
+              disabled={loading || view.page * 100 >= (data?.total || 0)}
               onClick={() => setView(current => ({ ...current, page: current.page + 1 }))}>Далее →</button>
-          </div>
+          </footer>
         </section>
         {aside && <SidePanel id={id} revision={revision} locked={locked} changed={changed} labels={labels}
+          close={() => togglePanel(false)}
           filter={(column, value) => updateView({ ...view, page: 1, filters: { ...view.filters, [column]: value } })}/>}
       </div>
     </>}

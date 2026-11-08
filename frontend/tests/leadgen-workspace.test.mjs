@@ -61,7 +61,7 @@ test("колонки: порядок и видимость сохраняютс�
   assert.deepEqual(plain(utils.columnPreferences(columns, [
     { key: "city", visible: false }, { key: "missing", visible: true }, { key: "city", visible: true },
   ])), [
-    { key: "city", visible: false }, { key: "display_name", visible: true },
+    { key: "display_name", visible: true }, { key: "city", visible: false },
     { key: "personal_line", visible: false }, { key: "inn", visible: true },
   ]);
 });
@@ -92,6 +92,9 @@ test("таблица рендерит почту, статус, ещё N, дуб
     "@/lib/api": { api() {} }, "../../shared": shared,
     "../../email-status": { EmailStatus: ({ status }) => createElement("span", null, status) },
     "../../sources/source-types": { shortError: e => e.message }, "./workspace-utils": utils,
+    "./popover": load("../app/admin/leadgen/lists/[id]/popover.tsx", {
+      "./workspace.module.css": { default: {} },
+    }),
     "./workspace.module.css": { default: { duplicate: "duplicate", wrap: "wrap" } },
   });
   const html = renderToStaticMarkup(createElement(WorkspaceTable, {
@@ -103,8 +106,35 @@ test("таблица рендерит почту, статус, ещё N, дуб
   assert.match(html, /ещё 2/);
   assert.match(html, /info@company.test/);
   assert.match(html, /duplicate/);
-  assert.match(html, /Не пусто/);
+  assert.match(html, /Фильтр колонки: Компания/);
+  assert.match(html, /aria-haspopup="dialog"/);
+  assert.doesNotMatch(html, /Условие: Компания/);
   assert.doesNotMatch(html, /<script>/);
+});
+
+test("коды проверки показываются человеку, неизвестный код не раскрывается", () => {
+  for (const [value, expected] of [
+    ["inn_mismatch:12", "ИНН на сайте другой"],
+    ["find_site:duplicate", "Сайт или ИНН уже у другой компании"],
+    ["name_clean:ip", "ИП — укажите название бренда"],
+    ["manual:дубль", "На проверке: дубль"], ["manual:", "На проверке"],
+    ["other_internal:42", "На проверке"], [true, "На проверке"], [null, ""], [false, ""],
+  ]) assert.equal(utils.reviewLabel(value), expected);
+  assert.equal(utils.valueOf({ ...row, needs_review: "name_clean:ip" }, "needs_review"),
+    "ИП — укажите название бренда");
+});
+
+test("область автоматически зависит от выбора, пустой выбор означает всю базу", () => {
+  assert.equal(utils.scopeForSelection(0), "all");
+  assert.equal(utils.scopeForSelection(1), "selected");
+  assert.equal(utils.scopeForSelection(105), "selected");
+});
+
+test("закреплённую компанию нельзя скрыть или перенести за другие колонки", () => {
+  const columns = ["city", "display_name", "inn"].map(key => ({ key, label: key, filter: "text" }));
+  assert.deepEqual(plain(utils.columnPreferences(columns, [
+    { key: "inn", visible: true }, { key: "display_name", visible: false },
+  ])), [{ key: "display_name", visible: true }, { key: "inn", visible: true }, { key: "city", visible: true }]);
 });
 test("ссылки списка ведут в рабочее место, диалоги переиспользуются обоими экранами", () => {
   const lists = readFileSync(new URL("../app/admin/leadgen/lists/page.tsx", import.meta.url), "utf8");
