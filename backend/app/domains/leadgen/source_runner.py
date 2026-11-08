@@ -687,7 +687,7 @@ async def tech_for(db: AsyncSession, company_id: int) -> dict | None:
 # ---------------------------------------------------------------- запуск функций по базе (WORKSPACE.md)
 
 # Порядок выполнения — всегда этот, как бы ни прислали: сначала сайт и ИНН, потом почты, потом проверки.
-WORKSPACE_ORDER = ("find_site", "site_contacts", "email_check", "name_clean", "site_tech", "dadata", "fns_revenue",
+WORKSPACE_ORDER = ("find_site", "site_contacts", "email_by_inn", "email_check", "name_clean", "site_tech", "dadata", "fns_revenue",
                    "fit_ai", "personalize")
 
 

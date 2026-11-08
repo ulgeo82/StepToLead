@@ -24,7 +24,7 @@ const plain = value => JSON.parse(JSON.stringify(value));
 test("функции всегда выполняются в порядке контракта, без повторов и чужих кодов", () => {
   assert.deepEqual(plain(utils.orderedSteps(["personalize", "email_check", "find_site", "email_check", "other"])),
     ["find_site", "email_check", "personalize"]);
-  assert.equal(utils.stepOrder.length, 9);
+  assert.equal(utils.stepOrder.length, 10);
 });
 test("таблица: 100 строк, точные f.* условия, без города по умолчанию", () => {
   const query = new URLSearchParams(utils.tableQuery({ page: 2, q: " мебель ", sort: "city", dir: "asc",

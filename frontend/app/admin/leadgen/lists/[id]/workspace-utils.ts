@@ -1,11 +1,11 @@
 import type { Company } from "../../shared";
 
 export const stepOrder = [
-  "find_site", "site_contacts", "email_check", "name_clean", "site_tech",
+  "find_site", "site_contacts", "email_by_inn", "email_check", "name_clean", "site_tech",
   "dadata", "fns_revenue", "fit_ai", "personalize",
 ] as const;
 export const stepNames: Record<string, string> = {
-  find_site: "Найти сайт и ИНН", site_contacts: "Найти почты", email_check: "Валидация почт",
+  find_site: "Найти сайт и ИНН", site_contacts: "Найти почты", email_by_inn: "Почта по ИНН", email_check: "Валидация почт",
   name_clean: "Чистка названий", site_tech: "Проверка сайтов", dadata: "DaData",
   fns_revenue: "Доходы ФНС", fit_ai: "Оценка ЦА", personalize: "Персонализация",
 };

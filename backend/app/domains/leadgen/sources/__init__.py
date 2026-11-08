@@ -12,7 +12,7 @@ from app.domains.leadgen.sources.base import (  # noqa: F401 — общий им
     short_error,
 )
 
-ORDER = ("site_tech", "serp", "hiring", "find_site", "site_contacts", "email_check", "name_clean", "dadata",
+ORDER = ("site_tech", "serp", "hiring", "find_site", "site_contacts", "email_by_inn", "email_check", "name_clean", "dadata",
          "fns_revenue", "fit_ai", "personalize")
 
 

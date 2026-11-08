@@ -220,7 +220,7 @@ class ApiTests(Base_):
         self.assertTrue(s["icp"].startswith("Подходят"))
         self.client.put(f"{base}/settings", headers=ORIGIN, json={"icp": "Только кухни в Самаре и области, B2C."})
         self.assertEqual(self.client.get(f"{base}/settings").json()["icp"], "Только кухни в Самаре и области, B2C.")
-        a = self.client.get(f"{base}/analytics", params={"days": 30}).json()
+        a = self.client.get(f"{base}/analytics", params={"days": 365}).json()   # NOW зашит — окно с запасом
         self.assertEqual(a["funnel"][0]["count"], 1)
 
 

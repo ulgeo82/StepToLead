@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from urllib.parse import urlsplit
@@ -21,6 +22,7 @@ from app.domains.leadgen.models import LgCompany, LgCompanyKey, LgContact, LgEnr
 
 USER_AGENT = "StepToLeadBot/1.0 (+https://steptolead.ru; contact collection from public company pages)"
 MAX_PAGES = 6
+CONTACT_PATHS = ("/contacts", "/kontakty", "/contact", "/contacts/", "/kontakti", "/about")
 MAX_BYTES = 1_500_000
 TIMEOUT = httpx.Timeout(8.0, connect=5.0)   # первая попытка: живые сайты отвечают быстро
 SLOW_TIMEOUT = httpx.Timeout(20.0, connect=10.0)   # вторая — только для не ответивших: медленный ≠ мёртвый
@@ -167,6 +169,25 @@ async def _crawl(domain: str, *, transport: httpx.AsyncBaseTransport | None = No
                 continue
             result.fetched.append(url)
             result.facts.merge(await asyncio.to_thread(extract, page, url))
+        # Почты нет или страницу контактов так и не открыли — пробуем типовые адреса: у многих сайтов ссылка
+        # на них в меню, собранном скриптом, и в HTML её не видно, а отдел продаж часто только там.
+        if not result.facts.emails or not any(m in u for u in result.fetched for m in ("contact", "kontakt")):
+            for path in CONTACT_PATHS:
+                url = root + path
+                if url in seen or len(result.fetched) >= MAX_PAGES + 2:
+                    continue
+                seen.add(url)
+                if robots is not None and not robots.can_fetch(USER_AGENT, url):
+                    continue
+                if delay:
+                    await asyncio.sleep(delay)
+                page, _ = await _get_html(client, url)   # 404 на догадке — не ошибка сайта
+                if page is None:
+                    continue
+                result.fetched.append(url)
+                result.facts.merge(await asyncio.to_thread(extract, page, url))
+                if result.facts.emails:
+                    break   # одной найденной страницы контактов достаточно
     return result
 
 
@@ -237,13 +258,38 @@ _ROLE_BOXES = ("info", "mail", "office", "sales", "zakaz", "order", "hello", "su
                "kontakt", "admin", "shop", "market", "reklama", "pr", "buh", "help", "service", "orders")
 
 
+_FIRST_NAMES = frozenset("""
+alexander alexandr aleksandr alexey aleksey alexei andrey andrei anton artem artyom boris denis dmitry dmitriy dmitrii
+egor evgeny evgeniy fedor igor ilya ivan kirill konstantin maxim maksim mikhail nikita nikolay oleg pavel petr roman
+ruslan sergey sergei stanislav stepan timur vadim valentin valery vasily viktor vitaly vladimir vladislav yuri yury
+alena alina alla anastasia anna daria darya ekaterina elena elizaveta galina inna irina julia kristina ksenia larisa
+lyudmila margarita maria marina natalia natalya nadezhda oksana olga polina svetlana tatiana tatyana valentina
+valeria vera victoria viktoria yulia yana zhanna sasha masha dasha katya lena olya nastya
+""".split())
+_SURNAME = re.compile(r"[a-z]{3,}(?:ov|ova|ev|eva|yov|yova|in|ina|yn|yna|sky|skiy|skii|skaya|ckiy|ckaya|enko|uk|yuk|ich)$")
+_NOT_SURNAMES = frozenset(("magazin", "magazine", "kitchen", "tyumen", "kaliningrad", "berlin", "bulletin", "kalinin",
+                           "tolyatti", "kremlin", "dolphin", "penguin", "cabin", "domain", "plugin", "checkin"))
+_NOT_INITIALS = frozenset(("ru", "rf", "su", "by", "kz", "ua", "tv", "me", "pr", "hr", "it", "op", "tk", "sc", "dv"))
+_INITIAL = re.compile(r"^(?:[a-z]{1,2}[._-]){1,2}[a-z]{3,}$|^[a-z]{3,}(?:[._-][a-z]{1,2}){1,2}$")
+
+
 def _looks_personal(email: str, domain: str) -> bool:
-    """Именной адрес сотрудника на домене компании (ivan.petrov@firma.ru) — персональные данные, по умолчанию не пишем."""
-    local, _, host = email.partition("@")
-    if host in _FREE_MAIL or not domain or not host.endswith(domain):
+    """Именной адрес сотрудника на домене компании (ivan.petrov@firma.ru, a.ivanova@…) — персональные данные,
+    не пишем. Отделы и ящики по назначению (info, tender, site, shatura, corpsales) — общие, их берём."""
+    local, _, host = email.lower().partition("@")
+    base = local.split("+")[0]
+    # Ящик на чужом домене или на gmail/mail.ru: личный, только если похож на имя (ivan.petrov@mail.ru,
+    # s.yakovlev@partner.ru). dentalia@yandex.ru, dom0717@mail.ru — общие ящики малого бизнеса.
+    if any(base == r or base.startswith(r) for r in _ROLE_BOXES):
         return False
-    base = local.split("+")[0].lower()
-    return not any(base == r or base.startswith(r) for r in _ROLE_BOXES)
+    parts = [p for p in re.split(r"[._-]", base) if p]
+    if any(p in _FIRST_NAMES for p in parts):
+        return True                      # ivan@, ivan.petrov@, petrov.ivan@
+    if _INITIAL.match(base) and not set(parts) & _NOT_INITIALS:
+        return True                      # a.petrov@, petrov_a@, a.v.petrov@
+    if any(_SURNAME.fullmatch(p) and len(p) >= 6 and p not in _NOT_SURNAMES for p in parts):
+        return True                      # petrov@, ivanova@, kovalenko@
+    return False
 
 
 async def _add_key(db: AsyncSession, company: LgCompany, kind: str, value: str) -> None:

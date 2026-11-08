@@ -37,6 +37,42 @@ _HREF = re.compile(r"""<a\b[^>]*?href\s*=\s*["']([^"'#][^"']*)["'][^>]*>(.*?)</a
 _TAGS = re.compile(r"<(script|style|noscript)\b.*?</\1>|<[^>]+>", re.I | re.S)
 _SRC = re.compile(r"""(?:src|href)\s*=\s*["']([^"']+)["']""", re.I)
 _BAD_EMAIL_TAIL = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".css", ".js")
+# Почты, которые попадают в код страницы не от компании: конструкторы, виджеты, примеры, системы ошибок.
+_JUNK_EMAIL_HOSTS = ("sentry", "wixpress.com", "wix.com", "tilda.cc", "tilda.ws", "tildacdn", "bitrix24.", "1c-bitrix.",
+                     "jivosite", "jivo.ru", "carrotquest", "roistat.", "calltouch.", "comagic.", "mango-office.",
+                     "amocrm.", "example.", "domain.", "yourdomain", "mysite", "email.com", "w3.org", "schema.org",
+                     "googleusercontent", "gstatic", "cloudflare", "jquery", "github.com", "apple.com", "google.com",
+                     "yandex-team.ru", "noreply", "unknown.", "sample.", "site.ru", "mail.example")
+_JUNK_EMAIL_LOCALS = ("noreply", "no-reply", "donotreply", "example", "test", "user", "username", "name", "email",
+                      "your", "ivanov", "mail.example")
+# Защита почты Cloudflare: адрес лежит в странице зашифрованным XOR-ом (data-cfemail или /cdn-cgi/l/email-protection#…).
+_CFEMAIL = re.compile(r"""data-cfemail\s*=\s*["']([0-9a-fA-F]{6,})["']|email-protection#([0-9a-fA-F]{6,})""")
+# «info [at] site [dot] ru», «info (собака) site.ru» — написано словами, чтобы не собирали роботы.
+_OBFUSCATED = re.compile(
+    r"([a-z0-9][a-z0-9._%+-]{0,63})\s*(?:\[at\]|\(at\)|\{at\}|\sat\s|\[собака\]|\(собака\)|\sсобака\s)\s*"
+    r"([a-z0-9-]+(?:\s*(?:\.|\[dot\]|\(dot\)|\sdot\s|\[точка\]|\(точка\)|\sточка\s)\s*[a-z0-9-]+)+)", re.I)
+_DOT = re.compile(r"\s*(?:\[dot\]|\(dot\)|\sdot\s|\[точка\]|\(точка\)|\sточка\s)\s*", re.I)
+
+
+def _cf_decode(hexed: str) -> str | None:
+    try:
+        key = int(hexed[:2], 16)
+        return "".join(chr(int(hexed[i:i + 2], 16) ^ key) for i in range(2, len(hexed), 2))
+    except ValueError:
+        return None
+
+
+def good_email(email: str) -> bool:
+    """Похоже на почту компании, а не на мусор из кода страницы (виджеты, примеры, картинки)."""
+    email = (email or "").lower()
+    local, _, host = email.partition("@")
+    if not local or not host or email.endswith(_BAD_EMAIL_TAIL):
+        return False
+    if any(j in host for j in _JUNK_EMAIL_HOSTS) or local in _JUNK_EMAIL_LOCALS:
+        return False
+    if re.fullmatch(r"[0-9a-f]{16,}|\d{1,3}", local):   # хеш-идентификаторы (sentry и подобные)
+        return False
+    return bool(_EMAIL.fullmatch(email))
 _TG_SKIP = {"share", "joinchat", "addstickers", "iv", "s", "proxy", "socks", "c"}
 
 
@@ -131,6 +167,19 @@ def extract(html: str, base_url: str) -> SiteFacts:
     for m in _EMAIL.finditer(text):
         email = m.group(1).lower()
         if not email.endswith(_BAD_EMAIL_TAIL):
+            facts.emails.add(email)
+    # Сайты на React/Vue/Nuxt и Тильде держат контакты в данных скриптов — html_to_text их выкидывает.
+    for m in _EMAIL.finditer(unescape(html).replace("\\u0040", "@").replace("\\/", "/")):
+        email = m.group(1).lower()
+        if good_email(email):
+            facts.emails.add(email)
+    for m in _CFEMAIL.finditer(html):
+        email = (_cf_decode(m.group(1) or m.group(2)) or "").strip().lower()
+        if good_email(email):
+            facts.emails.add(email)
+    for m in _OBFUSCATED.finditer(text):
+        email = f"{m.group(1)}@{_DOT.sub('.', m.group(2))}".lower().replace(" ", "")
+        if good_email(email):
             facts.emails.add(email)
     for rx in (_INN_KPP, _INN):
         for m in rx.finditer(text):
