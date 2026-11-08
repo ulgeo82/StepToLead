@@ -52,6 +52,8 @@ class HabrAdapter(Adapter):
     purpose = "IT и digital"
     # Квалификацию (qid) не делаем, пока не подтвердим живым запросом, что RSS её учитывает.
 
+    unit_seconds = 2.0   # запрос + пауза 1 с
+
     async def fetch(self, f, since, settings, filter_settings, ctx: Context) -> list[Vacancy]:
         out: list[Vacancy] = []
         async with ctx.http() as http:

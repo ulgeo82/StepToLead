@@ -58,6 +58,11 @@ class FlruAdapter(Adapter):
         {"key": "budget_from", "label": "Бюджет от, ₽", "type": "number", "default": 0},
     ]
 
+    unit_seconds = 3.0
+
+    def units(self, f, filter_settings, settings) -> int:   # одна RSS-лента на проход
+        return 1
+
     async def fetch(self, f, since, settings, filter_settings, ctx: Context):
         if not filter_settings.get("include_projects", False):
             return []

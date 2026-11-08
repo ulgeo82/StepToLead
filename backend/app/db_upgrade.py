@@ -18,6 +18,7 @@ def upgrade_existing_schema(connection):
     ExpressAssessment.__table__.create(connection, checkfirst=True)
     inspector = inspect(connection)
     columns = {
+        "jr_sources": {"stats": "JSON"},
         "jr_filters": {"source_settings": "JSON", "project_id": "INTEGER REFERENCES projects(id) ON DELETE SET NULL",
                        "kind": "VARCHAR(16) NOT NULL DEFAULT 'jobs'", "template": "VARCHAR(40)", "actions": "JSON"},
         "jr_matches": {"query_id": "INTEGER", "deal_id": "INTEGER", "company_key": "VARCHAR(200)"},

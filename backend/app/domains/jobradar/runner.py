@@ -11,8 +11,9 @@ import json
 import logging
 import re
 import secrets
+import time
 from collections import Counter
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
@@ -20,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings as app_settings
 from app.db import SessionLocal
-from app.domains.jobradar import core, crm, leads, platforms, posting, scanners, scoring
+from app.domains.jobradar import core, crm, leads, platforms, posting, scanners, scoring, timing
 from app.domains.jobradar.models import JrFilter, JrMatch, JrTgChannel, JrVacancy
 from app.domains.jobradar.sources import REGISTRY, Context, SourceSkipped, Vacancy, fingerprint, short_error
 from app.models.system import AppSetting
@@ -189,7 +190,7 @@ def match_any(v: Vacancy, checks: list[dict]) -> tuple[int | None, str]:
 
 async def collect(db: AsyncSession, f: JrFilter, since: datetime, ctx: Context, moment: datetime,
                   *, record: bool = True, query: dict | None = None,
-                  checks: list[dict] | None = None) -> tuple[list[Vacancy], dict, dict]:
+                  checks: list[dict] | None = None, track=None) -> tuple[list[Vacancy], dict, dict]:
     """Опрос площадок сканера одним общим запросом (query) и разбивка по площадкам: найдено / прошло хоть один
     из запросов (checks) / отсеяно. -> (вакансии, by_source, ошибки). record=False — без записи статусов."""
     rows = await platforms.ensure(db)
@@ -198,6 +199,7 @@ async def collect(db: AsyncSession, f: JrFilter, since: datetime, ctx: Context, 
     found: list[Vacancy] = []
     by_source: dict[str, dict] = {}
     errors: dict[str, str] = {}
+    jobs = []   # (code, adapter, row, settings, fs, units, свой Context)
     for code in [c for c in dict.fromkeys(f.sources or [])]:
         adapter, row = REGISTRY.get(code), rows.get(code)
         if adapter is None or row is None:
@@ -205,35 +207,63 @@ async def collect(db: AsyncSession, f: JrFilter, since: datetime, ctx: Context, 
             continue
         if not row.enabled:
             by_source[code] = {"state": "skipped", "note": "площадка выключена"}
+            if track:
+                track.end(code, "skipped", "выключена")
             continue
         settings = platforms.plain(adapter, row.settings)
         reason = adapter.ready(settings)
         if reason:
             by_source[code] = {"state": "skipped", "note": reason}
+            if track:
+                track.end(code, "skipped", reason)
             continue
         fs = dict((f.source_settings or {}).get(code) or {})
+        # Свой Context на площадку: площадки идут одновременно, у каждой свой счётчик запросов и каналы.
+        own = replace(ctx, on_request=(lambda c=code: track.tick(c)) if track else None)
         if code == TG:
-            ctx.channel_state = await _channels_in(db, f.id, list(fs.get("channels") or [])) if f.id and record else \
-                {name: None for name in fs.get("channels") or []}
-            ctx.channel_result = {}
+            own.channel_state = await _channels_in(db, f.id, list(fs.get("channels") or [])) if f.id and record \
+                else {name: None for name in fs.get("channels") or []}
+            own.channel_result = {}
+        jobs.append((code, adapter, row, settings, fs, adapter.units(query, fs, settings), own))
+
+    async def fetch(job) -> tuple[list[Vacancy], BaseException | None, float]:
+        code, adapter, _row, settings, fs, units, own = job
+        if track:
+            track.begin(code, total=units)
+        started = time.monotonic()
         try:
-            got = await adapter.fetch(query, since, settings, fs, ctx)
+            got = await adapter.fetch(query, since, settings, fs, own)
+        except Exception as exc:  # noqa: BLE001 — одна площадка упала, остальные работают
+            if track:   # на экране — сразу, не дожидаясь остальных площадок
+                skipped = isinstance(exc, SourceSkipped)
+                track.end(code, "skipped" if skipped else "error", str(exc)[:80] if skipped else short_error(exc))
+            return [], exc, time.monotonic() - started
+        if track:
+            track.end(code, "done", f"найдено {len(got)}")
+        return got, None, time.monotonic() - started
+
+    # Площадки — одновременно: проход длится столько, сколько самая медленная, а не их сумма.
+    results = await asyncio.gather(*(fetch(job) for job in jobs))
+    for (code, adapter, row, _settings, _fs, units, own), (got, exc, seconds) in zip(jobs, results):
+        if exc is None:
             found += got
             by_source[code] = {"state": "ok", "found": 0, "passed": 0, "dropped": 0}   # 0 — тоже ответ
+            timing.learn(adapter, row, seconds, units, persist=record)
             if record:
                 platforms.mark(row, moment, None)
-        except SourceSkipped as skip:   # не ошибка: ждёт настройки / нечего читать
-            by_source[code] = {"state": "skipped", "note": str(skip)[:120]}
-        except Exception as exc:  # noqa: BLE001 — одна площадка упала, остальные работают
+        elif isinstance(exc, SourceSkipped):   # не ошибка: ждёт настройки / нечего читать
+            by_source[code] = {"state": "skipped", "note": str(exc)[:120]}
+        else:
             text = short_error(exc)
             errors[code] = text
             by_source[code] = {"state": "error", "error": text}
             logger.warning("jobradar source %s failed: %s", code, text)
             if record:
                 platforms.mark(row, moment, text)
-        finally:
-            if code == TG and record and f.id:
-                await _channels_out(db, f.id, ctx.channel_result, moment)
+        if code == TG:
+            ctx.channel_result = own.channel_result
+            if record and f.id:
+                await _channels_out(db, f.id, own.channel_result, moment)
     found = list({v.uid: v for v in found}.values())   # одно и то же по разным ключевым словам
     reasons: dict[str, Counter] = {}
     for v in found:   # по каждой площадке: найдено / прошло фильтр / отсеяно и главная причина — видно, почему 0
@@ -260,7 +290,7 @@ async def plan(db: AsyncSession, f: JrFilter) -> tuple[list, list[dict], dict]:
 
 
 async def run_filter(db: AsyncSession, f: JrFilter, *, moment: datetime | None = None,
-                     ctx: Context | None = None) -> Result:
+                     ctx: Context | None = None, track=None) -> Result:
     """Один проход сканера: площадки -> запросы -> склейка -> ИИ -> действия. Коммитит по ходу (чтобы не слать
     повторно после сбоя)."""
     moment = moment or now()
@@ -275,7 +305,9 @@ async def run_filter(db: AsyncSession, f: JrFilter, *, moment: datetime | None =
     acts = scanners.actions_of(f)
     if not checks:
         result.errors["queries"] = "нет включённых запросов"
-    found, result.by_source, errors = await collect(db, f, since, ctx, moment, query=query, checks=checks)
+    found, result.by_source, errors = await collect(db, f, since, ctx, moment, query=query, checks=checks, track=track)
+    if track:
+        track.begin("match", note=f"{len(found)} вакансий")
     result.errors.update(errors)
     ok_sources = sum(1 for b in result.by_source.values() if b.get("state") == "ok")
     result.found = len(found)
@@ -309,8 +341,16 @@ async def run_filter(db: AsyncSession, f: JrFilter, *, moment: datetime | None =
     result.matched = len(fresh)
     result.by_query = by_query
     await db.commit()
+    if track:
+        track.end("match", note=f"новых подходящих: {len(fresh)}")
 
     scores: dict[str, tuple[int, str]] = {}
+    if track:
+        if f.ai_min_score and fresh:
+            track.estimate("ai", 3 + len(fresh) * timing.AI_SECONDS_PER_ITEM)
+            track.begin("ai", note=f"{len(fresh)} находок")
+        else:
+            track.end("ai", "skipped")
     if f.ai_min_score and fresh:
         scores = await scoring.score(db, f.id, f.profile or "", [g[0] for g, _ in fresh], workspace_id=f.workspace_id,
                                      complete=complete)
@@ -322,7 +362,14 @@ async def run_filter(db: AsyncSession, f: JrFilter, *, moment: datetime | None =
     to_companies = acts["companies"]["enabled"] and not f.project_id
     to_crm = acts["client_crm"]["enabled"] and bool(f.project_id)
     posted = 0
+    if track:
+        if f.ai_min_score and fresh:
+            track.end("ai")
+        track.estimate("actions", timing.action_seconds(f, len(fresh)))
+        track.begin("actions", total=len(fresh))
     for cards, hit in fresh:
+        if track:
+            track.tick("actions")
         main = cards[0]
         q = query_rows[hit]
         fp = fingerprint(main.title, main.company)
@@ -393,6 +440,8 @@ async def run_filter(db: AsyncSession, f: JrFilter, *, moment: datetime | None =
             result.failed += 1
             result.errors["telegram_post"] = short_error(exc)
             break
+    if track:
+        track.end("actions")
     f = await db.get(JrFilter, filter_id)
     if ok_sources and not result.failed:   # всё упало или Telegram не принял — окно не сдвигаем, дошлём потом
         f.last_run_at = moment
@@ -419,14 +468,26 @@ async def run_due(moment: datetime | None = None) -> int:
 _lock: asyncio.Lock | None = None
 
 
-async def run_one(filter_id: int, *, cache: dict | None = None) -> Result | None:
-    """Проход одного фильтра по очереди: ручной «Проверить сейчас» и фон не идут одновременно."""
+def summary(result: Result) -> str:
+    parts = [f"найдено {result.found}", f"подходит {result.matched}"]
+    parts += [f"{label} {value}" for label, value in (("в базу", result.leads), ("в CRM", result.deals),
+                                                       ("в Telegram", result.sent)) if value]
+    if result.errors:
+        parts.append(f"ошибок площадок: {len(result.errors)}")
+    return "Готово: " + ", ".join(parts)
+
+
+async def run_one(filter_id: int, *, cache: dict | None = None, track=None) -> Result | None:
+    """Проход одного сканера по очереди: ручной «Проверить сейчас» и фон не идут одновременно.
+    track — прогресс для экрана (создан ручным запуском заранее, пока ждём очереди); фон создаёт свой."""
     global _lock
     _lock = _lock or asyncio.Lock()
     async with _lock:
         async with session_factory() as db:
             f = await db.get(JrFilter, filter_id)
             if f is None:
+                if track:
+                    track.finish("error", "Сканер удалён")
                 return None
             try:
                 cfg = await get_settings(db)
@@ -434,10 +495,18 @@ async def run_one(filter_id: int, *, cache: dict | None = None) -> Result | None
                                               ai_extract=ai_extractor(f.workspace_id))
                 if cache is not None:
                     ctx.cache = cache
-                return await run_filter(db, f, ctx=ctx)
+                if track is None:
+                    _rows, _checks, query = await plan(db, f)
+                    track = await timing.start(db, f, query)
+                track.run()
+                result = await run_filter(db, f, ctx=ctx, track=track)
+                track.finish("done", summary(result))
+                return result
             except Exception:
                 logger.exception("jobradar filter %s failed", filter_id)
                 await db.rollback()
+                if track:
+                    track.finish("error", "Проверка прервалась из-за ошибки — она записана в мониторинг")
                 return None
 
 

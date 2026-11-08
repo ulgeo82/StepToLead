@@ -12,13 +12,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.access import require_admin
 from app.db import get_db
-from app.domains.jobradar import core, platforms, posting, runner, scanners
+from app.domains.jobradar import core, platforms, posting, runner, scanners, timing
 from app.domains.jobradar.models import JrFilter, JrMatch, JrQuery, JrTemplate, JrTgChannel, JrVacancy
 from app.domains.jobradar.routes import (EXPERIENCE, STATUS_NAMES, _channel_name, _source_settings, _tasks, _words, iso,
                                          workspace_id)
 from app.domains.jobradar.sources import REGISTRY, Vacancy
 from app.models.access import AdminUser
 from app.models.marketing import ClientWorkspace, PortalUser, Project
+from app.services import progress
 
 router = APIRouter(prefix="/admin/jobradar", tags=["admin-jobradar"])
 CHAT_RE = r"^(-?\d{3,20}|@[A-Za-z0-9_]{4,32})$"
@@ -56,6 +57,12 @@ class ScannerIn(BaseModel):
 class PreviewIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     days: int = Field(default=3, ge=1, le=14)
+    queries: list[QueryIn] | None = Field(default=None, max_length=20)
+
+
+class EstimateIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: str = Field(default="run", pattern="^(run|preview)$")
     queries: list[QueryIn] | None = Field(default=None, max_length=20)
 
 
@@ -334,11 +341,44 @@ async def run_scanner(scanner_id: int, db: AsyncSession = Depends(get_db), admin
     f = await scanner_or_404(db, scanner_id)
     if not await scanners.queries_of(db, f) or not f.sources:
         raise HTTPException(422, "В сканере нет включённых запросов или площадок")
+    if progress.active(timing.run_key(f.id)):   # уже идёт или ждёт очереди — второй раз не ставим
+        return {"queued": True, "already": True}
+    _rows, _checks, query = await runner.plan(db, f)
+    track = await timing.start(db, f, query, queued=True)   # в очереди, пока идёт фоновая проверка
     await db.commit()
-    task = asyncio.create_task(runner.run_one(f.id))   # фоном: веб-запрос не ждёт сайтов и Telegram
+    task = asyncio.create_task(runner.run_one(f.id, track=track))   # фоном: веб-запрос не ждёт сайтов и Telegram
     _tasks.add(task)
     task.add_done_callback(_tasks.discard)
     return {"queued": True}
+
+
+async def _named_queries(db: AsyncSession, f: JrFilter, drafts_in) -> list[tuple]:
+    """(id|None, имя, условия) — черновики из формы или включённые запросы сканера."""
+    strict = scanners.strict_city(f)
+    if drafts_in is not None:
+        drafts = [{"name": d.get("name") or f"Черновик {i + 1}", **_query_values(d)}
+                  for i, d in enumerate(q.model_dump(exclude_unset=True) for q in drafts_in)]
+        return [(None, d["name"], scanners.query_dict(d, strict_city=strict)) for d in drafts if d.get("enabled", True)]
+    return [(q.id, q.name, scanners.query_dict(q, strict_city=strict)) for q in await scanners.queries_of(db, f)]
+
+
+@router.post("/scanners/{scanner_id}/estimate")
+async def estimate_scanner(scanner_id: int, payload: EstimateIn, db: AsyncSession = Depends(get_db),
+                           admin: AdminUser = Depends(require_admin)):
+    """Сколько займёт проверка или предпросмотр — до запуска. По площадкам: запросов × секунд на запрос."""
+    f = await scanner_or_404(db, scanner_id)
+    checks = [c for _, _, c in await _named_queries(db, f, payload.queries)]
+    out = await timing.estimate(db, f, scanners.merged(checks), kind=payload.kind)
+    await db.rollback()
+    return out
+
+
+@router.get("/scanners/{scanner_id}/progress")
+async def scanner_progress(scanner_id: int, kind: str = Query("run", pattern="^(run|preview)$"),
+                           db: AsyncSession = Depends(get_db), admin: AdminUser = Depends(require_admin)):
+    await scanner_or_404(db, scanner_id)
+    key = timing.run_key(scanner_id) if kind == "run" else timing.preview_key(scanner_id)
+    return progress.get(key) or {"state": "idle"}
 
 
 @router.post("/scanners/{scanner_id}/test")
@@ -364,26 +404,28 @@ async def preview_scanner(scanner_id: int, payload: PreviewIn, db: AsyncSession 
                           admin: AdminUser = Depends(require_admin)):
     """«Посмотреть, что найдёт»: по включённым запросам сканера или по черновикам из формы. Ничего не сохраняет."""
     f = await scanner_or_404(db, scanner_id)
-    strict = scanners.strict_city(f)
-    if payload.queries is not None:
-        drafts = [{"name": d.get("name") or f"Черновик {i + 1}", **_query_values(d)}
-                  for i, d in enumerate(q.model_dump(exclude_unset=True) for q in payload.queries)]
-        named = [(None, d["name"], scanners.query_dict(d, strict_city=strict)) for d in drafts if d.get("enabled", True)]
-    else:
-        named = [(q.id, q.name, scanners.query_dict(q, strict_city=strict)) for q in await scanners.queries_of(db, f)]
+    named = await _named_queries(db, f, payload.queries)
     checks = [c for _, _, c in named]
     if not any(c["keywords"] for c in checks):
         raise HTTPException(422, "Добавьте ключевые слова хотя бы в один запрос")
     if not f.sources:
         raise HTTPException(422, "Выберите хотя бы одну площадку")
+    if progress.active(timing.preview_key(f.id)):
+        raise HTTPException(409, "Предпросмотр этого сканера уже идёт — дождитесь результата")
+    track = await timing.start(db, f, scanners.merged(checks), kind="preview")
     ctx = await platforms.context(db, first_run_days=payload.days, ai_extract=runner.ai_extractor(workspace_id()))
     try:
         found, by_source, _ = await asyncio.wait_for(runner.collect(
             db, f, runner.now() - timedelta(days=payload.days), ctx, runner.now(), record=False,
-            query=scanners.merged(checks), checks=checks), 150)
+            query=scanners.merged(checks), checks=checks, track=track), 150)
     except asyncio.TimeoutError:
+        track.finish("error", "Площадки отвечают слишком долго")
         raise HTTPException(504, "Площадки отвечают слишком долго — попробуйте меньше слов или период")
+    except Exception:
+        track.finish("error", "Предпросмотр прервался из-за ошибки")
+        raise
     await db.rollback()   # предпросмотр ничего не пишет (состояние каналов тоже)
+    track.begin("match", note=f"{len(found)} вакансий")
     by_query = [{"id": qid, "name": name, "found": 0, "passed": 0} for qid, name, _ in named]
     items = []
     for cards in core.group(found).values():
@@ -407,6 +449,7 @@ async def preview_scanner(scanner_id: int, payload: PreviewIn, db: AsyncSession 
                       "query": named[hit][1] if hit is not None else None})
     items.sort(key=lambda i: (not i["ok"], (i["company"] or "").lower()))
     matched = [i for i in items if i["ok"]]
+    track.finish("done", f"Готово: найдено {len(items)}, подходит {len(matched)}")
     sources = [{"code": code, "name": posting.source_name(code),
                 "found": b.get("found", 0) if b.get("state") == "ok" else None,
                 "skipped": b.get("note") if b.get("state") == "skipped" else None,

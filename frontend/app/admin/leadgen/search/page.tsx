@@ -209,7 +209,7 @@ export default function SearchPage() {
                 value={city}
                 onChange={(e) => setCity(e.target.value)}
                 maxLength={120}
-                placeholder="Самара"
+                placeholder="Город"
               />
             </label>
             <label className={`${styles.field} ${styles.wide}`}>
@@ -222,14 +222,14 @@ export default function SearchPage() {
                 onChange={(e) => setRegion(e.target.value)}
                 placeholder="51"
               />
-              <small>Самара — 51, Москва — 213, Екатеринбург — 54</small>
+              <small>Москва — 213, Санкт-Петербург — 2, Екатеринбург — 54</small>
             </label>
             <label className={`${styles.field} ${styles.wide}`}>
               Ключевые слова
               <textarea
                 value={text}
                 onChange={(e) => setText(e.target.value)}
-                placeholder={"кухни на заказ Самара\nкорпусная мебель Самара"}
+                placeholder={"кухни на заказ\nкорпусная мебель"}
                 required
               />
               <small>{keywords.length} уникальных ключевых слов · по одному на строку · максимум 500</small>

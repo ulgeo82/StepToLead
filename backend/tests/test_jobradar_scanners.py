@@ -27,7 +27,7 @@ async def noop(*_):
     return None
 
 
-class ScannerTests(FlowBase):
+class ScannerBase(FlowBase):
     def setUp(self):
         super().setUp()
         self._old = (settings.agency_workspace_id, runner.session_factory, runner.send, runner.sleep,
@@ -65,6 +65,8 @@ class ScannerTests(FlowBase):
         self.c = TestClient(app)
         self.c.cookies.set(COOKIE, "a" * 43)
         self.b = "/api/admin/jobradar"
+        from app.domains.jobradar import timing
+        timing._learned.clear()   # скорость площадок — с чистого листа в каждом тесте
 
     def tearDown(self):
         (settings.agency_workspace_id, runner.session_factory, runner.send, runner.sleep,
@@ -81,6 +83,8 @@ class ScannerTests(FlowBase):
         self.assertEqual(r.status_code, 201, r.text)
         return r.json()
 
+
+class ScannerTests(ScannerBase):
     # ------------------------------------------------------------ шаблоны
 
     def test_templates_and_create_for_agency_and_client(self):
@@ -327,3 +331,110 @@ class ParsingTests(FlowBase):
                                                    checks=[])
             return by_source["trudvsem"]
         self.assertEqual(self.run_db(fn), {"state": "ok", "found": 0, "passed": 0, "dropped": 0})
+
+
+class ProgressTests(ScannerBase):
+    """Время до запуска и прогресс во время прохода."""
+
+    def test_tracker_percent_and_remaining(self):
+        from app.services import progress
+        t = progress.start("t:1", "Тест", [("a", "A", 10), ("b", "B", 30)], queued=True)
+        self.assertEqual((t.snapshot()["state"], t.snapshot()["percent"]), ("queued", 0))
+        t.begin("a", total=4)
+        t.tick("a"); t.tick("a")
+        snap = t.snapshot()
+        self.assertEqual(snap["current"], "A: 2 из 4")
+        self.assertTrue(5 <= snap["percent"] <= 10)             # идёт 2-й из 4 запросов шага весом 10 из 40
+        t.end("a"); t.begin("b")
+        self.assertGreaterEqual(t.snapshot()["percent"], 25)
+        self.assertLessEqual(t.snapshot()["remaining"], 30)
+        t.end("missing")                                        # шага нет в плане — без ошибки и без нового шага
+        t.finish("done", "ok")
+        self.assertEqual((progress.get("t:1")["percent"], len(progress.get("t:1")["steps"])), (100, 2))
+        # площадки одновременно: этап длится как самая долгая, а не их сумма
+        p = progress.start("t:2", "Тест", [("a", "A", 20, "src"), ("b", "B", 5, "src"), ("m", "M", 2)])
+        self.assertEqual((p.snapshot()["estimate"], p.snapshot()["remaining"]), (22, 22))
+        p.begin("a"); p.begin("b"); p.end("b")
+        self.assertIn("A", p.snapshot()["current"])
+        self.assertNotIn("B", p.snapshot()["current"])
+
+    def test_estimate_before_run_and_progress_after(self):
+        s = self.scanner(name="Оценка", template="blank")
+        q = s["query_items"][0]["id"]
+        self.c.patch(f"{self.b}/queries/{q}", headers=ORIGIN, json={"keywords": ["маркетолог", "директолог"],
+                                                                     "regions": ["Самара"]})
+        self.c.patch(f"{self.b}/scanners/{s['id']}", headers=ORIGIN, json={
+            "sources": ["trudvsem", "hh", "superjob"], "enabled": True,
+            "actions": {"telegram": {"enabled": True, "chat_id": "-1001"}}})
+        est = self.c.post(f"{self.b}/scanners/{s['id']}/estimate", headers=ORIGIN, json={}).json()
+        by = {x["code"]: x for x in est["sources"]}
+        self.assertEqual((by["trudvsem"]["units"], by["trudvsem"]["seconds"]), (2, 2.5))   # 2 запроса разом — 1 круг
+        self.assertEqual(by["superjob"]["skip"], "площадка выключена")
+        self.assertEqual([x["code"] for x in est["steps"]][-2:], ["match", "actions"])
+        self.assertGreater(est["seconds"], 5)
+        pv = self.c.post(f"{self.b}/scanners/{s['id']}/estimate", headers=ORIGIN, json={
+            "kind": "preview", "queries": [{"name": "Ч", "keywords": ["a", "b", "c"], "regions": ["Самара", "Москва"]}]}).json()
+        tv = {x["code"]: x for x in pv["sources"]}["trudvsem"]
+        self.assertEqual((tv["units"], tv["seconds"]), (6, 5.0))     # 3 слова × 2 региона = 6 запросов, по 3 — 2 круга
+        self.assertNotIn("actions", [x["code"] for x in pv["steps"]])
+
+        self.assertEqual(self.c.get(f"{self.b}/scanners/{s['id']}/progress").json(), {"state": "idle"})
+
+        async def go(db):
+            from app.domains.jobradar import timing
+            f = await db.get(JrFilter, s["id"])
+            _r, _c, query = await runner.plan(db, f)
+            track = await timing.start(db, f, query)
+            await runner.run_filter(db, f, moment=MOMENT, track=track)
+            track.finish("done", "ok")
+            return (await platforms.ensure(db))["trudvsem"].stats
+        stats = self.run_db(go)
+        snap = self.c.get(f"{self.b}/scanners/{s['id']}/progress").json()
+        steps = {x["code"]: x for x in snap["steps"]}
+        self.assertEqual((snap["state"], snap["percent"]), ("done", 100))
+        self.assertEqual(steps["trudvsem"]["state"], "done")
+        self.assertGreaterEqual(steps["trudvsem"]["done"], 2)                # запросы к сайту посчитаны
+        self.assertEqual(steps["superjob"]["state"], "skipped")
+        self.assertEqual(steps["actions"]["total"], steps["actions"]["done"])
+        self.assertEqual(stats["samples"], 1)                                # скорость площадки запомнили
+
+    def test_run_twice_does_not_queue_twice(self):
+        from app.domains.jobradar import timing
+        from app.services import progress
+        s = self.scanner(name="Дважды", template="jobs_for_me")
+        progress.start(timing.run_key(s["id"]), "x", [("a", "A", 1)], queued=True)
+        r = self.c.post(f"{self.b}/scanners/{s['id']}/run", headers=ORIGIN)
+        self.assertEqual(r.json(), {"queued": True, "already": True})
+        progress.tracker(timing.run_key(s["id"])).finish()
+
+    def test_preview_leaves_progress(self):
+        s = self.scanner(name="ПП", template="blank")
+        self.c.patch(f"{self.b}/scanners/{s['id']}", headers=ORIGIN, json={"sources": ["trudvsem"]})
+        self.c.post(f"{self.b}/scanners/{s['id']}/preview", headers=ORIGIN, json={"days": 7, "queries": [
+            {"name": "М", "keywords": ["маркетолог"]}]})
+        snap = self.c.get(f"{self.b}/scanners/{s['id']}/progress", params={"kind": "preview"}).json()
+        self.assertEqual((snap["state"], snap["percent"]), ("done", 100))
+        self.assertIn("подходит", snap["message"])
+
+
+class LimitedTests(FlowBase):
+    def test_limited_keeps_order_and_limit(self):
+        import asyncio
+        from app.domains.jobradar.sources.base import Context, limited
+        state = {"now": 0, "max": 0, "done": []}
+
+        async def work(x):
+            state["now"] += 1
+            state["max"] = max(state["max"], state["now"])
+            await asyncio.sleep(0.01 * (5 - x))
+            state["now"] -= 1
+            if x == 99:
+                raise ValueError("boom")
+            state["done"].append(x)
+            return x * 10
+
+        ctx = Context(sleep=noop)
+        self.assertEqual(asyncio.run(limited(ctx, [1, 2, 3, 4, 5], work, 2)), [10, 20, 30, 40, 50])
+        self.assertEqual(state["max"], 2)
+        with self.assertRaises(ValueError):
+            asyncio.run(limited(ctx, [1, 99, 2, 3, 4], work, 3))

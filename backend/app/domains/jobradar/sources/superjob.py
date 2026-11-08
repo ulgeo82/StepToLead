@@ -53,6 +53,12 @@ class SuperjobAdapter(Adapter):
     settings_schema = [{"key": "app_id", "label": "Ключ приложения (X-Api-App-Id)", "type": "secret",
                         "hint": "api.superjob.ru → «Зарегистрировать приложение»"}]
 
+    unit_seconds = 1.5
+
+    def units(self, f, filter_settings, settings) -> int:   # слово × город
+        towns = [t for t in f.get("regions") or [] if t.strip()] or [None]
+        return max(1, len(f.get("keywords") or [])) * len(towns)
+
     def ready(self, settings):
         return None if (settings or {}).get("app_id") else KEY_HINT
 

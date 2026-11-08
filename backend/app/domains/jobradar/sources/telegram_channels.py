@@ -185,6 +185,11 @@ class TelegramChannelsAdapter(Adapter):
     settings_schema = [{"key": "proxy_id", "label": "Прокси для Telegram", "type": "proxy", "default": None}]
     filter_schema = [{"key": "channels", "label": "Каналы", "type": "list", "default": []}]
 
+    unit_seconds = 4.0   # страница канала через прокси + пауза 2,5 с
+
+    def units(self, f, filter_settings, settings) -> int:
+        return max(1, len((filter_settings or {}).get("channels") or []))
+
     async def healthcheck(self, settings, ctx):
         names = list(ctx.channel_state)
         # A source check has no filter/channel state. Probe Telegram's own public channel;

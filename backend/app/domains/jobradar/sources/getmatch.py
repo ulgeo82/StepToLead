@@ -94,6 +94,11 @@ class GetmatchAdapter(Adapter):
     icon = "🎯"
     purpose = "IT-вакансии и стек технологий"
 
+    unit_seconds = 1.0
+
+    def units(self, f, filter_settings, settings) -> int:   # весь список по 100 штук, слова — потом у нас
+        return 10
+
     async def fetch(self, f, since, settings, filter_settings, ctx: Context):
         if "getmatch" not in ctx.cache:
             collected = {}

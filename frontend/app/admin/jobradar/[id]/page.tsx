@@ -12,6 +12,7 @@ import { Client, Overview, Scanner, scannerError } from "../scanner-types";
 import { Queries } from "../scanner-queries";
 import { Platforms, ScannerActions, ScannerAI, ScannerStatistics } from "../scanner-panels";
 import { ScannerFeed } from "../scanner-feed";
+import { Estimate, EstimateHint, ProgressSnapshot, TaskProgress } from "@/components/task-progress";
 
 const tabs = ["Запросы", "Площадки", "Действия", "ИИ", "Лента", "Статистика"];
 
@@ -29,7 +30,8 @@ export default function ScannerPage() {
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [running, setRunning] = useState<{ baseline: string | null; started: number } | null>(null);
+  const [running, setRunning] = useState<{ since: number } | null>(null);
+  const [estimate, setEstimate] = useState<Estimate | null>(null);
   const [revision, setRevision] = useState(0);
   const refresh = useCallback(() => setRevision(n => n + 1), []);
   useEffect(() => {
@@ -50,6 +52,10 @@ export default function ScannerPage() {
       api<Overview>(`${base}/overview`, options),
     ]).then(([s, platforms, c, owners, o]) => {
       if (controller.signal.aborted) return;
+      api<ProgressSnapshot>(`${base}/scanners/${id}/progress`, options).then(p => {   // фоновая проверка уже идёт
+        if (!controller.signal.aborted && (p.state === "queued" || p.state === "running"))
+          setRunning(current => current || { since: p.started_at ?? Date.now() / 1000 });
+      }).catch(() => undefined);
       setScanner(s);
       setName(s.name);
       setSources(platforms.items);
@@ -61,38 +67,22 @@ export default function ScannerPage() {
     return () => controller.abort();
   }, [id, revision]);
 
+  // Оценка времени пересчитывается при любой смене площадок, каналов, действий и запросов.
+  const shape = scanner ? JSON.stringify([scanner.sources, scanner.source_settings, scanner.actions,
+    scanner.query_items.map(q => [q.enabled, q.keywords, q.regions]), scanner.ai_min_score]) : "";
   useEffect(() => {
-    if (!running) return;
-    const controller = new AbortController();
-    let timer: ReturnType<typeof setTimeout>;
-    const deadline = setTimeout(() => {
-      controller.abort();
-      clearTimeout(timer);
-      setRunning(null);
-      setNotice("Проверка ещё не завершилась за 3 минуты. Обновите страницу позже, не запускайте повторно.");
-    }, Math.max(0, 180_000 - (Date.now() - running.started)));
-    async function poll() {
-      try {
-        const value = await api<Scanner>(`${base}/scanners/${id}`, { signal: controller.signal });
-        if (controller.signal.aborted) return;
-        if ((value.last_result?.at || value.last_run_at) !== running!.baseline) {
-          setScanner(value);
-          setRunning(null);
-          setNotice(Object.keys(value.last_result?.errors || {}).length
-            ? "Проверка завершена с ошибками площадок — подробности во вкладке «Статистика»."
-            : "Проверка завершена. Результаты доступны в ленте и статистике.");
-        } else timer = setTimeout(poll, 5000);
-      } catch (e) {
-        if (!controller.signal.aborted) {
-          setError(scannerError(e));
-          setRunning(null);
-        }
-      }
-    }
-    timer = setTimeout(poll, 5000);
-    return () => { controller.abort(); clearTimeout(timer); clearTimeout(deadline); };
-  }, [id, running]);
-
+    if (!shape) return;
+    let alive = true;
+    send<Estimate>(`/scanners/${id}/estimate`, { kind: "run" })
+      .then(value => { if (alive) setEstimate(value); }).catch(() => { if (alive) setEstimate(null); });
+    return () => { alive = false; };
+  }, [id, shape, revision]);   // после проверки радар знает реальную скорость площадок — пересчитываем
+  function finished(snapshot: ProgressSnapshot) {
+    setRunning(null);
+    if (snapshot.state === "error") setError(snapshot.message || "Проверка прервалась");
+    else setNotice((snapshot.message || "Проверка завершена") + ". Подробности — в ленте и статистике.");
+    refresh();
+  }
   async function save(body: Partial<Scanner>) {
     setBusy(true);
     setError("");
@@ -117,10 +107,9 @@ export default function ScannerPage() {
         await api(`${base}/scanners/${id}`, { method: "DELETE" });
         router.push("/admin/jobradar");
       } else if (kind === "run") {
-        const started = Date.now();
+        const since = Date.now() / 1000;
         await send(`/scanners/${id}/run`, {});
-        setRunning({ baseline: scanner.last_result?.at || scanner.last_run_at, started });
-        setNotice("Проверяем площадки. Результат появится в течение нескольких минут.");
+        setRunning({ since });
       } else {
         await send(`/scanners/${id}/test`, {});
         setNotice("Тестовый пост отправлен — проверьте чат.");
@@ -153,6 +142,9 @@ export default function ScannerPage() {
           <button type="button" className={`${styles.secondary} ${styles.danger}`} disabled={disabled}
             onClick={() => action("delete")}>Удалить сканер</button>
         </div>
+        {!running && <EstimateHint estimate={estimate}/>}
+        {running && <TaskProgress url={`${base}/scanners/${id}/progress?kind=run`} active since={running.since}
+          onFinish={finished}/>}
         <small>Последняя проверка: {date(scanner.last_run_at)}</small>
       </section>
       <div className={`${styles.tabs} ${local.scannerTabs}`} role="tablist" aria-label="Сканер">

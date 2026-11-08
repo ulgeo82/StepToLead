@@ -98,7 +98,7 @@ export default function CampaignsPage() {
         <form role="dialog" aria-modal="true" aria-labelledby="new-campaign" className={`${styles.card} ${styles.modal} ${styles.modalWide}`} onSubmit={create}>
           <h2 id="new-campaign">Новая кампания</h2>
           <div className={styles.fields}>
-            <label className={styles.field}>Название<input autoFocus required minLength={2} maxLength={180} placeholder="Кухни Самара — октябрь" value={name} onChange={(e) => setName(e.target.value)} /></label>
+            <label className={styles.field}>Название<input autoFocus required minLength={2} maxLength={180} placeholder="Кухни — ноябрь" value={name} onChange={(e) => setName(e.target.value)} /></label>
             <label className={styles.field}>Для кого
               <select value={owner} onChange={(e) => setOwner(e.target.value)}>
                 <option value="">Для агентства (наши продажи)</option>

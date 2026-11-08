@@ -107,6 +107,8 @@ class JrSource(Base):
     last_ok_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_error: Mapped[str | None] = mapped_column(String(200))
     last_error_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Скорость площадки по факту проходов: {"sec_per_unit": 2.3, "samples": 12} — для оценки времени до запуска.
+    stats: Mapped[dict | None] = mapped_column(JSON)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 

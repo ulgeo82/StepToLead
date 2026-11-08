@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from app.domains.jobradar.sources.base import Adapter, Context, SourceFormatError, Vacancy, norm, parse_dt, strip_tags, \
-    to_int
+from app.domains.jobradar.sources.base import Adapter, Context, SourceFormatError, Vacancy, limited, norm, parse_dt, \
+    strip_tags, to_int
 from app.domains.jobradar.sources.regions import codes_for
 
 URL = "http://opendata.trudvsem.ru/api/v1/vacancies"
@@ -92,31 +92,39 @@ class TrudvsemAdapter(Adapter):
          "hint": "Без скопированных с других сайтов и без кадровых агентств"},
     ]
 
+    unit_seconds = 2.5   # запрос + пауза 1 с
+    concurrency = 3      # API медленный (до 8–9 с на ответ): три запроса разом, каждый со своей паузой
+
+    def units(self, f, filter_settings, settings) -> int:   # слово × регион, первая страница
+        codes, _unknown = codes_for(f.get("regions") or [])
+        return max(1, len(f.get("keywords") or [])) * max(1, len(codes))
+
     async def fetch(self, f, since, settings, filter_settings, ctx: Context) -> list[Vacancy]:
         codes, _unknown = codes_for(f.get("regions") or [])
         exclude = {str(i).strip() for i in (settings or {}).get("exclude_inn") or [] if str(i).strip()}
         direct_only = bool((settings or {}).get("direct_only"))
         paths = [f"{URL}/region/{code:02d}" for code in codes] or [URL]
-        out: list[Vacancy] = []
-        first = True
+        jobs = [(keyword, path) for keyword in f.get("keywords") or [] for path in paths]
+        modified = since.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         async with ctx.http() as http:
-            for keyword in f.get("keywords") or []:
-                for path in paths:
-                    for page in range(MAX_PAGES):
-                        if not first:
-                            await ctx.sleep(PAUSE)
-                        first = False
-                        # httpx кодирует кириллицу в text сам (без кодирования API отвечает 400)
-                        response = await http.get(path, params={
-                            "text": keyword, "limit": LIMIT, "offset": page,
-                            "modifiedFrom": since.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")})
-                        response.raise_for_status()
-                        items = parse(response.json())
-                        out += [v for v in items if not (v.company_inn and v.company_inn in exclude)
-                                and not (direct_only and not v.extra.get("direct"))]
-                        if len(items) < LIMIT:
-                            break
-        return out
+            async def one(job) -> list[Vacancy]:
+                keyword, path = job
+                got: list[Vacancy] = []
+                for page in range(MAX_PAGES):
+                    if page:
+                        await ctx.sleep(PAUSE)
+                    # httpx кодирует кириллицу в text сам (без кодирования API отвечает 400)
+                    response = await http.get(path, params={"text": keyword, "limit": LIMIT, "offset": page,
+                                                            "modifiedFrom": modified})
+                    response.raise_for_status()
+                    items = parse(response.json())
+                    got += [v for v in items if not (v.company_inn and v.company_inn in exclude)
+                            and not (direct_only and not v.extra.get("direct"))]
+                    if len(items) < LIMIT:
+                        break
+                return got
+            pages = await limited(ctx, jobs, one, self.concurrency, PAUSE)
+        return [v for got in pages for v in got]
 
     async def healthcheck(self, settings, ctx):
         try:

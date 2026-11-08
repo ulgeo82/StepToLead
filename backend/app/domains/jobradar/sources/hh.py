@@ -57,6 +57,11 @@ class HhAdapter(Adapter):
     settings_schema = [{"key": "token", "label": "Токен приложения hh.ru", "type": "secret",
                         "hint": "dev.hh.ru → «Мои приложения». Без токена hh.ru пропускается"}]
 
+    unit_seconds = 1.5
+
+    def units(self, f, filter_settings, settings) -> int:   # одним запросом все слова, обычно 1–2 страницы
+        return 2
+
     def ready(self, settings):
         return None if (settings or {}).get("token") else TOKEN_HINT
 

@@ -1,6 +1,7 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
+import { Estimate, EstimateHint, TaskProgress } from "@/components/task-progress";
 import { api } from "@/lib/api";
 import styles from "../leadgen/leadgen.module.css";
 import local from "./jobradar.module.css";
@@ -30,7 +31,10 @@ export function Queries({ scanner, changed }: { scanner: Scanner; changed: () =>
   const [days, setDays] = useState(3);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [looking, setLooking] = useState(false);
+  const [since, setSince] = useState(0);
+  const estimate = useEstimate(scanner, null, looking);
   async function look(queries?: QueryDraft[]) {
+    setSince(Date.now() / 1000);
     setLooking(true);
     setPreview(null);
     setError("");
@@ -84,7 +88,7 @@ export function Queries({ scanner, changed }: { scanner: Scanner; changed: () =>
       </div>
     </article>)}</div>
     {editing && <QueryEditor key={"id" in editing ? editing.id : "new"} value={editing} scannerId={scanner.id}
-      looking={looking} preview={draft => look([draft])} close={() => setEditing(null)}
+      scanner={scanner} looking={looking} preview={draft => look([draft])} close={() => setEditing(null)}
       saved={() => { setEditing(null); setPreview(null); changed(); }}/>} 
     <div className={styles.inlineForm}>
       <label className={styles.field}>Период предпросмотра<select value={days} disabled={looking}
@@ -93,16 +97,17 @@ export function Queries({ scanner, changed }: { scanner: Scanner; changed: () =>
       </select></label>
       <button type="button" className={styles.secondary} disabled={looking || busy || !!editing}
         onClick={() => look()}>{looking ? "Ищем…" : "🔍 Посмотреть, что найдёт"}</button>
+      {!looking && <EstimateHint estimate={estimate}/>}
     </div>
     <small className={styles.hint}>Без сохранения находок и отправки в Telegram, базу компаний или CRM.</small>
-    {looking && <p role="status">Проверяем площадки…</p>}
+    {looking && <TaskProgress url={`${base}/scanners/${scanner.id}/progress?kind=preview`} active since={since}/>}
     {preview && <PreviewResults preview={preview}/>}
   </section>;
 }
 
-function QueryEditor({ value, scannerId, looking, preview, close, saved }: {
-  value: Query | QueryDraft; scannerId: number; looking: boolean; preview: (draft: QueryDraft) => void;
-  close: () => void; saved: () => void;
+function QueryEditor({ value, scanner, scannerId, looking, preview, close, saved }: {
+  value: Query | QueryDraft; scanner: Scanner; scannerId: number; looking: boolean;
+  preview: (draft: QueryDraft) => void; close: () => void; saved: () => void;
 }) {
   const [draft, setDraft] = useState(value);
   const [keywords, setKeywords] = useState(value.keywords.join("\n"));
@@ -110,6 +115,8 @@ function QueryEditor({ value, scannerId, looking, preview, close, saved }: {
   const [regions, setRegions] = useState(value.regions.join(", "));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const draftEstimate = useEstimate(scanner, lines(keywords).length
+    ? { name: draft.name || "Черновик", keywords: lines(keywords), regions: lines(regions) } : undefined);
   const body = (): QueryDraft => ({
     name: draft.name.trim(), enabled: draft.enabled, keywords: lines(keywords), exclude: lines(exclude),
     regions: lines(regions), remote_only: draft.remote_only, salary_from: draft.salary_from,
@@ -157,10 +164,29 @@ function QueryEditor({ value, scannerId, looking, preview, close, saved }: {
         <button className={styles.primary} type="submit">Сохранить запрос</button>
         <button className={styles.secondary} type="button" disabled={!lines(keywords).length}
           onClick={() => preview(body())}>🔍 Проверить черновик</button>
+        <EstimateHint estimate={draftEstimate}/>
         <button className={styles.secondary} type="button" onClick={close}>Отмена</button>
       </div>
     </fieldset>
   </form>;
+}
+
+/** Сколько займёт предпросмотр: по сохранённым запросам (draft = null) или по черновику. Пауза 0,6 с после ввода. */
+function useEstimate(scanner: Scanner, draft: { name: string; keywords: string[]; regions: string[] } | null | undefined,
+  busy = false) {
+  const [value, setValue] = useState<Estimate | null>(null);
+  const key = JSON.stringify([scanner.sources, scanner.source_settings, draft === null
+    ? scanner.query_items.map(q => [q.enabled, q.keywords, q.regions]) : draft]);
+  useEffect(() => {
+    if (draft === undefined || busy) { if (draft === undefined) setValue(null); return; }
+    let alive = true;
+    const timer = setTimeout(() => {
+      send<Estimate>(`/scanners/${scanner.id}/estimate`, { kind: "preview", ...(draft ? { queries: [draft] } : {}) })
+        .then(v => { if (alive) setValue(v); }).catch(() => { if (alive) setValue(null); });
+    }, 600);
+    return () => { alive = false; clearTimeout(timer); };
+  }, [scanner.id, key, busy]);   // eslint-disable-line react-hooks/exhaustive-deps
+  return value;
 }
 
 function PreviewResults({ preview }: { preview: Preview }) {

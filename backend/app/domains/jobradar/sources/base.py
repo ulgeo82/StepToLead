@@ -12,7 +12,7 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
-from typing import Awaitable, Callable
+from typing import Any, Awaitable, Callable
 
 import httpx
 
@@ -102,14 +102,45 @@ class Context:
     first_run_days: int = 3
     # ИИ-извлечение полей из текста поста: async (text) -> dict | None. None — ИИ не подключён.
     ai_extract: Callable[[str], Awaitable[dict | None]] | None = None
+    # Вызывается на каждый HTTP-запрос площадки: прогресс «запрос 3 из 8» без правок в адаптерах.
+    on_request: Callable[[], None] | None = None
 
     def http(self, *, use_proxy: bool = False, **headers) -> httpx.AsyncClient:
         kwargs = {"timeout": TIMEOUT, "follow_redirects": True, "headers": {"User-Agent": UA, **headers}}
+        if self.on_request is not None:
+            hook = self.on_request
+
+            async def counted(_request):
+                hook()
+            kwargs["event_hooks"] = {"request": [counted]}
         if self.transport is not None:
             kwargs["transport"] = self.transport
         elif use_proxy and self.proxy:
             kwargs["proxy"] = self.proxy
         return httpx.AsyncClient(**kwargs)
+
+
+async def limited(ctx: "Context", items: list, fn: Callable[[Any], Awaitable[Any]], limit: int,
+                  pause: float = 0.0) -> list:
+    """fn по каждому элементу: параллельно, но не больше limit одновременно; после каждого — пауза (вежливость
+    к сайту). Порядок результатов — как у items. Первая ошибка останавливает остальные и уходит наверх."""
+    gate = asyncio.Semaphore(max(1, limit))
+    out: list = [None] * len(items)
+
+    async def one(index: int, item) -> None:
+        async with gate:
+            out[index] = await fn(item)
+            if pause and index < len(items) - 1:
+                await ctx.sleep(pause)
+    tasks = [asyncio.ensure_future(one(i, item)) for i, item in enumerate(items)]
+    try:
+        await asyncio.gather(*tasks)
+    except BaseException:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
+    return out
 
 
 # ---------------------------------------------------------------- адаптер
@@ -127,6 +158,13 @@ class Adapter:
     filter_schema: list[dict] = []
     # Какие условия фильтра площадка умеет проверять сама; остальные раннер проверит после (core.matches).
     default_enabled: bool = True
+    # Оценка времени до запуска: сколько HTTP-запросов сделает площадка и сколько секунд в среднем на запрос
+    # (вместе с паузой). Радар уточняет секунды по факту прошлых проходов (jr_sources.stats).
+    unit_seconds: float = 2.0   # на один «круг»: запрос + пауза (при concurrency > 1 — на concurrency запросов разом)
+    concurrency: int = 1         # сколько запросов к сайту одновременно (вежливо: 1–3)
+
+    def units(self, f: dict, filter_settings: dict, settings: dict) -> int:
+        return max(1, len(f.get("keywords") or []))
 
     def defaults(self) -> dict:
         return {s["key"]: s.get("default") for s in self.settings_schema if s.get("type") != "secret"}

@@ -25,7 +25,7 @@ TEMPLATES = [
                             "маркетинг на аутсорсе.",
                  "sources": ["trudvsem", "hh"], "source_settings": {},
                  "actions": {"companies": {"enabled": True, "list_name": "Нанимает маркетолога", "signal": "hh_marketing"}},
-                 "queries": [{"name": "Маркетолог", "keywords": MARKETING, "exclude": NOT_CLIENT, "regions": ["Самара", "Тольятти"]}]}},
+                 "queries": [{"name": "Маркетолог", "keywords": MARKETING, "exclude": NOT_CLIENT, "regions": []}]}},
     {"code": "hiring_sales", "name": "Компании ищут РОПа", "icon": "📈", "position": 2,
      "description": "Компании, которые строят отдел продаж: ищут РОПа или коммерческого директора.",
      "payload": {"profile": "Компании, которые строят или перестраивают отдел продаж.",
@@ -33,7 +33,7 @@ TEMPLATES = [
                  "actions": {"companies": {"enabled": True, "list_name": "Ищут РОПа", "signal": "hiring"}},
                  "queries": [{"name": "РОП", "keywords": ["руководитель отдела продаж", "коммерческий директор",
                                                           "директор по продажам", "head of sales"],
-                              "exclude": ["стажер", "помощник", "ассистент"], "regions": ["Самара", "Тольятти"]}]}},
+                              "exclude": ["стажер", "помощник", "ассистент"], "regions": []}]}},
     {"code": "jobs_for_me", "name": "Вакансии для себя", "icon": "🎯", "position": 3,
      "description": "Удалённые вакансии по вашей профессии — постами в Telegram с кнопками 👍/👎.",
      "payload": {"profile": "", "sources": ["trudvsem", "habr", "getmatch", "hh"], "source_settings": {},
@@ -57,11 +57,15 @@ TEMPLATES = [
 
 
 async def ensure_templates(db: AsyncSession) -> None:
-    """Сид шаблонов: добавляет недостающие, свои правки в базе не трогает.
-    Безопасен при гонке (два запроса экрана или воркер одновременно): каждая вставка в своей точке сохранения."""
-    known = set((await db.scalars(select(JrTemplate.code))).all())
+    """Сид шаблонов: добавляет недостающие и обновляет встроенные до текущей версии из кода (шаблоны на экране
+    не редактируются). Безопасен при гонке: каждая вставка в своей точке сохранения."""
+    rows = {t.code: t for t in (await db.scalars(select(JrTemplate))).all()}
     for t in TEMPLATES:
-        if t["code"] in known:
+        row = rows.get(t["code"])
+        if row is not None:
+            for key, value in t.items():
+                if getattr(row, key) != value:
+                    setattr(row, key, value)
             continue
         try:
             async with db.begin_nested():
