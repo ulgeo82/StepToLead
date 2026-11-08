@@ -40,6 +40,14 @@ class SerpSource(CompanySource):
     settings_schema = [{"key": "price_per_1000", "type": "number", "label": "Цена 1000 запросов, ₽", "default": 25}]
     signals_info = [{"kind": "organic_top", "label": "В топ-10 поиска"}]
 
+    def ready(self, settings: dict) -> str | None:
+        """XMLStock не настроен — видно на плашке сразу, а не после запуска."""
+        try:
+            provider_factory()
+        except Exception:  # noqa: BLE001 — HTTPException 400 из routes или ProviderNotConfigured
+            return "поиск XMLStock не настроен (ключи в окружении сервера)"
+        return super().ready(settings)
+
     @staticmethod
     def depth(query: dict) -> int:
         wanted = max(1, min(5, int(query.get("depth") or 2)))

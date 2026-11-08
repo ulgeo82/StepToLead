@@ -28,6 +28,11 @@ HH_PARAMS = {"text", "area", "professional_role", "industry", "salary", "currenc
 HH_PAGES = 5
 EMPLOYER_SITES = 40          # сайт работодателя с hh — не больше стольких компаний за запуск
 SIGNAL_TTL = 30
+# Сайты вакансий: у скопированной вакансии «сайт работодателя» — это доска, откуда её взяли. Такой домен — не сайт
+# компании: иначе разные работодатели склеятся по «rabota.ru», а тех-профиль проверит доску вакансий.
+JOB_BOARDS = ("hh.ru", "headhunter.ru", "rabota.ru", "superjob.ru", "zarplata.ru", "trudvsem.ru", "gorodrabot.ru",
+              "rabota.yandex.ru", "avito.ru", "careerist.ru", "jobfilter.ru", "rabotavgorode.ru", "farpost.ru",
+              "habr.com", "getmatch.ru", "fl.ru", "vk.com", "t.me")
 
 
 def parse_hh_url(url: str) -> list[tuple[str, str]] | None:
@@ -154,8 +159,9 @@ class HiringSource(CompanySource):
             inn = v.company_inn or v.employer.get("inn")
             if not (v.company or "").strip() or (inn and inn in exclude) or is_agency(v):
                 continue
-            if v.source == "trudvsem" and not v.extra.get("direct", True):
-                continue    # скопирована с другого сайта или от кадрового агентства
+            # Копии с других сайтов («Вакансия интернет-ресурса») — тоже реальные работодатели: на «Работе России»
+            # их большинство. Отсекаются, только если на плашке радара включено «Только напрямую от работодателей»
+            # (это уже сделал адаптер радара в fetch).
             key = f"inn:{inn}" if inn else f"hh:{v.employer['id']}" if v.employer.get("id") else \
                 f"name:{norm(v.company)}|{norm(v.city)}"
             groups.setdefault(key, []).append(v)
@@ -180,8 +186,10 @@ class HiringSource(CompanySource):
         main = next((c for c in cards if c.employer.get("id")), cards[0])
         first = sorted(cards, key=lambda c: c.published or datetime.min.replace(tzinfo=timezone.utc), reverse=True)[0]
         inn = next((c.company_inn or c.employer.get("inn") for c in cards if c.company_inn or c.employer.get("inn")), None)
-        site = next((c.employer.get("site") for c in cards if c.employer.get("site")), None) or \
-            sites.get(main.employer.get("id"))
+        site = next((c.employer.get("site") for c in cards if c.employer.get("site")
+                     and not _job_board(c.employer["site"])), None) or sites.get(main.employer.get("id"))
+        if site and _job_board(site):
+            site = None
         phones = list(dict.fromkeys(p for c in cards for p in c.employer.get("phones") or []))[:3]
         emails = general_emails([e for c in cards for e in c.employer.get("emails") or []])[:3]
         finding = service.FindingIn(
@@ -193,6 +201,12 @@ class HiringSource(CompanySource):
         signal = SignalIn("hiring", {"title": first.title, "url": first.url, "platform": first.source,
                                      "vacancies": len(cards)}, ttl_days=SIGNAL_TTL)
         return Candidate(finding, [signal])
+
+
+def _job_board(url: str) -> bool:
+    from app.domains.leadgen.core.normalize import is_platform_domain, normalize_domain
+    domain = normalize_domain(url)
+    return bool(domain) and is_platform_domain(domain, JOB_BOARDS)
 
 
 async def _radar_settings(codes: list[str]) -> dict[str, tuple[bool, dict]]:

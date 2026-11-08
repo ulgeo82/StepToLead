@@ -13,7 +13,7 @@ sys.path.insert(0, ".")
 from app.domains.leadgen.core.normalize import normalize_domain  # noqa: E402
 from app.domains.leadgen.providers import XmlStockLiveProvider, parse_xmlstock_page  # noqa: E402
 
-QUERY, LR = "кухни на заказ", 51
+QUERY, LR = "кухни на заказ", 213   # Москва; регион здесь только для проверки параметра
 
 
 async def main():

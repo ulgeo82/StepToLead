@@ -329,3 +329,42 @@ class SchemaApiTests(_Api):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HiringCopiesTests(FinderBase):
+    """На «Работе России» большинство вакансий — копии с hh («Вакансия интернет ресурса»). Это реальные работодатели:
+    без галочки «Только напрямую» на плашке радара они попадают, с галочкой — нет."""
+
+    def net(self):
+        data = json.loads(TV)
+        for w in data["results"]["vacancies"]:
+            if w["vacancy"]["id"] in ("tv1", "tv2"):
+                w["vacancy"]["source"] = "Вакансия интернет ресурса"
+        body = json.dumps(data, ensure_ascii=False).encode()
+        return httpx.MockTransport(lambda r: httpx.Response(200, content=body)
+                                   if r.url.host == "opendata.trudvsem.ru" else httpx.Response(404))
+
+    def found(self, direct_only):
+        async def fn(db):
+            rows = await jr_platforms.ensure(db)
+            jr_platforms.apply(JR["trudvsem"], rows["trudvsem"], {"direct_only": direct_only})
+        self.run_db(fn)
+        source_settings.transport = self.net()
+        run = self.run_find("hiring", {"titles": ["дизайнер кухонь", "замерщик кухонь"], "region": "Самара",
+                                       "platforms": ["trudvsem"]})
+        self.assertEqual(run.status, "done", run.error)
+        return run.stats["result"]["found"]
+
+    def test_copies_kept_unless_direct_only(self):
+        self.assertEqual(self.found(False), 1)    # «Кухни Волги» — копия с hh, но реальный работодатель
+        self.assertEqual(self.found(True), 0)
+
+    def test_job_board_is_not_company_site(self):
+        from app.domains.jobradar.sources.base import Vacancy
+        from app.domains.leadgen.sources.hiring import HiringSource
+        copy = Vacancy(source="trudvsem", ext_id="1", title="Дизайнер кухонь", company="ООО Джейкет",
+                       company_inn="7709969870", employer={"inn": "7709969870", "site": "https://www.rabota.ru/"})
+        own = Vacancy(source="trudvsem", ext_id="2", title="Замерщик", company="ООО Джейкет",
+                      company_inn="7709969870", employer={"inn": "7709969870", "site": "jaket.ru"})
+        self.assertIsNone(HiringSource._candidate([copy], {}).finding.domain)        # доска вакансий — не сайт
+        self.assertEqual(HiringSource._candidate([copy, own], {}).finding.domain, "jaket.ru")
