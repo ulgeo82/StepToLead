@@ -231,13 +231,13 @@ async def get_run(run_id: int, db: AsyncSession = Depends(get_db), admin: AdminU
 
 async def filtered_companies(db: AsyncSession, ws: int, *, q=None, niche=None, city=(), min_score=None, stage=(),
                              channel=(), signal=(), new_days=None, needs_review=None, fit=None, run_id=None,
-                             segment_id=None, list_ids=(), not_exported=None, has_contacts=None):
+                             segment_id=None, list_ids=(), not_exported=None, has_contacts=None, verify_status=None):
     """Запрос компаний по фильтрам базы (общий для списка и выгрузки в Excel)."""
     if await outreach.sync_from_crm(db, ws):
         await db.commit()
     filters = {"q": q, "niche": niche, "cities": list(city), "min_score": min_score, "stages": list(stage),
                "channels": list(channel), "signals": list(signal), "new_days": new_days, "needs_review": needs_review,
-               "fit": fit}
+               "fit": fit, "verify_status": verify_status}
     filters = {k: v for k, v in filters.items() if v not in (None, [], "")}
     if segment_id:
         seg = await db.get(LgSegment, segment_id)
@@ -278,12 +278,14 @@ async def list_companies(q: str | None = None, niche: str | None = None, city: l
                          segment_id: int | None = None, sort: str = Query("score", pattern="^(score|new|seen|name)$"),
                          list_id: list[int] = Query(default=[]), not_exported: bool | None = None,
                          has_contacts: bool | None = None,
+                         verify_status: str | None = Query(None, pattern="^(valid|invalid|risky|unknown)$"),
                          limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0),
                          db: AsyncSession = Depends(get_db), admin: AdminUser = Depends(require_admin)):
     base = await filtered_companies(db, workspace_id(), q=q, niche=niche, city=city, min_score=min_score,
                                     stage=stage, channel=channel, signal=signal, new_days=new_days,
                                     needs_review=needs_review, fit=fit, run_id=run_id, segment_id=segment_id,
-                                    list_ids=list_id, not_exported=not_exported, has_contacts=has_contacts)
+                                    list_ids=list_id, not_exported=not_exported, has_contacts=has_contacts,
+                                    verify_status=verify_status)
     total = await db.scalar(select(func.count()).select_from(base.subquery()))
     rows = (await db.execute(base.order_by(*SORTS[sort]).limit(limit).offset(offset))).scalars().all()
     in_lists = await lists.company_lists(db, [c.id for c in rows])
@@ -296,11 +298,11 @@ EXPORT_EXCLUDED = ("dnc", "rejected", "hidden")  # стоп-лист и отка
 
 async def export_query(db, *, q=None, niche=None, city=(), min_score=None, stage=(), channel=(), signal=(),
                        new_days=None, needs_review=None, fit=None, run_id=None, segment_id=None, ids=(),
-                       list_ids=(), not_exported=None, has_contacts=None):
+                       list_ids=(), not_exported=None, has_contacts=None, verify_status=None):
     base = await filtered_companies(db, workspace_id(), q=q, niche=niche, city=city, min_score=min_score, stage=stage,
                                     channel=channel, signal=signal, new_days=new_days, needs_review=needs_review,
                                     fit=fit, run_id=run_id, segment_id=segment_id, list_ids=list_ids,
-                                    not_exported=not_exported, has_contacts=has_contacts)
+                                    not_exported=not_exported, has_contacts=has_contacts, verify_status=verify_status)
     if ids:
         base = base.where(LgCompany.id.in_(list(ids)))
     return base.where(LgCompany.stage.not_in(EXPORT_EXCLUDED))
@@ -343,6 +345,7 @@ async def export_companies(q: str | None = None, niche: str | None = None, city:
                            segment_id: int | None = None, ids: list[int] = Query(default=[]),
                            list_id: list[int] = Query(default=[]), not_exported: bool | None = None,
                            has_contacts: bool | None = None,
+                           verify_status: str | None = Query(None, pattern="^(valid|invalid|risky|unknown)$"),
                            preset: str = Query("full", pattern="^(full|outreach)$"),
                            count_only: bool = False,
                            sort: str = Query("score", pattern="^(score|new|seen|name)$"),
@@ -352,7 +355,7 @@ async def export_companies(q: str | None = None, niche: str | None = None, city:
     base = await export_query(db, q=q, niche=niche, city=city, min_score=min_score, stage=stage, channel=channel,
                               signal=signal, new_days=new_days, needs_review=needs_review, fit=fit, run_id=run_id,
                               segment_id=segment_id, ids=ids, list_ids=list_id, not_exported=not_exported,
-                              has_contacts=has_contacts)
+                              has_contacts=has_contacts, verify_status=verify_status)
     if count_only:
         total = await db.scalar(select(func.count()).select_from(base.subquery()))
         return {"count": min(int(total or 0), export.MAX_ROWS), "total": int(total or 0), "max": export.MAX_ROWS}
@@ -360,7 +363,8 @@ async def export_companies(q: str | None = None, niche: str | None = None, city:
     params = {k: v for k, v in {"q": q, "niche": niche, "city": city, "min_score": min_score, "stage": stage,
               "channel": channel, "signal": signal, "new_days": new_days, "fit": fit, "run_id": run_id,
               "segment_id": segment_id, "list_id": list_id, "not_exported": not_exported,
-              "has_contacts": has_contacts, "ids": ids[:50]}.items() if v not in (None, [], "", False)}
+              "has_contacts": has_contacts, "verify_status": verify_status,
+              "ids": ids[:50]}.items() if v not in (None, [], "", False)}
     title = await export_title(db, list_id, ids, not_exported)
     return await send_xlsx(db, companies, preset=preset, title=title, params=params, admin=admin)
 
@@ -413,7 +417,8 @@ async def get_company(company_id: int, db: AsyncSession = Depends(get_db), admin
                  "last_seen_at": iso(a.last_seen_at)} for a in ads],
         "contacts": [{"id": x.id, "kind": x.kind, "value": x.value, "is_personal": x.is_personal,
                       "person_name": x.person_name, "source": x.source, "source_url": x.source_url,
-                      "found_at": iso(x.found_at), "verify_status": x.verify_status, "bounced": x.bounced}
+                      "found_at": iso(x.found_at), "verify_status": x.verify_status,
+                      "verified_at": iso(x.verified_at), "bounced": x.bounced}
                      for x in contacts],
         "signals": [{"kind": s.kind, "payload": s.payload, "observed_at": iso(s.observed_at),
                      "expires_at": iso(s.expires_at)} for s in signals],

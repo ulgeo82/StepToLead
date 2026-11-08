@@ -76,6 +76,7 @@ class RunIn(BaseModel):
     query: dict | None = None
     target: dict | None = None
     list_name: str | None = Field(default=None, max_length=180)
+    then: list[str] | None = Field(default=None, max_length=10)
 
 
 @router.post("/sources/{code}/estimate")
@@ -83,7 +84,7 @@ async def estimate_source(code: str, payload: RunIn, db: AsyncSession = Depends(
                           admin: AdminUser = Depends(require_admin)):
     try:
         return await source_runner.estimate(db, lg_routes.workspace_id(), code, query=payload.query,
-                                            target=payload.target)
+                                            target=payload.target, then=payload.then)
     except source_runner.RunError as exc:
         raise _http(exc)
 
@@ -93,7 +94,8 @@ async def run_source(code: str, payload: RunIn, tasks: BackgroundTasks, db: Asyn
                      admin: AdminUser = Depends(require_admin)):
     try:
         run = await source_runner.create_run(db, lg_routes.workspace_id(), code, query=payload.query,
-                                             target=payload.target, list_name=payload.list_name, admin_id=admin.id)
+                                             target=payload.target, list_name=payload.list_name, admin_id=admin.id,
+                                             then=payload.then)
     except source_runner.RunError as exc:
         raise _http(exc)
     await db.commit()

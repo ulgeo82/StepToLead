@@ -31,9 +31,16 @@ export type CompanySource = {
   last_ok_at: string | null;
   last_error: string | null;
   signals: { kind: string; label: string }[];
+  chainable?: boolean;
+  chain_default?: boolean;
 };
 export type Target = { list_id: number } | { segment_id: number };
-export type RunBody = { query?: Values; target?: Target; list_name?: string };
+export type RunBody = { query?: Values; target?: Target; list_name?: string; then?: string[] };
+export type ChainSummary = {
+  done: number; skipped: number; failed: number;
+  reasons?: Record<string, number>; errors?: Record<string, string>;
+  valid?: number; invalid?: number; risky?: number; cleaned?: number; site_found?: number; inn_found?: number;
+};
 export type SourceEstimate = Estimate & {
   units: number; companies?: number; cost?: { requests: number; rub: number | null };
 };
@@ -48,6 +55,11 @@ export type SourceRun = {
     skipped: number;
     signals: Record<string, number>;
     errors: Record<string, string>;
+    chain?: Record<string, ChainSummary>;
+    reasons?: Record<string, number>;
+    valid?: number;
+    invalid?: number;
+    risky?: number;
   };
 };
 

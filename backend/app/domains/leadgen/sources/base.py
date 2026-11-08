@@ -41,6 +41,9 @@ class CompanyView:
     city: str | None = None
     inn: str | None = None
     region_code: int | None = None
+    legal_name: str | None = None
+    provenance: dict = field(default_factory=dict)
+    contacts: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -53,6 +56,9 @@ class Enrichment:
     signals: list[SignalIn] = field(default_factory=list)
     contacts: list[dict] = field(default_factory=list)  # только общие: {"kind","value","source_url"?}
     fields: dict = field(default_factory=dict)          # inn / city / legal_name … — с учётом надёжности источника
+    counters: dict = field(default_factory=dict)
+    review: str | None = None
+    contact_updates: list[dict] = field(default_factory=list)
 
 
 class CompanySource(Adapter):
@@ -66,6 +72,15 @@ class CompanySource(Adapter):
     # Какие переменные письма даёт профиль: [{"key","label"}] (lg_enrichments.result[key])
     variables: list[dict] = []
     fresh_days: int = 30              # enricher: не перепроверять компанию чаще (если не «перепроверить все»)
+    requires_site: bool = True
+    chainable: bool = True
+    chain_default: bool = False
+    field_source: str | None = None
+    persist_work: bool = False
+
+    async def persist(self, db, company, enrichment: Enrichment, ctx: Context) -> Enrichment:
+        """Optional sequential persistence hook for wrappers around existing DB services."""
+        return enrichment
 
     def units(self, query: dict, filter_settings: dict, settings: dict) -> int:   # noqa: D401
         """finder: сколько запросов сделает поиск по query (для оценки). enricher: раннер считает по компаниям."""

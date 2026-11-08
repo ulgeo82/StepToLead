@@ -17,7 +17,7 @@ SORTS = {
 CHANNELS = {"whatsapp": ("whatsapp", "phone"), "telegram": ("telegram",), "email": ("email",),
             "phone": ("phone",), "messenger": ("whatsapp", "telegram")}
 FILTER_KEYS = {"q", "niche", "cities", "min_score", "max_score", "stages", "channels", "signals",
-               "new_days", "needs_review", "fit"}
+               "new_days", "needs_review", "fit", "verify_status"}
 
 
 class FilterError(ValueError):
@@ -63,6 +63,10 @@ def clean_filters(raw: dict | None) -> dict:
         if raw["fit"] not in ("fit", "maybe", "no"):
             raise FilterError("fit must be fit|maybe|no")
         out["fit"] = raw["fit"]
+    if raw.get("verify_status"):
+        if raw["verify_status"] not in {"valid", "invalid", "risky", "unknown"}:
+            raise FilterError("Неизвестный статус проверки почты")
+        out["verify_status"] = raw["verify_status"]
     return out
 
 
@@ -102,4 +106,8 @@ def company_query(workspace_id: int, filters: dict, now: datetime) -> Select:
         q = q.where(LgCompany.needs_review.is_not(None) if f["needs_review"] else LgCompany.needs_review.is_(None))
     if f.get("fit"):
         q = q.where(LgCompany.fit_label == f["fit"])
+    if f.get("verify_status"):
+        q = q.where(exists().where(LgContact.company_id == LgCompany.id, LgContact.kind == "email",
+                                   LgContact.verify_status == f["verify_status"],
+                                   LgContact.is_personal.is_(False), LgContact.bounced.is_(False)))
     return q

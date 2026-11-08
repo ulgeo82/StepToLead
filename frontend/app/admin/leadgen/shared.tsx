@@ -219,6 +219,7 @@ export type Filters = {
   new_days?: number;
   needs_review?: boolean;
   fit?: "fit" | "maybe" | "no";
+  verify_status?: "valid";
 };
 export type Segment = { id: number; name: string; filters: Filters; count: number };
 export type Pipeline = { project_id: number; pipeline_id: number; crm_url: string };

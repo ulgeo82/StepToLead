@@ -8,13 +8,16 @@ import { base, LeadList, Segment, signalLabels } from "../shared";
 import styles from "../leadgen.module.css";
 import { SourceFields } from "./source-fields";
 import { SourceCost } from "./source-cost";
+import { ChainResult, CheckCounters } from "./chain-result";
 import {
   CompanySource, defaults, normalize, RunBody, shortError, SourceEstimate, SourceRun, Target, valid, Values,
 } from "./source-types";
 
-export function SourceRunner({ source, lists, segments, targetError, initialList }: {
+export function SourceRunner({ source, lists, segments, targetError, initialList, chainSources = [] }: {
   source: CompanySource; lists: LeadList[]; segments: Segment[]; targetError: string; initialList: string;
+  chainSources?: CompanySource[];
 }) {
+  const [after, setAfter] = useState<string[]>(() => chainSources.filter(item => item.chain_default).map(item => item.code));
   const [query, setQuery] = useState<Values>(() => defaults(source.query_schema));
   const [listName, setListName] = useState("");
   const [targetKind, setTargetKind] = useState<"list" | "segment">("list");
@@ -39,7 +42,8 @@ export function SourceRunner({ source, lists, segments, targetError, initialList
     targetSize != null && targetSize > 0 && targetSize <= 500 && !targetError;
   const canEstimate = source.ready && source.enabled && !busy && !active &&
     (finder ? valid(source.query_schema, query) : targetValid);
-  const estimateBody = finder ? { query: normalize(source.query_schema, query) } : { target };
+  const ordered = chainSources.filter(item => after.includes(item.code)).map(item => item.code);
+  const estimateBody = finder ? { query: normalize(source.query_schema, query), then: ordered } : { target };
   const key = JSON.stringify(estimateBody);
 
   useEffect(() => {
@@ -101,6 +105,14 @@ export function SourceRunner({ source, lists, segments, targetError, initialList
           <SourceFields schema={source.query_schema} values={query} prefix={`query-${source.code}`} changed={setQuery}/>
           <label className={styles.field}>Название нового списка (необязательно)<input value={listName}
             onChange={e => setListName(e.target.value)}/></label>
+          {!!chainSources.length && <fieldset className={styles.multiOptions}><legend>После поиска</legend>
+            {chainSources.map(item => <label className={styles.check} key={item.code}>
+              <input type="checkbox" checked={after.includes(item.code)} onChange={e => setAfter(e.target.checked
+                ? [...after, item.code] : after.filter(code => code !== item.code))}/>
+              <span>{item.icon} {item.title}{!item.ready && <small className={styles.hint}>
+                {shortError(new Error(item.ready_reason || "Шаг будет пропущен: источник не готов"))}</small>}</span>
+            </label>)}
+          </fieldset>}
         </> : <>
           <label className={styles.field}>Кого дополнить<select value={targetKind} onChange={e => {
             setTargetKind(e.target.value as "list" | "segment"); setTargetId("");
@@ -115,7 +127,7 @@ export function SourceRunner({ source, lists, segments, targetError, initialList
           {targetSize === 0 && <p className={styles.muted}>В выбранном наборе нет компаний.</p>}
           {targetSize != null && targetSize > 500 && <p role="alert" className={styles.error}>
             Не больше 500 компаний за запуск. Выберите меньший список или сегмент.</p>}
-          <small className={styles.hint}>Обрабатываются только компании с сайтом. Остальные будут пропущены.</small>
+          <small className={styles.hint}>Компании без необходимых для этого шага данных будут пропущены.</small>
         </>}
         {estimating && <p role="status">Оцениваем время…</p>}
         {estimate?.key === key && <p><EstimateHint estimate={estimate.value}/>
@@ -136,13 +148,19 @@ export function SourceRunner({ source, lists, segments, targetError, initialList
       <p>{shortError(new Error(finished.message || (finished.state === "error" ? "Ошибка выполнения" : "Готово")))}</p>
       {loadingResult && <p>Загружаем итог…</p>}
       {result?.result && <>
+        {finder && <h4>Поиск</h4>}
         <p>Найдено: {result.result.found} · новых: {result.result.new} · обновлено: {result.result.updated}
           {" · "}пропущено: {result.result.skipped}</p>
+        <CheckCounters result={result.result}/>
+        {Object.entries(result.result.reasons || {}).map(([reason, count]) => <p key={reason}>
+          {shortError(new Error(reason))}: {count}</p>)}
         <ul>{Object.entries(result.result.signals).map(([kind, count]) => <li key={kind}>
           {labels[kind] || kind}: {count}</li>)}</ul>
         {Object.entries(result.result.errors).map(([code, reason]) => <p key={code} className={styles.errorText}>
           {shortError(new Error(reason))}</p>)}
       </>}
+      {result?.result.chain && <ChainResult chain={result.result.chain}
+        names={Object.fromEntries(chainSources.map(item => [item.code, item.title]))}/>}
       {finder && result?.list_id != null && <Link href={`/admin/leadgen/companies?list_id=${result.list_id}`}>
         Открыть список компаний →</Link>}
       {!finder && targetLink && <Link href={targetLink}>Открыть компании выбранного набора →</Link>}

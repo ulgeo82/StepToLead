@@ -48,14 +48,16 @@ function Sources() {
     {sources?.length === 0 && <p className={styles.card}>Источников пока нет.</p>}
     <div className={styles.companySourceGrid}>{sources?.map(source => <SourceCard key={source.code}
       source={source} lists={lists} segments={segments} targetError={targetError}
+      chainSources={sources.filter(item => item.kind === "enricher" && item.chainable)}
       initialList={params.get("list_id") || ""} updated={value => setSources(current =>
         current?.map(item => item.code === value.code ? value : item) || [])}/>)}</div>
   </div>;
 }
 
-function SourceCard({ source, lists, segments, targetError, initialList, updated }: {
+function SourceCard({ source, lists, segments, targetError, initialList, updated, chainSources }: {
   source: CompanySource; lists: LeadList[]; segments: Segment[]; targetError: string; initialList: string;
   updated: (value: CompanySource) => void;
+  chainSources: CompanySource[];
 }) {
   const [draft, setDraft] = useState<Values>({});
   const [busy, setBusy] = useState(false);
@@ -123,6 +125,7 @@ function SourceCard({ source, lists, segments, targetError, initialList, updated
       <summary>Сигналы источника</summary><ul>{source.signals.map(signal => <li key={signal.kind}>
         {signalLabels[signal.kind] || signal.label || signal.kind}</li>)}</ul>
     </details>}
-    <SourceRunner source={source} lists={lists} segments={segments} targetError={targetError} initialList={initialList}/>
+    <SourceRunner source={source} lists={lists} segments={segments} targetError={targetError} initialList={initialList}
+      chainSources={chainSources}/>
   </article>;
 }

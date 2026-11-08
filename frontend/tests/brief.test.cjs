@@ -4,7 +4,8 @@ const fs=require('node:fs');
 const path=require('node:path');
 const vm=require('node:vm');
 const ts=require('typescript');
-const postcss=require('postcss');
+const {createRequire}=require('node:module');
+const postcss=createRequire(require.resolve('next/package.json'))('postcss');
 const element=(type,props)=>({type,props});
 function render(file,states){
   let hook=0;

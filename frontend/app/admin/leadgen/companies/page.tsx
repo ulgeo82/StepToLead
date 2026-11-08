@@ -34,6 +34,7 @@ import AddToCampaignDialog from "../../outreach/campaigns/AddToCampaignDialog";
 import ExportDialog from "../ExportDialog";
 import ImportDialog from "../ImportDialog";
 import { CompanyTech } from "../company-tech";
+import { EmailStatus } from "../email-status";
 import type { CompanySource } from "../sources/source-types";
 
 const channels: Record<string, string> = {
@@ -84,11 +85,12 @@ function readFilters(params: URLSearchParams): Filters {
     new_days: number("new_days"),
     needs_review: params.get("needs_review") === "true" ? true : undefined,
     fit: (["fit", "maybe", "no"] as const).find((v) => v === params.get("fit")),
+    verify_status: params.get("verify_status") === "valid" ? "valid" : undefined,
   };
 }
 function filtersQuery(filters: Filters) {
   const q = new URLSearchParams();
-  for (const key of ["q", "niche", "min_score", "new_days", "needs_review", "fit"] as const)
+  for (const key of ["q", "niche", "min_score", "new_days", "needs_review", "fit", "verify_status"] as const)
     if (filters[key] !== undefined && filters[key] !== "") q.set(key, String(filters[key]));
   for (const [key, values] of [
     ["city", filters.cities],
@@ -204,6 +206,8 @@ function CompanyCard({
         <header>
           <div>
             <h2 id="company-card-title">{company ? companyName(company) : "Карточка компании"}</h2>
+            {company?.legal_name && company.display_name !== company.legal_name && <small className={styles.muted}>
+              Очищено из: {company.legal_name}</small>}
             {company?.domain && safeUrl(company.domain) && (
               <a href={safeUrl(company.domain)} target="_blank" rel="noopener noreferrer">
                 {company.domain_display || company.domain} ↗
@@ -291,6 +295,7 @@ function CompanyCard({
                 <article key={contact.id} className={styles.contact}>
                   <span className={styles.badge}>{channels[contact.kind] || contact.kind}</span>
                   <strong>{contact.value}</strong>
+                  {contact.kind === "email" && <EmailStatus status={contact.verify_status}/>}
                   {contact.is_personal && (
                     <p className={styles.personal}>
                       Личный — не пишем{contact.person_name ? ` · ${contact.person_name}` : ""}
@@ -994,6 +999,11 @@ function CompaniesPage() {
               </label>
             ))}
           </details>
+          <label className={styles.check}>
+            <input type="checkbox" checked={filters.verify_status === "valid"}
+              onChange={e => change("verify_status", e.target.checked ? "valid" : "")}/>
+            Есть проверенная почта
+          </label>
           <label className={styles.check}>
             <input
               type="checkbox"

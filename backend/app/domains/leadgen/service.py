@@ -32,7 +32,7 @@ DEFAULT_SETTINGS = {
     "outreach_pipeline_id": None,
 }
 # Чем выше, тем надёжнее источник поля (раздел «Дедупликация и склейка», правило 2).
-SOURCE_RANK = {"dadata": 40, "fns": 35, "site": 30, "twogis": 20, "hh": 20,
+SOURCE_RANK = {"dadata": 40, "fns": 35, "site": 30, "site_search": 25, "name_clean": 30, "twogis": 20, "hh": 20,
                "yandex_direct": 10, "yandex_organic": 10, "import": 5, "manual": 50}
 COMPANY_FIELDS = ("display_name", "legal_name", "inn", "domain", "city", "region_code", "niche")
 CHANNEL_KINDS = {"email": {"email"}, "telegram": {"telegram"}, "whatsapp": {"whatsapp", "phone"},

@@ -25,6 +25,8 @@
 .sourceSettings summary { cursor: pointer; min-height: 44px; }
 .sourceLaunch .field { margin-bottom: 14px; }
 .sourceResult { margin-top: 14px; overflow-wrap: anywhere; }
+.chainStep { min-width: 0; border: 1px solid #26324d; border-radius: 10px; padding: 12px; margin: 12px 0; }
+.chainStep p { margin: 8px 0; overflow-wrap: anywhere; }
 .companyTech { min-width: 0; overflow-wrap: anywhere; }
 .multiOptions { min-width: 0; padding: 12px; margin: 0; border: 1px solid #26324d; border-radius: 10px; }
 .multiOptions legend { padding: 0 5px; }

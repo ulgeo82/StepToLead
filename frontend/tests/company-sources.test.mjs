@@ -139,3 +139,26 @@ test("оценка стоимости: null не превращается в 0 �
   assert.match(paid, /≈ 1 ₽/);
   assert.match(renderToStaticMarkup(SourceCost({ cost: { requests: 0, rub: 0 } })), /≈ 0 ₽/);
 });
+
+test("значки почты различают valid/risky/invalid/не проверена", () => {
+  const { EmailStatus } = load("../app/admin/leadgen/email-status.tsx", {
+    "./leadgen.module.css": { default: {} },
+  });
+  for (const [status, expected] of [["valid", "✓ Проверена"], ["risky", "⚠ Есть риск"],
+    ["invalid", "✕ Некорректная"], ["unknown", "Не проверена"]]) {
+    assert.ok(renderToStaticMarkup(EmailStatus({ status })).includes(expected));
+  }
+});
+
+test("итог цепочки: нулевые счётчики видны, причины без адресов", () => {
+  const { ChainResult } = load("../app/admin/leadgen/sources/chain-result.tsx", {
+    "../leadgen.module.css": { default: {} }, "./source-types": types,
+  });
+  const html = renderToStaticMarkup(ChainResult({ chain: { email_check: {
+    done: 1, skipped: 2, failed: 0, valid: 0, invalid: 1, risky: 1,
+    reasons: { "Нет сайта https://private.test/path": 2 },
+  } }, names: { email_check: "Проверка почт" } }));
+  assert.match(html, /Проверка почт/);
+  assert.match(html, /Корректных почт: 0/);
+  assert.doesNotMatch(html, /private\.test/);
+});

@@ -30,6 +30,7 @@ test('all four AI test buttons send JSON with the selected workspace', async () 
   const overview = { functions, stt: { feature: 'stt', configured: false }, limits: {}, workspaces: [{ id: 7, name: 'Тест' }] };
   const element = (type, props) => ({ type, props });
   const page = load('app/admin/ai/page.tsx', name => {
+    if (name === '@/components/ai-tokens') return { AdminTokensConfig: () => null };
     if (name === '@/lib/api') return api;
     if (name === 'react/jsx-runtime') return { jsx: element, jsxs: element, Fragment: 'fragment' };
     if (name === 'react') return { useEffect() {}, useState(initial) { const i = hook++; return [i === 0 ? overview : i === 3 ? '7' : initial, () => {}]; } };

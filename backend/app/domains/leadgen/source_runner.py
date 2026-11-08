@@ -9,9 +9,11 @@ from __future__ import annotations
 import logging
 import math
 import time
+from copy import deepcopy
 from datetime import timedelta
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.jobradar import leads
@@ -20,7 +22,7 @@ from app.domains.leadgen.core.normalize import normalize_domain
 from app.domains.leadgen import service, source_settings
 from app.domains.leadgen.core.scoring import REASON_LABELS
 from app.domains.leadgen.models import (
-    LgCompany, LgContact, LgEnrichment, LgList, LgListItem, LgSignal, LgSource, LgSourceRun,
+    LgCompany, LgCompanyKey, LgContact, LgEnrichment, LgList, LgListItem, LgSignal, LgSource, LgSourceRun,
 )
 from app.domains.leadgen.sources import (
     REGISTRY, CompanySource, CompanyView, Enrichment, SourceSkipped, limited, short_error,
@@ -68,6 +70,8 @@ def source_view(adapter: CompanySource, row: LgSource) -> dict:
         "last_error": row.last_error if source_state(row) == "error" else None,
         "signals": [{"kind": s["kind"], "label": REASON_LABELS.get(s["kind"], s.get("label") or s["kind"])}
                     for s in adapter.signals_info],
+        "chainable": adapter.kind == "enricher" and adapter.chainable,
+        "chain_default": adapter.kind == "enricher" and adapter.chain_default,
     }
 
 
@@ -178,14 +182,41 @@ async def _with_site(db: AsyncSession, ids: list[int]) -> int:
                                                             LgCompany.domain.isnot(None)))).all())
 
 
-async def estimate(db: AsyncSession, ws: int, code: str, *, query: dict | None, target: dict | None) -> dict:
+async def clean_chain(db, adapter, then):
+    if then is None:
+        return []
+    if adapter.kind != "finder":
+        raise RunError(422, "Цепочка доступна только после поиска")
+    out = []
+    for code in then:
+        child = REGISTRY.get(code)
+        if child is None or child.kind != "enricher" or not child.chainable:
+            raise RunError(422, "В цепочке допускаются только известные источники дообогащения")
+        if code in out:
+            raise RunError(422, "Шаги цепочки не должны повторяться")
+        out.append(code)
+    return out
+
+
+def _sum_cost(current, extra):
+    if not extra:
+        return current
+    if not current:
+        return dict(extra)
+    rub = None if current.get("rub") is None or extra.get("rub") is None else current["rub"] + extra["rub"]
+    return {"requests": current["requests"] + extra["requests"], "rub": round(rub, 4) if rub is not None else None}
+
+
+async def estimate(db: AsyncSession, ws: int, code: str, *, query: dict | None, target: dict | None,
+                   then: list[str] | None = None) -> dict:
     adapter, row = await adapter_row(db, code)
     settings = source_settings.plain(adapter, row.settings)
+    chain = await clean_chain(db, adapter, then)
     companies = None
     if adapter.kind == "enricher":
         ids = await resolve_target(db, ws, target)
         companies = len(ids)
-        units = await _with_site(db, ids)
+        units = await _with_site(db, ids) if adapter.requires_site else len(ids)
     else:
         query = clean_query(adapter, query)
         units = adapter.units(query, {}, settings)
@@ -197,7 +228,23 @@ async def estimate(db: AsyncSession, ws: int, code: str, *, query: dict | None, 
                      {"code": "save", "name": "Запись в базу", "seconds": save}]}
     if companies is not None:
         out["companies"] = companies
-    cost = adapter.cost(query or {}, settings) if adapter.kind == "finder" else None
+    cost_query = query or {}
+    if adapter.code == "find_site":
+        missing_site = await db.scalar(select(func.count()).select_from(LgCompany).where(
+            LgCompany.id.in_(ids), LgCompany.domain.is_(None)))
+        cost_query = {"companies": missing_site}
+    cost = adapter.cost(cost_query, settings)
+    for child_code in chain:
+        child, child_row = await adapter_row(db, child_code)
+        child_settings = source_settings.plain(child, child_row.settings)
+        expected = min(MAX_COMPANIES, max(1, units * 10))
+        available = child_row.enabled and child.ready(child_settings) is None
+        duration = (math.ceil(expected / max(1, child.concurrency)) * _unit_seconds(child, child_row, child_settings)
+                    if available else 0)
+        out["steps"].append({"code": child_code, "name": child.title, "seconds": round(duration, 1)})
+        out["seconds"] += round(duration)
+        if available:
+            cost = _sum_cost(cost, child.cost({"companies": expected}, child_settings))
     if cost:
         out["cost"] = cost
     return out
@@ -206,9 +253,10 @@ async def estimate(db: AsyncSession, ws: int, code: str, *, query: dict | None, 
 # ---------------------------------------------------------------- запуск
 
 async def create_run(db: AsyncSession, ws: int, code: str, *, query: dict | None, target: dict | None,
-                     list_name: str | None, admin_id: int | None) -> LgSourceRun:
+                     list_name: str | None, admin_id: int | None, then: list[str] | None = None) -> LgSourceRun:
     adapter, row = await adapter_row(db, code)
     settings = source_settings.plain(adapter, row.settings)
+    chain = await clean_chain(db, adapter, then)
     if not row.enabled:
         raise RunError(400, "Источник не настроен: источник выключен")
     reason = adapter.ready(settings)
@@ -226,7 +274,9 @@ async def create_run(db: AsyncSession, ws: int, code: str, *, query: dict | None
     else:
         params["query"] = clean_query(adapter, query)
         params["list_name"] = (list_name or "").strip()[:180] or None
-    est = await estimate(db, ws, code, query=query, target=target)
+        if then is not None:
+            params["then"] = chain
+    est = await estimate(db, ws, code, query=query, target=target, then=then)
     run = LgSourceRun(workspace_id=ws, source=code, params=params, status="queued", stats={},
                       created_by_id=admin_id)
     db.add(run)
@@ -265,11 +315,35 @@ async def _execute(run_id: int, session_factory) -> None:
         await db.commit()
         result = {"found": 0, "new": 0, "updated": 0, "skipped": 0, "signals": {}, "errors": {}}
         started = time.monotonic()
+        primary_duration = None
         try:
             if adapter.kind == "enricher":
                 units = await _enrich_all(db, run, adapter, settings, tracker, result)
             else:
                 units = await _find(db, run, adapter, settings, tracker, result)
+                primary_duration = time.monotonic() - started
+                await db.commit()  # preserve the search/list even if a subsequent optional step fails
+                if run.params.get("then"):
+                    result["chain"] = {}
+                for child_code in run.params.get("then") or []:
+                    child, child_row = await adapter_row(db, child_code)
+                    child_settings = source_settings.plain(child, child_row.settings)
+                    summary = {"found": 0, "updated": 0, "done": 0, "skipped": 0, "failed": 0,
+                               "signals": {}, "errors": {}, "reasons": {}}
+                    result["chain"][child_code] = summary
+                    if not child_row.enabled or child.ready(child_settings):
+                        summary["skipped"] = len((run.stats or {}).get("company_ids") or [])
+                        summary["reasons"]["источник выключен или не настроен"] = summary["skipped"]
+                        tracker.end(child_code, "skipped", "источник выключен или не настроен")
+                        continue
+                    child_started = time.monotonic()
+                    child_units = await _enrich_all(db, run, child, child_settings, tracker, summary,
+                                                    ids=list((run.stats or {}).get("company_ids") or []))
+                    if child_units:
+                        jr_timing.learn(child, child_row, time.monotonic() - child_started, child_units, persist=True)
+                    source_settings.mark(child_row, service.utcnow(), next(iter(summary["errors"].values()), None))
+                    run.stats = {**(run.stats or {}), "result": deepcopy(result)}
+                    await db.commit()
         except Exception as exc:  # noqa: BLE001
             message = str(exc) if isinstance(exc, SourceSkipped) else short_error(exc)
             if not isinstance(exc, SourceSkipped):
@@ -279,16 +353,17 @@ async def _execute(run_id: int, session_factory) -> None:
             row = await db.get(LgSource, run.source)
             result["errors"][adapter.code] = message
             run.status, run.error, run.finished_at = "failed", message, service.utcnow()
-            run.stats = {**(run.stats or {}), "result": result}
+            run.stats = {**(run.stats or {}), "result": deepcopy(result)}
             source_settings.mark(row, service.utcnow(), message)
             await db.commit()
             tracker.finish("error", f"Ошибка: {message}")
             return
         if units:
-            jr_timing.learn(adapter, row, time.monotonic() - started, units, persist=True)
+            jr_timing.learn(adapter, row, primary_duration if primary_duration is not None
+                            else time.monotonic() - started, units, persist=True)
         source_settings.mark(row, service.utcnow(), None)
         run.status, run.finished_at = "done", service.utcnow()
-        run.stats = {**(run.stats or {}), "result": result}
+        run.stats = {**(run.stats or {}), "result": deepcopy(result)}
         await db.commit()
         tracker.finish("done", _summary(adapter, result))
 
@@ -307,15 +382,26 @@ def _summary(adapter: CompanySource, r: dict) -> str:
 
 # ---------------------------------------------------------------- enricher
 
-async def _enrich_all(db, run, adapter, settings, tracker, result) -> int:
-    ids = [int(i) for i in run.params.get("company_ids") or []]
-    companies = (await db.scalars(select(LgCompany).where(LgCompany.id.in_(ids)))).all()
-    with_site = [c for c in companies if c.domain]
+async def _enrich_all(db, run, adapter, settings, tracker, result, *, ids=None) -> int:
+    chained = ids is not None
+    ids = [int(i) for i in (ids if chained else run.params.get("company_ids") or [])]
+    companies = (await db.scalars(select(LgCompany).where(LgCompany.id.in_(ids),
+                                                        LgCompany.workspace_id == run.workspace_id))).all()
+    with_site = [c for c in companies if c.domain or not adapter.requires_site]
     result["skipped"] += len(companies) - len(with_site)
     result["found"] = len(companies)
-    run.stats = {"company_ids": ids}
+    if not chained:
+        run.stats = {"company_ids": ids}
+    result.setdefault("reasons", {})
+    result.setdefault("done", 0)
+    result.setdefault("failed", 0)
+    if len(companies) > len(with_site):
+        result["reasons"]["нет сайта"] = len(companies) - len(with_site)
     tracker.begin(adapter.code, total=len(with_site))
     ctx = source_settings.context()
+    ctx.cache["leadgen_settings"] = await service.get_settings(db)
+    if source_settings.sleep is not None:
+        ctx.cache["crawl_delay"] = 0
     failures: dict[str, int] = {}
 
     async def one(view: CompanyView) -> Enrichment:
@@ -326,29 +412,52 @@ async def _enrich_all(db, run, adapter, settings, tracker, result) -> int:
         except Exception as exc:  # noqa: BLE001 — один сайт не валит запуск
             return Enrichment(status="failed", error=short_error(exc))
         finally:   # отметка по готовности: «проверено 3 из 5» — честно, а не «начато»
-            tracker.tick(adapter.code)
+            if not adapter.persist_work:
+                tracker.tick(adapter.code)
 
     saved = 0
     for start in range(0, len(with_site), CHUNK):
         chunk = with_site[start:start + CHUNK]
+        contacts = (await db.scalars(select(LgContact).where(LgContact.company_id.in_([c.id for c in chunk])))).all()
         views = [CompanyView(id=c.id, name=c.display_name, domain=c.domain, city=c.city, inn=c.inn,
-                             region_code=c.region_code) for c in chunk]
+                             region_code=c.region_code, legal_name=c.legal_name, provenance=c.provenance or {},
+                             contacts=[{"id": x.id, "kind": x.kind, "value": x.value, "is_personal": x.is_personal,
+                                        "verified_at": x.verified_at} for x in contacts if x.company_id == c.id])
+                 for c in chunk]
         found = await limited(ctx, views, one, adapter.concurrency)
         for company, enr in zip(chunk, found):
-            await apply_enrichment(db, company, adapter.code, enr, run_id=run.id)
+            await db.refresh(company)
+            try:
+                async with db.begin_nested():
+                    enr = await adapter.persist(db, company, enr, ctx)
+                    await apply_enrichment(db, company, adapter.code, enr, run_id=run.id)
+            except Exception as exc:
+                await db.refresh(company)
+                enr = Enrichment(status="failed", error=short_error(exc))
+                await apply_enrichment(db, company, adapter.code, enr, run_id=run.id)
+            if adapter.persist_work:
+                tracker.tick(adapter.code)
+            for key, count in enr.counters.items():
+                result[key] = result.get(key, 0) + count
             if enr.status == "done":
+                result["done"] += 1
                 result["updated"] += 1
                 for s in enr.signals:
                     result["signals"][s.kind] = result["signals"].get(s.kind, 0) + 1
             else:
-                result["skipped"] += 1
+                if enr.status != "failed" or not chained:
+                    result["skipped"] += 1
+                reason = enr.error or "нет данных"
+                result["reasons"][reason] = result["reasons"].get(reason, 0) + 1
                 if enr.status == "failed":
+                    result["failed"] += 1
                     failures[enr.error or "ошибка"] = failures.get(enr.error or "ошибка", 0) + 1
             saved += 1
         await db.commit()
     tracker.end(adapter.code, note=f"проверено {result['updated']}")
-    tracker.begin("save")
-    tracker.end("save")
+    if not chained:
+        tracker.begin("save")
+        tracker.end("save")
     if failures:
         top = max(failures, key=failures.get)
         result["errors"][adapter.code] = f"не проверено {sum(failures.values())}: {top}"[:120]
@@ -359,6 +468,8 @@ async def apply_enrichment(db: AsyncSession, company: LgCompany, code: str, enr:
                            run_id: int | None = None) -> None:
     """Пишет результат enricher'а. Прежние сигналы этого источника снимаются — остаются только актуальные."""
     now = service.utcnow()
+    if enr.review:
+        company.needs_review = company.needs_review or enr.review
     if enr.status == "done":
         await db.execute(delete(LgSignal).where(LgSignal.company_id == company.id, LgSignal.key == code))
         for s in enr.signals:
@@ -367,7 +478,15 @@ async def apply_enrichment(db: AsyncSession, company: LgCompany, code: str, enr:
                             expires_at=now + timedelta(days=s.ttl_days) if s.ttl_days else None))
         await _add_contacts(db, company, code, enr.contacts, now)
         if enr.fields:
-            service._apply_fields(company, enr.fields, code, None, now)
+            if code == "find_site":
+                await _identity_fields(db, company, enr, now)
+            else:
+                service._apply_fields(company, enr.fields, REGISTRY[code].field_source or code, None, now)
+        for update in enr.contact_updates:
+            contact = await db.scalar(select(LgContact).where(LgContact.id == update["id"],
+                LgContact.company_id == company.id, LgContact.is_personal.is_(False)))
+            if contact is not None and update["verify_status"] in {"valid", "invalid", "risky"}:
+                contact.verify_status, contact.verified_at = update["verify_status"], update["verified_at"]
     row = await db.scalar(select(LgEnrichment).where(LgEnrichment.company_id == company.id, LgEnrichment.step == code))
     if row is None:
         row = LgEnrichment(company_id=company.id, step=code)
@@ -379,6 +498,32 @@ async def apply_enrichment(db: AsyncSession, company: LgCompany, code: str, enr:
     await db.flush()
     if enr.status == "done":
         await service.recalc_score(db, company, now=now)
+
+
+async def _identity_fields(db, company, enr, now):
+    keys = {k: v for k, v in enr.fields.items() if k in {"inn", "domain"}}
+    for key, value in keys.items():
+        other = await db.scalar(select(LgCompany.id).where(LgCompany.workspace_id == company.workspace_id,
+            LgCompany.id != company.id, getattr(LgCompany, key) == value))
+        keyed = await db.scalar(select(LgCompanyKey.id).where(LgCompanyKey.workspace_id == company.workspace_id,
+            LgCompanyKey.company_id != company.id, LgCompanyKey.kind == key, LgCompanyKey.value_norm == value))
+        if other or keyed:
+            company.needs_review = "find_site:duplicate"
+            enr.profile["conflict"] = "find_site:duplicate"
+            enr.counters.clear()
+            enr.status, enr.error = "skipped", "конфликт ИНН или домена, нужна ручная проверка"
+            return
+    try:
+        async with db.begin_nested():
+            service._apply_fields(company, keys, "site_search", enr.profile.get("url"), now)
+            await service._add_keys(db, company, {k: [getattr(company, k)] for k in keys if getattr(company, k)})
+            await db.flush()
+    except IntegrityError:
+        await db.refresh(company)
+        company.needs_review = "find_site:duplicate"
+        enr.profile["conflict"] = "find_site:duplicate"
+        enr.counters.clear()
+        enr.status, enr.error = "skipped", "конфликт ИНН или домена, нужна ручная проверка"
 
 
 async def _add_contacts(db, company, code, contacts, now) -> None:
