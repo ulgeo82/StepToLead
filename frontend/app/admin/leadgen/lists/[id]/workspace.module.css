@@ -1,0 +1,65 @@
+.workspace { width: 100%; max-width: 100%; min-width: 0; }
+.workspace *, .workspace *::before, .workspace *::after { box-sizing: border-box; }
+.toolbar, .tabs, .counters, .functions, .controls, .pagination { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.toolbar input { max-width: 100%; }
+.tabs { margin: 16px 0; }
+.tabs > span { display: inline-flex; align-items: center; border: 1px solid #273650; border-radius: 10px; padding: 6px 10px; max-width: 100%; }
+.tabs a { overflow-wrap: anywhere; }
+.tabs a[aria-current="page"] { color: #8eb0ff; font-weight: 700; }
+.tabs button { border: 0; background: transparent; color: #a6b8d4; font-size: 20px; padding: 0 0 0 10px; }
+.title { display: block; text-align: left; font: inherit; font-size: 26px; font-weight: 700; overflow-wrap: anywhere;
+  background: transparent; color: #eef3ff; border: 0; padding: 0; cursor: pointer; }
+.counters { margin: 14px 0; }
+.counters span { padding: 8px 12px; background: #141f35; border-radius: 10px; }
+.panel { min-width: 0; margin: 16px 0; }
+.functions { margin-bottom: 14px; }
+.function { border: 1px solid #2c3b54; border-radius: 12px; background: #141f35; color: #ccd5e6; padding: 10px 12px; }
+.function[aria-pressed="true"] { background: #23438a; border-color: #477be5; color: #fff; }
+.unavailable { opacity: .5; cursor: not-allowed; }
+.controls { margin: 12px 0; }
+.controls > label { min-width: 0; }
+.controls input { max-width: 100%; }
+.layout { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 16px; align-items: start; }
+.layout.closed { grid-template-columns: minmax(0, 1fr); }
+.main { min-width: 0; max-width: 100%; }
+.scroll { overflow: auto; max-width: 100%; max-height: 72vh; border: 1px solid #273650; border-radius: 12px; }
+.table { border-collapse: separate; border-spacing: 0; width: max-content; min-width: 100%; }
+.table th, .table td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #273650; vertical-align: top; min-width: 150px; max-width: 320px; }
+.table th:first-child, .table td:first-child { min-width: 45px; width: 45px; }
+.table th { position: sticky; top: 0; background: #142039; z-index: 1; }
+.table td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.table.wrap td { white-space: normal; overflow-wrap: anywhere; }
+.table tbody tr { cursor: pointer; }
+.table tbody tr:hover { background: #17243e; }
+.table .duplicate { background: #4a392b; box-shadow: inset 3px 0 #e8b560; }
+.table .selected { background: #1c345b; }
+.table button { text-align: left; }
+.table th button { background: transparent; border: 0; color: #d8e2f3; font: inherit; font-weight: 700;
+  padding: 0; cursor: pointer; }
+.table input, .table select { width: 100%; min-width: 0; }
+.table input[type="checkbox"] { width: auto; }
+.filter { display: grid; gap: 5px; margin-top: 8px; font-weight: 400; font-size: 12px; }
+.filter input, .filter select { max-width: 215px; }
+.cellEdit { display: grid; gap: 5px; min-width: 190px; }
+.cellEdit button { padding: 3px 7px; }
+.cellEdit button { background: #1b3157; color: #e2eaff; border: 1px solid #345382; border-radius: 6px; }
+.cellError { color: #f9a6a6; font-size: 12px; white-space: normal; overflow-wrap: anywhere; }
+.aside { min-width: 0; }
+.aside section { margin-bottom: 16px; }
+.summary { display: grid; gap: 6px; margin-top: 10px; max-height: 360px; overflow: auto; }
+.summary button { display: flex; justify-content: space-between; gap: 12px; text-align: left; overflow-wrap: anywhere; }
+.cleanup { display: grid; gap: 8px; }
+.columns { display: grid; gap: 8px; padding: 12px 0; max-width: 420px; }
+.column { display: flex; gap: 8px; align-items: center; }
+.column label { flex: 1; }
+.pagination { justify-content: space-between; padding-top: 14px; }
+.hint { font-size: 12px; color: #94a5c1; overflow-wrap: anywhere; }
+.workspace :focus-visible { outline: 2px solid #7faaff; outline-offset: 3px; }
+@media (max-width: 1050px) { .layout { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 600px) {
+  .title { font-size: 22px; }
+  .toolbar > button, .toolbar > a { flex: 1 1 125px; }
+  .controls > label { width: 100%; }
+  .controls input, .controls select { width: 100%; }
+  .panel { padding: 14px; }
+}

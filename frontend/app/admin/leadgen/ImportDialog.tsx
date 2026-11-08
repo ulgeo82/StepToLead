@@ -34,7 +34,9 @@ const columnNames: Record<string, string> = {
   whatsapp: "WhatsApp",
 };
 
-export default function ImportDialog({ close, completed }: { close: () => void; completed: () => void }) {
+export default function ImportDialog({ close, completed, listId }: {
+  close: () => void; completed: () => void; listId?: number;
+}) {
   const [text, setText] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [niche, setNiche] = useState("");
@@ -43,6 +45,7 @@ export default function ImportDialog({ close, completed }: { close: () => void; 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState<ImportResult | null>(null);
+  const [pending, setPending] = useState<ImportResult | null>(null);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -61,6 +64,21 @@ export default function ImportDialog({ close, completed }: { close: () => void; 
     };
   }, [close, busy]);
 
+  async function finishImport(data: ImportResult) {
+    if (listId != null) {
+      setPending(data);
+      const run = await api<{ companies: { id: number }[] }>(`${base}/runs/${data.id}`);
+      for (let start = 0; start < run.companies.length; start += 5000) {
+        await api(`${base}/lists/${listId}/companies`, { method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ company_ids: run.companies.slice(start, start + 5000).map(item => item.id) }) });
+      }
+      setPending(null);
+    }
+    setResult(data);
+    completed();
+  }
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (busy || (!file && !text.trim())) return;
@@ -78,8 +96,7 @@ export default function ImportDialog({ close, completed }: { close: () => void; 
         body: form,
         timeoutMs: 120_000,
       });
-      setResult(data);
-      completed();
+      await finishImport(data);
     } catch (err) {
       setError(message(err));
     } finally {
@@ -99,7 +116,7 @@ export default function ImportDialog({ close, completed }: { close: () => void; 
         aria-labelledby="import-title"
         tabIndex={-1}
       >
-        <h2 id="import-title">Импорт базы</h2>
+        <h2 id="import-title">{listId != null ? "Импорт в эту базу" : "Импорт базы"}</h2>
         {error && (
           <p role="alert" className={styles.error}>
             {error}
@@ -138,7 +155,16 @@ export default function ImportDialog({ close, completed }: { close: () => void; 
               </Link>
             </p>
           </div>
-        ) : (
+        ) : pending ? <div>
+          <p>Импорт сохранён. Не удалось добавить компании в эту базу.</p>
+          <button type="button" className={styles.primary} disabled={busy} onClick={async () => {
+            setBusy(true);
+            setError("");
+            try { await finishImport(pending); } catch (err) { setError(message(err)); }
+            finally { setBusy(false); }
+          }}>Повторить добавление в базу</button>
+          <button type="button" className={styles.secondary} disabled={busy} onClick={close}>Закрыть</button>
+        </div> : (
           <form onSubmit={submit}>
             <p className={styles.muted}>
               CSV, Excel (.xlsx) или список сайтов — по одному на строку. Колонки узнаём по заголовкам: сайт,

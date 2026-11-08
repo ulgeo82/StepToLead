@@ -26,6 +26,8 @@ DEFAULT_WEIGHTS: dict[str, int] = {
     "has_calltracking": 0, # продвинутый покупатель — другой текст письма, не балл
     "slow_site": 1,        # PageSpeed мобильной версии ниже порога
     "outdated_site": 1,    # год в подвале старше порога
+    "revenue_fit": 1,      # ГИР БО: выручка в целевом коридоре
+    "big_company": -2,     # ГИР БО: выручка выше коридора — скорее сеть/крупный бизнес
 }
 
 REASON_LABELS: dict[str, str] = {
@@ -54,6 +56,7 @@ REASON_LABELS: dict[str, str] = {
     "vk_active": "Активное сообщество ВК",
     "vk_abandoned": "Заброшенное сообщество ВК",
     "new_site": "Новый сайт",
+    "big_company": "Крупная компания",
 }
 
 MIN_SCORE, MAX_SCORE, FIT_NO_CAP = 0, 10, 2

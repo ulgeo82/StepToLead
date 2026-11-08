@@ -1,0 +1,98 @@
+[
+ {
+  "id": 18773517,
+  "period": "2022",
+  "actualBfoDate": "2023-04-07",
+  "gainSum": 8100,
+  "knd": "0710099",
+  "mspCategory": null,
+  "published": true,
+  "organizationInfo": {
+   "fullName": "ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ \"КУХНИ ВОЛГИ\"",
+   "inn": "6312000014"
+  },
+  "typeCorrections": [
+   {
+    "type": 12,
+    "correction": {
+     "financialResult": {
+      "current2110": 8100,
+      "previous2110": null
+     }
+    }
+   }
+  ]
+ },
+ {
+  "id": 24188917,
+  "period": "2024",
+  "actualBfoDate": "2025-03-24",
+  "gainSum": 96500,
+  "knd": "0710099",
+  "mspCategory": null,
+  "published": true,
+  "organizationInfo": {
+   "fullName": "ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ \"КУХНИ ВОЛГИ\"",
+   "inn": "6312000014"
+  },
+  "typeCorrections": [
+   {
+    "type": 12,
+    "correction": {
+     "financialResult": {
+      "current2110": 96500,
+      "previous2110": null
+     }
+    }
+   }
+  ]
+ },
+ {
+  "id": 28260431,
+  "period": "2025",
+  "actualBfoDate": "2026-03-27",
+  "gainSum": null,
+  "knd": "0710099",
+  "mspCategory": null,
+  "published": true,
+  "organizationInfo": {
+   "fullName": "ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ \"КУХНИ ВОЛГИ\"",
+   "inn": "6312000014"
+  },
+  "typeCorrections": [
+   {
+    "type": 12,
+    "correction": {
+     "financialResult": {
+      "current2110": null,
+      "previous2110": null
+     }
+    }
+   }
+  ]
+ },
+ {
+  "id": 21897602,
+  "period": "2023",
+  "actualBfoDate": "2024-03-29",
+  "gainSum": 41000,
+  "knd": "0710099",
+  "mspCategory": null,
+  "published": true,
+  "organizationInfo": {
+   "fullName": "ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ \"КУХНИ ВОЛГИ\"",
+   "inn": "6312000014"
+  },
+  "typeCorrections": [
+   {
+    "type": 12,
+    "correction": {
+     "financialResult": {
+      "current2110": 41000,
+      "previous2110": null
+     }
+    }
+   }
+  ]
+ }
+]

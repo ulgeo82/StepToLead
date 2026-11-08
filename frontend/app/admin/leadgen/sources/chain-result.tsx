@@ -11,8 +11,10 @@ export function CheckCounters({ result }: { result: Partial<ChainSummary> }) {
     return count == null ? null : <li key={key}>{label}: {count}</li>;
   })}</ul>;
 }
-export function ChainResult({ chain, names }: { chain: Record<string, ChainSummary>; names: Record<string, string> }) {
-  return <section aria-label="Итог цепочки"><h4>После поиска</h4>
+export function ChainResult({ chain, names, title = "После поиска" }: {
+  chain: Record<string, ChainSummary>; names: Record<string, string>; title?: string;
+}) {
+  return <section aria-label="Итог цепочки"><h4>{title}</h4>
     {Object.entries(chain).map(([code, step]) => <article key={code} className={styles.chainStep}>
       <b>{names[code] || code}</b>
       <p>Сделано: {step.done} · пропущено: {step.skipped} · ошибок: {step.failed}</p>

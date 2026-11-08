@@ -349,6 +349,7 @@ async def export_companies(q: str | None = None, niche: str | None = None, city:
                            preset: str = Query("full", pattern="^(full|outreach)$"),
                            count_only: bool = False,
                            sort: str = Query("score", pattern="^(score|new|seen|name)$"),
+                           format: str = Query("xlsx", pattern="^(xlsx|csv)$"),
                            db: AsyncSession = Depends(get_db), admin: AdminUser = Depends(require_admin)):
     """Выгрузка в Excel: по фильтру, по спискам или выбранные. Стоп-лист и отказы — никогда.
     count_only — сколько попадёт в файл (для окна выгрузки). Каждая выгрузка пишется в историю."""
@@ -366,7 +367,27 @@ async def export_companies(q: str | None = None, niche: str | None = None, city:
               "has_contacts": has_contacts, "verify_status": verify_status,
               "ids": ids[:50]}.items() if v not in (None, [], "", False)}
     title = await export_title(db, list_id, ids, not_exported)
+    if format == "csv":
+        return await send_csv(db, companies, preset=preset, title=title, params={**params, "format": "csv"},
+                              admin=admin)
     return await send_xlsx(db, companies, preset=preset, title=title, params=params, admin=admin)
+
+
+async def send_csv(db, companies, *, preset, title, params, admin):
+    """Как send_xlsx (та же история выгрузок и отметка «выгружалась»), но CSV."""
+    from fastapi.responses import Response
+    from urllib.parse import quote
+    in_lists = await lists.company_lists(db, [c.id for c in companies])
+    data = await export.build_csv(db, companies, base_url=app_settings.frontend_origin, preset=preset, lists=in_lists)
+    now = service.utcnow()
+    for c in companies:
+        c.last_exported_at, c.export_count = now, (c.export_count or 0) + 1
+    db.add(LgExport(workspace_id=workspace_id(), created_by_id=admin.id, title=title, params=params,
+                    company_ids=[c.id for c in companies], count=len(companies), preset=preset))
+    await db.commit()
+    name = f"baza-kompaniy-{service.utcnow():%Y-%m-%d}.csv"
+    return Response(data, media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f"attachment; filename=\"{name}\"; filename*=UTF-8''{quote(name)}"})
 
 
 @router.get("/exports")
@@ -1016,7 +1037,7 @@ async def list_sequences(include: int | None = None, db: AsyncSession = Depends(
     q = q.where(LgSequence.campaign_owned.is_(False) | (LgSequence.id == include)) if include else \
         q.where(LgSequence.campaign_owned.is_(False))
     rows = (await db.execute(q.order_by(LgSequence.id.desc()))).scalars().all()
-    variables = list(seq_core.VARIABLES)
+    variables = list(seq_core.VARIABLES) + [v for v in seq_core.EXTRA_VARIABLES if v not in seq_core.VARIABLES]
     if include:
         campaign = await db.scalar(select(LgCampaign).where(LgCampaign.sequence_id == include))
         variables += [v for v in (campaign.variables if campaign else []) if v not in variables]

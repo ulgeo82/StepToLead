@@ -366,7 +366,8 @@ async def enroll(db: AsyncSession, sequence: LgSequence, company: LgCompany, *,
 
 async def _context(db: AsyncSession, company: LgCompany, mailbox: LgMailbox | None) -> dict:
     ad = await db.scalar(select(LgAd).where(LgAd.company_id == company.id).order_by(LgAd.last_seen_at.desc()).limit(1))
-    return {"company": company.display_name or company.legal_name or company.domain, "domain": company.domain,
+    from app.domains.leadgen.sources import variable_values   # переменные источников: {{site_platform}}, {{personal_line}}…
+    return {**await variable_values(db, company.id), "company": company.display_name or company.legal_name or company.domain, "domain": company.domain,
             "city": company.city, "niche": company.niche, "ad_title": ad.title if ad else None,
             "ad_text": ad.text if ad else None, "director_name": company.director_name,
             "director_first_name": core.first_name(company.director_name),

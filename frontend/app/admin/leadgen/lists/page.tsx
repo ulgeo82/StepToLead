@@ -233,7 +233,7 @@ export default function ListsPage() {
                         </form>
                       ) : (
                         <>
-                          <Link className={styles.companyButton} href={`/admin/leadgen/companies?list_id=${list.id}`}>
+                          <Link className={styles.companyButton} href={`/admin/leadgen/lists/${list.id}`}>
                             {list.name}
                           </Link>
                           <small>

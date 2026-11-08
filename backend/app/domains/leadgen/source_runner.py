@@ -622,3 +622,163 @@ async def tech_for(db: AsyncSession, company_id: int) -> dict | None:
         "pagespeed_mobile": p.get("mobile_speed"),
         "tag_manager": bool(p.get("has_gtm")),   # счётчики могут стоять через GTM и не видны в html
     }
+
+
+# ---------------------------------------------------------------- запуск функций по базе (WORKSPACE.md)
+
+# Порядок выполнения — всегда этот, как бы ни прислали: сначала сайт и ИНН, потом почты, потом проверки.
+WORKSPACE_ORDER = ("find_site", "site_contacts", "email_check", "name_clean", "site_tech", "dadata", "fns_revenue",
+                   "fit_ai", "personalize")
+
+
+def list_run_source(list_id: int) -> str:
+    return f"list:{list_id}"
+
+
+def ordered_steps(steps) -> list[str]:
+    steps = list(dict.fromkeys(steps or []))
+    if not steps:
+        raise RunError(422, "Выберите хотя бы одну функцию")
+    unknown = [s for s in steps if s not in WORKSPACE_ORDER or s not in REGISTRY]
+    if unknown:
+        raise RunError(422, f"Неизвестная функция: {unknown[0]}")
+    return [s for s in WORKSPACE_ORDER if s in steps]
+
+
+async def list_targets(db: AsyncSession, ws: int, list_id: int, company_ids: list[int] | None) -> list[int]:
+    lst = await db.get(LgList, list_id)
+    if lst is None or lst.workspace_id != ws:
+        raise RunError(404, "Список не найден")
+    query = select(LgCompany.id).join(LgListItem, LgListItem.company_id == LgCompany.id).where(
+        LgListItem.list_id == list_id, LgCompany.workspace_id == ws, LgCompany.stage != "hidden")
+    if company_ids is not None:
+        query = query.where(LgCompany.id.in_([int(i) for i in company_ids]))
+    ids = list(dict.fromkeys((await db.scalars(query.order_by(LgCompany.id))).all()))
+    if not ids:
+        raise RunError(422, "Нет компаний для запуска")
+    if len(ids) > MAX_COMPANIES:
+        raise RunError(422, f"Не больше {MAX_COMPANIES} компаний за запуск — сейчас {len(ids)}")
+    return ids
+
+
+async def list_estimate(db: AsyncSession, ws: int, list_id: int, *, steps, company_ids=None) -> dict:
+    order = ordered_steps(steps)
+    ids = await list_targets(db, ws, list_id, company_ids)
+    with_site = await _with_site(db, ids)
+    missing_site = await db.scalar(select(func.count()).select_from(LgCompany).where(
+        LgCompany.id.in_(ids), LgCompany.domain.is_(None)))
+    out = {"seconds": 0, "steps": [], "companies": len(ids)}
+    cost, tokens = None, 0
+    for code in order:
+        adapter, row = await adapter_row(db, code)
+        settings = source_settings.plain(adapter, row.settings)
+        available = row.enabled and adapter.ready(settings) is None
+        units = (with_site if adapter.requires_site else len(ids)) if available else 0
+        rounds = math.ceil(units / max(1, adapter.concurrency)) if units else 0
+        seconds = round(rounds * _unit_seconds(adapter, row, settings) + SAVE_SECONDS * units, 1)
+        step = {"code": code, "name": adapter.title, "seconds": seconds}
+        if not available:
+            step["skip"] = "источник выключен" if not row.enabled else adapter.ready(settings)
+        out["steps"].append(step)
+        out["seconds"] += seconds
+        if available:
+            cost = _sum_cost(cost, adapter.cost({"companies": missing_site if code == "find_site" else units},
+                                                settings))
+            tokens += int(getattr(adapter, "ai_tokens_per_company", 0) or 0) * units
+    out["seconds"] = round(out["seconds"])
+    if cost:
+        out["cost"] = cost
+    if tokens:
+        out["ai_tokens"] = tokens
+    return out
+
+
+async def create_list_run(db: AsyncSession, ws: int, list_id: int, *, steps, company_ids=None,
+                          admin_id: int | None = None) -> LgSourceRun:
+    order = ordered_steps(steps)
+    source = list_run_source(list_id)
+    busy = source in _running or await db.scalar(select(LgSourceRun.id).where(
+        LgSourceRun.workspace_id == ws, LgSourceRun.source == source, LgSourceRun.status.in_(("queued", "running")),
+        LgSourceRun.created_at > service.utcnow() - timedelta(hours=3)))
+    if busy:
+        raise RunError(409, "По этой базе уже идёт запуск")
+    ids = await list_targets(db, ws, list_id, company_ids)
+    est = await list_estimate(db, ws, list_id, steps=order, company_ids=company_ids)
+    run = LgSourceRun(workspace_id=ws, source=source, status="queued", created_by_id=admin_id,
+                      params={"kind": "list", "list_id": list_id, "steps": order, "company_ids": ids,
+                              "scope": "selected" if company_ids is not None else "all"},
+                      stats={"company_ids": ids, "list_id": list_id})
+    db.add(run)
+    await db.flush()
+    _running.add(source)
+    progress.start(run_key(run.id), "Функции по базе", [(s["code"], s["name"], s["seconds"]) for s in est["steps"]],
+                   queued=True)
+    return run
+
+
+async def execute_list(run_id: int, session_factory, lock=None) -> None:
+    async with session_factory() as db:
+        run = await db.get(LgSourceRun, run_id)
+        source = run.source if run else None
+    if run is None:
+        return
+    try:
+        if lock is not None:
+            async with lock:
+                await _execute_list(run_id, session_factory)
+        else:
+            await _execute_list(run_id, session_factory)
+    finally:
+        _running.discard(source)
+
+
+async def _execute_list(run_id: int, session_factory) -> None:
+    async with session_factory() as db:
+        run = await db.get(LgSourceRun, run_id)
+        tracker = progress.tracker(run_key(run_id)) or progress.start(run_key(run_id), "Функции по базе", [])
+        tracker.run()
+        run.status, run.started_at = "running", service.utcnow()
+        await db.commit()
+        ids = list(run.params.get("company_ids") or [])
+        result = {"found": len(ids), "new": 0, "updated": 0, "skipped": 0, "signals": {}, "errors": {}, "chain": {}}
+        try:
+            for code in run.params.get("steps") or []:
+                adapter, row = await adapter_row(db, code)
+                settings = source_settings.plain(adapter, row.settings)
+                summary = {"found": 0, "updated": 0, "done": 0, "skipped": 0, "failed": 0,
+                           "signals": {}, "errors": {}, "reasons": {}}
+                result["chain"][code] = summary
+                reason = "источник выключен" if not row.enabled else adapter.ready(settings)
+                if reason:
+                    summary["skipped"] = len(ids)
+                    summary["reasons"][reason] = len(ids)
+                    result["errors"][code] = f"{adapter.title}: {reason}"
+                    tracker.end(code, "skipped", reason)
+                    continue
+                started = time.monotonic()
+                units = await _enrich_all(db, run, adapter, settings, tracker, summary, ids=ids)
+                if units:
+                    jr_timing.learn(adapter, row, time.monotonic() - started, units, persist=True)
+                source_settings.mark(row, service.utcnow(), next(iter(summary["errors"].values()), None))
+                result["updated"] += summary["done"]
+                for kind, n in summary["signals"].items():
+                    result["signals"][kind] = result["signals"].get(kind, 0) + n
+                if summary["errors"]:
+                    result["errors"][code] = next(iter(summary["errors"].values()))
+                run.stats = {**(run.stats or {}), "result": deepcopy(result)}
+                await db.commit()
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("leadgen list run %s failed", run_id)
+            await db.rollback()
+            run = await db.get(LgSourceRun, run_id)
+            message = short_error(exc)
+            run.status, run.error, run.finished_at = "failed", message, service.utcnow()
+            run.stats = {**(run.stats or {}), "result": deepcopy(result)}
+            await db.commit()
+            tracker.finish("error", f"Ошибка: {message}")
+            return
+        run.status, run.finished_at = "done", service.utcnow()
+        run.stats = {**(run.stats or {}), "result": deepcopy(result)}
+        await db.commit()
+        parts = [f"{REGISTRY[c].title}: {s['done']}" for c, s in result["chain"].items()]
+        tracker.finish("done", "Готово — " + "; ".join(parts))

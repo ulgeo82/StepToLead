@@ -1,0 +1,38 @@
+{
+ "content": [
+  {
+   "id": 900001,
+   "inn": "<strong>6312000014</strong>",
+   "shortName": "ООО \"КУХНИ ВОЛГИ\"",
+   "ogrn": "1236300000001",
+   "region": "САМАРСКАЯ ОБЛАСТЬ",
+   "okved2": "31.02",
+   "statusCode": "ACTIVE"
+  }
+ ],
+ "pageable": {
+  "pageNumber": 0,
+  "pageSize": 20,
+  "sort": {
+   "unsorted": true,
+   "sorted": false,
+   "empty": true
+  },
+  "offset": 0,
+  "paged": true,
+  "unpaged": false
+ },
+ "totalPages": 1,
+ "totalElements": 1,
+ "last": true,
+ "first": true,
+ "numberOfElements": 1,
+ "size": 20,
+ "number": 0,
+ "sort": {
+  "unsorted": true,
+  "sorted": false,
+  "empty": true
+ },
+ "empty": false
+}

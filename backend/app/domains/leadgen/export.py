@@ -153,3 +153,36 @@ def _render(companies, contacts, ads, base_url: str, preset: str = "full", lists
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
+
+
+async def build_csv(db: AsyncSession, companies: list[LgCompany], *, base_url: str = "", preset: str = "full",
+                    lists: dict[int, list[dict]] | None = None) -> bytes:
+    """Те же колонки и значения, что в Excel: UTF-8 с BOM (Excel откроет кириллицу), разделитель «;»."""
+    import csv
+    import io
+    ids = [c.id for c in companies]
+    contacts: dict[int, list[LgContact]] = defaultdict(list)
+    ads: dict[int, list[LgAd]] = defaultdict(list)
+    for i in range(0, len(ids), 500):
+        chunk = ids[i:i + 500]
+        for row in (await db.execute(select(LgContact).where(LgContact.company_id.in_(chunk))
+                                     .order_by(LgContact.is_primary.desc(), LgContact.id))).scalars():
+            contacts[row.company_id].append(row)
+        for row in (await db.execute(select(LgAd).where(LgAd.company_id.in_(chunk))
+                                     .order_by(LgAd.last_seen_at.desc()))).scalars():
+            ads[row.company_id].append(row)
+    names = PRESETS.get(preset) or PRESETS["full"]
+    portal = (base_url or "").rstrip("/")
+    buf = io.StringIO()
+    writer = csv.writer(buf, delimiter=";", lineterminator="\r\n")
+    writer.writerow(names)
+    for c in companies:
+        values = _values(c, contacts, ads, portal, lists or {})
+        writer.writerow([_csv_cell(values[name]) for name in names])
+    return ("﻿" + buf.getvalue()).encode("utf-8")
+
+
+def _csv_cell(value) -> str:
+    text = "" if value is None else str(value)
+    # формулы в чужих данных (название «=HYPERLINK(...)») Excel не исполняет — экранируем апострофом
+    return "'" + text if text[:1] in ("=", "+", "-", "@") else text

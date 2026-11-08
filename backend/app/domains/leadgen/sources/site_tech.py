@@ -66,6 +66,7 @@ class SiteTechSource(CompanySource):
         {"key": "site_platform", "field": "site_platform", "label": "Платформа сайта (Тильда, WordPress…)"},
         {"key": "has_metrika", "field": "has_metrika_text", "label": "Есть Метрика: да / нет"},
         {"key": "calltracking", "field": "calltracking_text", "label": "Коллтрекинг (Calltouch…) или пусто"},
+        {"key": "has_calltracking", "field": "has_calltracking_text", "label": "Есть коллтрекинг: да / нет"},
         {"key": "footer_year", "field": "footer_year", "label": "Год в подвале сайта"},
         {"key": "mobile_speed", "field": "mobile_speed", "label": "Скорость на телефоне 0–100"},
     ]
@@ -132,6 +133,7 @@ class SiteTechSource(CompanySource):
         data["site_platform"] = data["platform_title"] or ""
         data["has_metrika_text"] = "да" if data["has_metrika"] else ("" if hidden else "нет")
         data["calltracking_text"] = ", ".join(TRACKING_TITLES.get(c, c) for c in data["calltracking"])
+        data["has_calltracking_text"] = "да" if data["calltracking"] else ("" if hidden else "нет")
         return Enrichment(status="done", profile=data, signals=signals)
 
     async def _pagespeed(self, url: str, key: str, ctx: Context) -> tuple[int | None, str | None]:

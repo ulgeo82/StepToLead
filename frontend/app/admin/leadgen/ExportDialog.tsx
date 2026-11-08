@@ -20,6 +20,7 @@ export default function ExportDialog({
   filterLabel,
   selectedIds = [],
   initialLists = [],
+  format = "xlsx",
 }: {
   close: () => void;
   done?: () => void;
@@ -29,6 +30,7 @@ export default function ExportDialog({
   filterLabel?: string;
   selectedIds?: number[];
   initialLists?: number[];
+  format?: "xlsx" | "csv";
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [source, setSource] = useState<Source>(
@@ -101,7 +103,7 @@ export default function ExportDialog({
     };
   }, [queryKey, ready]);
 
-  const href = `${API_URL}/api${base}/companies/export?${query}`;
+  const href = `${API_URL}/api${base}/companies/export?${query}${format === "csv" ? "&format=csv" : ""}`;
   const toggle = (id: number, on: boolean) => setChosen((ids) => (on ? [...ids, id] : ids.filter((x) => x !== id)));
 
   return (
@@ -115,7 +117,7 @@ export default function ExportDialog({
         aria-labelledby="export-title"
         className={`${styles.card} ${styles.modal} ${styles.modalWide}`}
       >
-        <h2 id="export-title">Выгрузка в Excel</h2>
+        <h2 id="export-title">Выгрузка в {format === "csv" ? "CSV" : "Excel"}</h2>
 
         <fieldset className={styles.formFieldset}>
           <legend className={styles.legend}>Что выгрузить</legend>
@@ -224,7 +226,7 @@ export default function ExportDialog({
               setTimeout(() => done?.(), 1500);
             }}
           >
-            {started ? "Скачивается…" : "Скачать Excel"}
+            {started ? "Скачивается…" : format === "csv" ? "Скачать CSV" : "Скачать Excel"}
           </a>
           <button type="button" className={styles.secondary} onClick={close}>
             {started ? "Готово" : "Отмена"}

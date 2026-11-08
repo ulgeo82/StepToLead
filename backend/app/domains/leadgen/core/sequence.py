@@ -12,6 +12,8 @@ TASK_CHANNELS = {"call": ("CALL", "Позвонить"), "whatsapp": ("MESSAGE",
                  "telegram": ("MESSAGE", "Написать в Telegram")}
 VARIABLES = ("company", "domain", "city", "niche", "ad_title", "ad_text", "director_name", "director_first_name",
              "sender_name")
+# Переменные источников компаний ({{site_platform}}, {{personal_line}}…): реестр sources/ дописывает их сюда сам.
+EXTRA_VARIABLES: list[str] = []
 MAX_STEPS = 10
 # Переменные: стандартные (латиница) и свои из столбцов файла кампании — можно по-русски: {{боль}}, {{имя}}.
 _VAR = re.compile(r"\{\{\s*([0-9a-zа-яё_]+)\s*(?:\|([^}]*))?\}\}", re.I)
@@ -49,7 +51,7 @@ class Window:
 
 def parse_steps(raw: list[dict], extra: tuple | list | set = (), strict: bool = True) -> list[Step]:
     """strict=False — при отправке (переменные уже проверены при сохранении, у кампании есть свои)."""
-    allowed = set(VARIABLES) | {v.lower() for v in extra}
+    allowed = set(VARIABLES) | set(EXTRA_VARIABLES) | {v.lower() for v in extra}
     if not raw or len(raw) > MAX_STEPS:
         raise SequenceError(f"В цепочке должно быть от 1 до {MAX_STEPS} шагов")
     steps = []
