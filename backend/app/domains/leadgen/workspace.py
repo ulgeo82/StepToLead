@@ -60,11 +60,17 @@ async def get_list(db: AsyncSession, ws: int, list_id: int) -> LgList:
     return lst
 
 
+# Откуда компания пришла в базу — только источники находок. Дообогащение (чистка названий, DaData, поиск сайта…)
+# тоже пишет provenance, но источником компании не является.
+ORIGINS = {"yandex_direct": "Директ", "yandex_organic": "Поисковая выдача", "hh": "hh.ru", "trudvsem": "Работа России",
+           "twogis": "2ГИС", "import": "Импорт", "manual": "Вручную"}
+
+
 def _source(c: LgCompany) -> str | None:
     prov = c.provenance or {}
     entries = [(v.get("at") or "", v.get("source")) for k, v in prov.items()
-               if isinstance(v, dict) and v.get("source") and k != "stage_before_hide"]
-    return min(entries)[1] if entries else None
+               if isinstance(v, dict) and v.get("source") in ORIGINS and k != "stage_before_hide"]
+    return ORIGINS[min(entries)[1]] if entries else None
 
 
 async def rows(db: AsyncSession, ws: int, list_id: int) -> list[dict]:

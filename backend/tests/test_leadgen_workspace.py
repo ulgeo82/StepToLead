@@ -1,6 +1,7 @@
 """Рабочее место базы: таблица и фильтры колонок, совпадения, сводка, очистка (preview = apply), правка ячейки,
 «на проверку», CSV, запуск функций по базе, новые источники, переменные писем. Без сети, ИИ подменяется."""
 import asyncio
+import unittest
 import csv
 import io
 import json
@@ -412,3 +413,13 @@ class VariablesTests(WorkspaceBase):
 async def _ctx(db, cid):
     from app.domains.leadgen import sequences
     return await sequences._context(db, await db.get(LgCompany, cid), None)
+
+
+class SourceColumnTests(unittest.TestCase):
+    def test_source_is_origin_not_enricher(self):
+        from types import SimpleNamespace
+        from app.domains.leadgen.workspace import _source
+        c = SimpleNamespace(provenance={"display_name": {"source": "name_clean", "at": "2026-01-01"},
+                                        "domain": {"source": "yandex_direct", "at": "2026-02-01"}})
+        self.assertEqual(_source(c), "Директ")            # чистка названия — не источник компании
+        self.assertIsNone(_source(SimpleNamespace(provenance={"inn": {"source": "dadata", "at": "x"}})))
