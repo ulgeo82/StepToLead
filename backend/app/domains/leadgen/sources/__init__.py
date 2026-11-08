@@ -12,7 +12,7 @@ from app.domains.leadgen.sources.base import (  # noqa: F401 — общий им
     short_error,
 )
 
-ORDER = ("site_tech",)
+ORDER = ("site_tech", "serp", "hiring")
 
 
 def _load() -> dict[str, CompanySource]:

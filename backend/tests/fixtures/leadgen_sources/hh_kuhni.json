@@ -1,0 +1,49 @@
+{
+ "items": [
+  {
+   "id": "h1",
+   "name": "Дизайнер кухонь",
+   "area": {
+    "name": "Самара"
+   },
+   "employer": {
+    "id": "555",
+    "name": "Мебель Стиль",
+    "alternate_url": "https://hh.ru/employer/555"
+   },
+   "alternate_url": "https://hh.ru/vacancy/h1",
+   "published_at": "2026-11-07T10:00:00+0300",
+   "schedule": {
+    "id": "fullDay"
+   }
+  },
+  {
+   "id": "h2",
+   "name": "Дизайнер кухонь",
+   "area": {
+    "name": "Москва"
+   },
+   "employer": {
+    "id": "777",
+    "name": "Столичные кухни"
+   },
+   "alternate_url": "https://hh.ru/vacancy/h2",
+   "published_at": "2026-11-07T10:00:00+0300"
+  },
+  {
+   "id": "h3",
+   "name": "Дизайнер кухонь",
+   "area": {
+    "name": "Самара"
+   },
+   "employer": {
+    "id": "888",
+    "name": "Кадровое агентство Старт"
+   },
+   "alternate_url": "https://hh.ru/vacancy/h3",
+   "published_at": "2026-11-07T10:00:00+0300"
+  }
+ ],
+ "pages": 1,
+ "found": 3
+}

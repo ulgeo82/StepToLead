@@ -14,7 +14,9 @@ from datetime import timedelta
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domains.jobradar import leads
 from app.domains.jobradar import timing as jr_timing
+from app.domains.leadgen.core.normalize import normalize_domain
 from app.domains.leadgen import service, source_settings
 from app.domains.leadgen.core.scoring import REASON_LABELS
 from app.domains.leadgen.models import (
@@ -118,6 +120,7 @@ async def resolve_target(db: AsyncSession, ws: int, target: dict | None) -> list
 
 
 def clean_query(adapter: CompanySource, query: dict | None) -> dict:
+    """Значения формы по query_schema: типы, min/max, варианты multi/select, обязательные поля (adapter.missing)."""
     query = dict(query or {})
     specs = {s["key"]: s for s in adapter.query_schema}
     unknown = [k for k in query if k not in specs]
@@ -126,19 +129,37 @@ def clean_query(adapter: CompanySource, query: dict | None) -> dict:
     out = {}
     for key, spec in specs.items():
         value = query.get(key, spec.get("default"))
+        kind = spec.get("type")
         empty = value in (None, "", [])
-        if spec.get("required") and empty:
-            raise RunError(422, f"Заполните поле «{spec['label']}»")
-        if spec.get("type") == "number" and not empty:
+        label = spec["label"]
+        if kind == "number" and not empty:
             try:
                 value = int(value)
             except (TypeError, ValueError):
-                raise RunError(422, f"«{spec['label']}»: нужно число")
+                raise RunError(422, f"«{label}»: нужно число")
             if spec.get("min") is not None and value < spec["min"] or spec.get("max") is not None and value > spec["max"]:
-                raise RunError(422, f"«{spec['label']}»: от {spec.get('min', 0)} до {spec.get('max', '…')}")
-        if spec.get("type") == "list" and isinstance(value, str):
-            value = [v.strip() for v in value.splitlines() if v.strip()]
+                raise RunError(422, f"«{label}»: от {spec.get('min', 0)} до {spec.get('max', '…')}")
+        elif kind == "list":
+            items = value.splitlines() if isinstance(value, str) else list(value or [])
+            value = list(dict.fromkeys(str(v).strip()[:200] for v in items if str(v).strip()))[:500]
+        elif kind in ("multi", "select") and not empty:
+            allowed = {o["value"] for o in spec.get("options") or []}
+            values = value if isinstance(value, list) else [value]
+            bad = [v for v in values if v not in allowed]
+            if bad or (kind == "select" and isinstance(value, list)):
+                raise RunError(422, f"«{label}»: нет варианта «{(bad or values)[0]}»")
+            value = list(dict.fromkeys(values)) if kind == "multi" else value
+        elif kind == "bool":
+            value = bool(value)
+        elif kind in ("text", "region") and not empty:
+            value = str(value).strip()[:1000]
         out[key] = value
+    label = adapter.missing(out)
+    if label:
+        raise RunError(422, f"Заполните поле «{label}»")
+    problem = adapter.problem(out)
+    if problem:
+        raise RunError(422, problem)
     return out
 
 
@@ -166,7 +187,8 @@ async def estimate(db: AsyncSession, ws: int, code: str, *, query: dict | None, 
         companies = len(ids)
         units = await _with_site(db, ids)
     else:
-        units = adapter.units(clean_query(adapter, query), {}, settings)
+        query = clean_query(adapter, query)
+        units = adapter.units(query, {}, settings)
     rounds = math.ceil(max(1, units) / max(1, adapter.concurrency)) if units else 0
     work = round(rounds * _unit_seconds(adapter, row, settings), 1)
     save = round(0.5 + SAVE_SECONDS * (companies if companies is not None else units * 10), 1)
@@ -175,6 +197,9 @@ async def estimate(db: AsyncSession, ws: int, code: str, *, query: dict | None, 
                      {"code": "save", "name": "Запись в базу", "seconds": save}]}
     if companies is not None:
         out["companies"] = companies
+    cost = adapter.cost(query or {}, settings) if adapter.kind == "finder" else None
+    if cost:
+        out["cost"] = cost
     return out
 
 
@@ -381,8 +406,13 @@ async def _find(db, run, adapter, settings, tracker, result) -> int:
     tracker.begin(adapter.code, total=units)
     ctx = source_settings.context()
     ctx.on_request = lambda: tracker.tick(adapter.code)
+    ctx.cache["errors"] = {}
+    ctx.cache["leadgen_settings"] = await service.get_settings(db)
     candidates = await adapter.fetch(query, settings, ctx)
-    tracker.end(adapter.code, note=f"найдено {len(candidates)}")
+    errors = ctx.cache.get("errors") or {}
+    result["errors"].update(errors)
+    note = f"найдено {len(candidates)}" + ("; " + "; ".join(errors.values()) if errors else "")
+    tracker.end(adapter.code, note=note[:200])
     tracker.begin("save", total=len(candidates))
     name = run.params.get("list_name") or f"{adapter.title} — {service.utcnow():%d.%m.%Y %H:%M}"
     lst = LgList(workspace_id=run.workspace_id, name=name[:180], kind="run", run_id=run.id,
@@ -392,9 +422,13 @@ async def _find(db, run, adapter, settings, tracker, result) -> int:
     ids, new_ids, seen = [], [], set()
     for cand in candidates:
         tracker.tick("save")
+        domain = normalize_domain(cand.finding.domain) if cand.finding.domain else None
+        if await leads._domain_blocked(db, run.workspace_id, domain, service.utcnow()):
+            result["skipped"] += 1    # стоп-лист по домену: компанию даже не заводим
+            continue
         res = await service.upsert_company(db, run.workspace_id, cand.finding)
         company = res.company
-        if company is None:
+        if company is None or await leads._company_blocked(db, company, service.utcnow()):
             result["skipped"] += 1
             continue
         if company.id in seen:

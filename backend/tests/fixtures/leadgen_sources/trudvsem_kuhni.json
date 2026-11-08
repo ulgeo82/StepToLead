@@ -1,0 +1,110 @@
+{
+ "status": "200",
+ "meta": {
+  "total": 5,
+  "limit": 100
+ },
+ "results": {
+  "vacancies": [
+   {
+    "vacancy": {
+     "id": "tv1",
+     "source": "Работа России",
+     "job-name": "Дизайнер кухонь",
+     "company": {
+      "name": "ООО «Кухни Волги»",
+      "inn": "6312000014",
+      "site": "kuhni-volgi.ru"
+     },
+     "region": {
+      "region_code": "6300000000000",
+      "name": "Самарская область"
+     },
+     "salary_min": 60000,
+     "vac_url": "https://trudvsem.ru/vacancy/card/1/tv1",
+     "creation-date": "2026-11-05",
+     "contact_list": [
+      {
+       "contact_type": "Эл. почта",
+       "contact_value": "info@kuhni-volgi.ru"
+      },
+      {
+       "contact_type": "Эл. почта",
+       "contact_value": "anna.ivanova@kuhni-volgi.ru"
+      },
+      {
+       "contact_type": "Телефон",
+       "contact_value": "+7 (846) 200-10-20"
+      }
+     ]
+    }
+   },
+   {
+    "vacancy": {
+     "id": "tv2",
+     "source": "Работа России",
+     "job-name": "Замерщик кухонь",
+     "company": {
+      "name": "ООО «Кухни Волги»",
+      "inn": "6312000014"
+     },
+     "region": {
+      "region_code": "6300000000000",
+      "name": "Самарская область"
+     },
+     "vac_url": "https://trudvsem.ru/vacancy/card/1/tv2",
+     "creation-date": "2026-11-06"
+    }
+   },
+   {
+    "vacancy": {
+     "id": "tv3",
+     "source": "Работа России",
+     "job-name": "Дизайнер кухонь",
+     "company": {
+      "name": "КА Персонал-Плюс",
+      "inn": "6312000099",
+      "hr-agency": true
+     },
+     "region": {
+      "region_code": "6300000000000",
+      "name": "Самарская область"
+     },
+     "vac_url": "https://trudvsem.ru/x/tv3"
+    }
+   },
+   {
+    "vacancy": {
+     "id": "tv4",
+     "source": "Работа России",
+     "job-name": "Дизайнер кухонь",
+     "company": {
+      "name": "АО «Тандер»",
+      "inn": "2310031475"
+     },
+     "region": {
+      "region_code": "6300000000000",
+      "name": "Самарская область"
+     },
+     "vac_url": "https://trudvsem.ru/x/tv4"
+    }
+   },
+   {
+    "vacancy": {
+     "id": "tv5",
+     "source": "Работа России",
+     "job-name": "Водитель",
+     "company": {
+      "name": "ООО «Транс»",
+      "inn": "6312000077"
+     },
+     "region": {
+      "region_code": "6300000000000",
+      "name": "Самарская область"
+     },
+     "vac_url": "https://trudvsem.ru/x/tv5"
+    }
+   }
+  ]
+ }
+}

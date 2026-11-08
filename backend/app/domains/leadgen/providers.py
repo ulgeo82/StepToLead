@@ -113,6 +113,11 @@ def parse_xmlstock_page(raw: str, keyword: str) -> SerpPage:
     return SerpPage(ads, organic, has_blocks)
 
 
+# Параметр номера страницы органической выдачи в XMLStock Live. None — ещё не сверен живым запросом:
+# тогда «Поисковая выдача» берёт только первую страницу (см. scripts/xmlstock_page_check.py).
+PAGE_PARAM: str | None = None
+
+
 class XmlStockLiveProvider:
     name = "xmlstock_live"
 
@@ -127,12 +132,16 @@ class XmlStockLiveProvider:
         if not (self.user and self.key and self.url):
             raise ProviderNotConfigured("XMLSTOCK_USER, XMLSTOCK_KEY и XMLSTOCK_LIVE_URL не заданы")
 
-    async def fetch_raw(self, keyword: str, region_code: int | None, device: str = "desktop") -> str:
+    async def fetch_raw(self, keyword: str, region_code: int | None, device: str = "desktop", page_no: int = 0) -> str:
         # ads=1 обязателен: без него XMLStock Live не отдаёт рекламные блоки.
         params = {"user": self.user, "key": self.key, "query": keyword, "ads": 1, "device": device,
                   **self.extra_params}
         if region_code:
             params["lr"] = region_code
+        if page_no:
+            if not PAGE_PARAM:
+                raise ProviderError("страницы выдачи дальше первой ещё не включены")
+            params[PAGE_PARAM] = page_no
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             resp = await client.get(self.url, params=params)
             resp.raise_for_status()
@@ -158,7 +167,10 @@ class XmlStockLiveProvider:
     async def search(self, keyword: str, region_code: int | None) -> list[SerpAd]:
         return (await self.search_page(keyword, region_code)).ads
 
-    async def search_page(self, keyword: str, region_code: int | None, device: str = "desktop") -> SerpPage:
+    async def search_page(self, keyword: str, region_code: int | None, device: str = "desktop",
+                          page_no: int = 0) -> SerpPage:
+        if page_no and not PAGE_PARAM:
+            raise ProviderError("страницы выдачи дальше первой ещё не включены")
         last: Exception | None = None
         page: SerpPage | None = None
         for attempt in range(self.retries):
@@ -166,7 +178,9 @@ class XmlStockLiveProvider:
                 await asyncio.sleep(self.retry_pause)
             await self._throttle()
             try:
-                page = parse_xmlstock_page(await self.fetch_raw(keyword, region_code, device), keyword)
+                raw = await self.fetch_raw(keyword, region_code, device, page_no) if page_no else \
+                    await self.fetch_raw(keyword, region_code, device)
+                page = parse_xmlstock_page(raw, keyword)
                 # Без рекламных блоков повторяем один раз; если и во второй раз нет — значит, её правда нет.
                 if page.has_ad_blocks or attempt >= 1:
                     return page

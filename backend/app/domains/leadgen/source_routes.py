@@ -1,14 +1,14 @@
 """API «Источники компаний»: /api/admin/leadgen/sources/* и прогресс запуска. Контракт — SOURCES.md."""
 from __future__ import annotations
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.access import require_admin
 from app.db import get_db
 from app.domains.leadgen import routes as lg_routes
-from app.domains.leadgen import source_runner, source_settings
+from app.domains.leadgen import ai_queries, source_runner, source_settings
 from app.domains.leadgen.models import LgSourceRun
 from app.domains.leadgen.sources import REGISTRY, short_error
 from app.models.access import AdminUser
@@ -112,3 +112,51 @@ async def run_progress(run_id: int, db: AsyncSession = Depends(get_db), admin: A
     if run is None or run.workspace_id != lg_routes.workspace_id():
         raise HTTPException(404, "Запуск не найден")
     return progress.get(source_runner.run_key(run_id)) or {"state": "idle"}
+
+
+# ---------------------------------------------------------------- ИИ-подбор запросов
+
+ai_complete = None   # подмена ai.complete в тестах
+
+
+class AiQueriesIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    purpose: str = Field(pattern=r"^(direct|search|jobs)$")
+    niche: str = Field(default="", max_length=200)
+    brief: str | None = Field(default=None, max_length=20000)
+    region: str | None = Field(default=None, max_length=120)
+    count: int = Field(default=30, ge=10, le=60)
+
+
+async def _suggest(purpose, niche, brief, region, count):
+    try:
+        return await ai_queries.suggest(purpose, niche, brief=brief, region=region, count=count,
+                                        workspace_id=lg_routes.workspace_id(), complete=ai_complete)
+    except ai_queries.QueryError as exc:
+        raise HTTPException(exc.status, exc.detail)
+
+
+@router.post("/ai/queries")
+async def ai_queries_text(payload: AiQueriesIn, admin: AdminUser = Depends(require_admin)):
+    return await _suggest(payload.purpose, payload.niche, payload.brief, payload.region, payload.count)
+
+
+@router.post("/ai/queries/pdf")
+async def ai_queries_pdf(file: UploadFile = File(...), purpose: str = Form(...), niche: str = Form(""),
+                         brief: str | None = Form(None), region: str | None = Form(None), count: int = Form(30),
+                         admin: AdminUser = Depends(require_admin)):
+    if purpose not in ai_queries.PURPOSES:
+        raise HTTPException(422, "Неизвестное назначение подбора")
+    if not niche.strip():
+        raise HTTPException(422, "Укажите нишу")
+    if not 10 <= count <= 60:
+        raise HTTPException(422, "Количество — от 10 до 60")
+    data = await file.read(ai_queries.MAX_PDF_BYTES + 1)
+    if len(data) > ai_queries.MAX_PDF_BYTES:
+        raise HTTPException(422, "PDF больше 10 МБ")
+    try:
+        text = ai_queries.pdf_text(data)
+    except ai_queries.QueryError as exc:
+        raise HTTPException(exc.status, exc.detail)
+    combined = "\n\n".join(p for p in ((brief or "").strip(), text) if p)
+    return await _suggest(purpose, niche, combined, region, count)

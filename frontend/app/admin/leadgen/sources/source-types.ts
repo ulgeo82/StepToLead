@@ -1,10 +1,12 @@
 import type { Estimate } from "@/components/task-progress";
+import type { QueryPurpose } from "../ai-query-utils";
 
 export type Values = Record<string, unknown>;
 export type Field = {
   key: string;
   label: string;
-  type: "text" | "number" | "bool" | "list" | "secret" | "select" | "region";
+  type: "text" | "number" | "bool" | "list" | "secret" | "select" | "region" | "multi";
+  ai?: { purpose: QueryPurpose };
   default?: unknown;
   hint?: string;
   options?: { value: string | number; label: string }[];
@@ -32,7 +34,9 @@ export type CompanySource = {
 };
 export type Target = { list_id: number } | { segment_id: number };
 export type RunBody = { query?: Values; target?: Target; list_name?: string };
-export type SourceEstimate = Estimate & { units: number; companies?: number };
+export type SourceEstimate = Estimate & {
+  units: number; companies?: number; cost?: { requests: number; rub: number | null };
+};
 export type SourceRun = {
   id: number;
   source: string;
@@ -70,6 +74,8 @@ export function normalize(schema: Field[], values: Values): Values {
     } else if (field.type === "list") {
       result[field.key] = Array.isArray(value) ? value : String(value ?? "").split(/\r?\n/)
         .map(line => line.trim()).filter(Boolean);
+    } else if (field.type === "multi") {
+      result[field.key] = Array.isArray(value) ? [...new Set(value)] : [];
     } else if (field.type === "number") {
       if (value !== "" && value != null && Number.isFinite(Number(value))) result[field.key] = Number(value);
     } else if (value !== "" && value != null) result[field.key] = value;
@@ -82,11 +88,18 @@ export function valid(schema: Field[], values: Values): boolean {
   const body = normalize(schema, values);
   return schema.every(field => {
     const value = body[field.key];
+    if (field.type === "number" && values[field.key] !== "" && values[field.key] != null && value == null) {
+      return false;
+    }
     if (field.required && (value == null || value === "" ||
       (Array.isArray(value) && !value.length) || (typeof value === "string" && !value.trim()))) return false;
     if (field.type === "number" && value != null) {
       return Number.isFinite(Number(value)) && (field.min == null || Number(value) >= field.min) &&
         (field.max == null || Number(value) <= field.max);
+    }
+    if (field.type === "multi" && field.key in values) {
+      return Array.isArray(values[field.key]) && (value as unknown[]).every(item =>
+        field.options?.some(option => option.value === item));
     }
     return true;
   });

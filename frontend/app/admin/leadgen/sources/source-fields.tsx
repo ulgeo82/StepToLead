@@ -2,6 +2,8 @@
 
 import styles from "../leadgen.module.css";
 import type { Field, Values } from "./source-types";
+import { AiQueryPicker } from "../ai-query-picker";
+import { mergeQueries, queryLines } from "../ai-query-utils";
 
 export function SourceFields({ schema, values, saved = {}, prefix, changed }: {
   schema: Field[]; values: Values; saved?: Values; prefix: string; changed: (value: Values) => void;
@@ -15,6 +17,17 @@ export function SourceFields({ schema, values, saved = {}, prefix, changed }: {
     const id = `${prefix}-${field.key}`;
     const configured = secret && typeof saved[field.key] === "object" &&
       (saved[field.key] as { set?: boolean } | null)?.set === true;
+    if (field.type === "multi") {
+      const selected = Array.isArray(value) ? value : [];
+      return <fieldset key={field.key} className={styles.multiOptions}>
+        <legend>{field.label}{field.required ? " *" : ""}</legend>
+        {field.options?.map(option => <label key={String(option.value)} className={styles.check}>
+          <input type="checkbox" checked={selected.includes(option.value)} onChange={e =>
+            set(e.target.checked ? [...selected, option.value] : selected.filter(item => item !== option.value))}/>
+          <span>{option.label}</span></label>)}
+        {field.hint && <small className={styles.hint}>{field.hint}</small>}
+      </fieldset>;
+    }
     if (field.type === "bool") return <label key={field.key} className={styles.check}>
       <input type="checkbox" checked={!!value} onChange={e => set(e.target.checked)}/>
       <span>{field.label}{field.hint && <small className={styles.hint}>{field.hint}</small>}</span>
@@ -36,6 +49,8 @@ export function SourceFields({ schema, values, saved = {}, prefix, changed }: {
         autoComplete={secret ? "new-password" : "off"} spellCheck={!secret}
         onChange={e => set(e.target.value)}/>}
       {field.type === "list" && <small>Одно значение на строку.</small>}
+      {field.type === "list" && field.ai && <AiQueryPicker purpose={field.ai.purpose}
+        added={queries => set(mergeQueries(queryLines(value), queries).join("\n"))}/>}
       {field.hint && <small>{field.hint}</small>}
       {secret && configured && <button type="button" className={styles.secondary} onClick={() => set("")}>
         Удалить ключ при сохранении</button>}

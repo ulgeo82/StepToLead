@@ -71,7 +71,25 @@ class CompanySource(Adapter):
         """finder: сколько запросов сделает поиск по query (для оценки). enricher: раннер считает по компаниям."""
         return max(1, len((query or {}).get("keywords") or []) or 1)
 
+    def missing(self, query: dict) -> str | None:
+        """Какое обязательное поле формы не заполнено (подпись) — None, если всё есть. Источник может ослабить
+        правило: например, «Нанимают в нише» со ссылкой поиска hh не требует названий вакансий и города."""
+        for spec in self.query_schema:
+            if spec.get("required") and query.get(spec["key"]) in (None, "", []):
+                return spec["label"]
+        return None
+
+    def problem(self, query: dict) -> str | None:
+        """Что не так в форме, кроме пустых обязательных полей (422 с этим текстом). None — всё в порядке."""
+        return None
+
+    def cost(self, query: dict, settings: dict) -> dict | None:
+        """Цена запуска до старта: {"requests": int, "rub": float|None} или None — бесплатно/неизвестно."""
+        return None
+
     async def fetch(self, query: dict, settings: dict, ctx: Context) -> list[Candidate]:   # type: ignore[override]
+        """Ошибки отдельных площадок/запросов, из-за которых запуск не падает, кладите в
+        ctx.cache["errors"][код] = "коротко по-русски" — раннер покажет их в result.errors и в шагах прогресса."""
         raise NotImplementedError
 
     async def enrich(self, company: CompanyView, settings: dict, ctx: Context) -> Enrichment:

@@ -5,6 +5,8 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { Advertisement, base, companyName, date, message, money, PageHeader, post, Run, Score } from "../shared";
 import styles from "../leadgen.module.css";
+import { AiQueryPicker } from "../ai-query-picker";
+import { mergeQueries, queryLines } from "../ai-query-utils";
 
 const statusNames: Record<string, string> = {
   queued: "В очереди",
@@ -225,16 +227,19 @@ export default function SearchPage() {
               />
               <small>Москва — 213, Санкт-Петербург — 2, Екатеринбург — 54</small>
             </label>
-            <label className={`${styles.field} ${styles.wide}`}>
-              Ключевые слова
+            <div className={`${styles.field} ${styles.wide}`}>
+              <label htmlFor="direct-keywords">Ключевые слова</label>
               <textarea
+                id="direct-keywords"
                 value={text}
                 onChange={(e) => setText(e.target.value)}
                 placeholder={"кухни на заказ\nкорпусная мебель"}
                 required
               />
               <small>{keywords.length} уникальных ключевых слов · по одному на строку · максимум 500</small>
-            </label>
+              <AiQueryPicker purpose="direct" added={queries =>
+                setText(current => mergeQueries(queryLines(current), queries).join("\n"))}/>
+            </div>
           </div>
           <label className={styles.check}>
             <input type="checkbox" checked={enrich} onChange={(e) => setEnrich(e.target.checked)} />

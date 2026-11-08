@@ -7,6 +7,7 @@ import { EstimateHint, ProgressSnapshot, TaskProgress } from "@/components/task-
 import { base, LeadList, Segment, signalLabels } from "../shared";
 import styles from "../leadgen.module.css";
 import { SourceFields } from "./source-fields";
+import { SourceCost } from "./source-cost";
 import {
   CompanySource, defaults, normalize, RunBody, shortError, SourceEstimate, SourceRun, Target, valid, Values,
 } from "./source-types";
@@ -118,6 +119,7 @@ export function SourceRunner({ source, lists, segments, targetError, initialList
         </>}
         {estimating && <p role="status">Оцениваем время…</p>}
         {estimate?.key === key && <p><EstimateHint estimate={estimate.value}/>
+          {estimate.value.cost && <> · <SourceCost cost={estimate.value.cost}/></>}
           {estimate.value.companies != null && <small> · компаний: {estimate.value.companies}</small>}</p>}
         {estimateError && <p role="alert" className={styles.error}>{estimateError}
           <button type="button" className={styles.secondary} onClick={() => setResultRevision(n => n + 1)}>

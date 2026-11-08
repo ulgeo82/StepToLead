@@ -26,6 +26,22 @@
 .sourceLaunch .field { margin-bottom: 14px; }
 .sourceResult { margin-top: 14px; overflow-wrap: anywhere; }
 .companyTech { min-width: 0; overflow-wrap: anywhere; }
+.multiOptions { min-width: 0; padding: 12px; margin: 0; border: 1px solid #26324d; border-radius: 10px; }
+.multiOptions legend { padding: 0 5px; }
+.multiOptions .check { margin: 8px 0; overflow-wrap: anywhere; }
+.aiQueryOverlay {
+  position: fixed; inset: 0; z-index: 150; display: flex; justify-content: center; align-items: flex-start;
+  overflow: auto; padding: 24px 16px; background: #050b18d9; box-sizing: border-box; min-width: 0;
+}
+.aiQueryDialog { width: min(600px, 100%); min-width: 0; margin: 0 !important; overflow-wrap: anywhere; }
+.aiQueryDialog :is(input, textarea, select, fieldset) { min-width: 0; max-width: 100%; box-sizing: border-box; }
+.aiQueryDialog .field { margin-bottom: 14px; }
+.aiQueryDialog button { max-width: 100%; white-space: normal; }
+.aiSuggestions { margin-top: 18px; border-top: 1px solid #26324d; padding-top: 16px; }
+.aiSuggestionList { display: grid; gap: 12px; margin: 16px 0; }
+.aiSuggestionList .check { align-items: flex-start; }
+.aiSuggestionList span { min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 430px) { .aiQueryDialog { padding: 16px; } }
 @media (max-width: 850px) { .companySourceGrid { grid-template-columns: 1fr; } }
 @media (max-width: 430px) {
   .companySources .card { padding: 16px; }
