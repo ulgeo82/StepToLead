@@ -72,9 +72,13 @@ async def ensure_run_lists(db: AsyncSession, workspace_id: int) -> int:
     runs = (await db.scalars(select(LgSourceRun).where(LgSourceRun.workspace_id == workspace_id,
                                                        LgSourceRun.status == "done", ~has_list)
                              .order_by(LgSourceRun.id))).all()
+    made = 0
     for run in runs:
+        if (run.params or {}).get("kind") == "enricher":   # дообогащение компании не находит — список ему не нужен
+            continue
         await sync_run(db, run)
-    return len(runs)
+        made += 1
+    return made
 
 
 async def stats(db: AsyncSession, list_ids: list[int]) -> dict[int, dict]:

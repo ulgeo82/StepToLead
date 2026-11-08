@@ -15,6 +15,23 @@ from app.domains.leadgen.core.tech_profile import TRACKING_TITLES, profile
 from app.domains.leadgen.sources.base import CompanySource, CompanyView, Context, Enrichment, SignalIn, short_error
 
 PAGESPEED_URL = "https://www.googleapis.com/pagespeedonline/v5/runPagespeed"
+SITE_TIMEOUT = httpx.Timeout(12, connect=6)   # мёртвый сайт не держит запуск по 40 с
+
+
+async def _robots(http: httpx.AsyncClient, root: str):
+    """robots.txt; (parser|None, «сайт не отвечает»). Таймаут — сайт недоступен, html уже не ждём."""
+    try:
+        resp = await http.get(f"{root}/robots.txt")
+    except httpx.TimeoutException:
+        return None, True
+    except httpx.HTTPError:
+        return None, False
+    if resp.status_code >= 400:
+        return None, False
+    from urllib.robotparser import RobotFileParser
+    parser = RobotFileParser()
+    parser.parse(resp.text.splitlines())
+    return parser, False
 
 
 class SiteTechSource(CompanySource):
@@ -67,9 +84,13 @@ class SiteTechSource(CompanySource):
         now_year = datetime.now(timezone.utc).year
         html, root, blocked, error = None, "", False, None
         async with ctx.http(**{"User-Agent": site_enrich.USER_AGENT, "Accept": "text/html,*/*;q=0.5"}) as http:
+            http.timeout = SITE_TIMEOUT
             for scheme in ("https", "http"):
                 root = f"{scheme}://{company.domain}"
-                robots = await site_enrich._robots(http, root)
+                robots, down = await _robots(http, root)
+                if down:   # не ответил вовремя — по http он тоже не ответит
+                    error = "Timeout"
+                    break
                 if robots is not None and not robots.can_fetch(site_enrich.USER_AGENT, root + "/"):
                     blocked = True
                     break
@@ -77,6 +98,8 @@ class SiteTechSource(CompanySource):
                 if html is not None:
                     break
                 error = err
+                if err and "Timeout" in err:
+                    break
         if blocked:
             return Enrichment(status="skipped", error="robots.txt запрещает обход")
         if html is None:
@@ -85,11 +108,14 @@ class SiteTechSource(CompanySource):
         data = await asyncio.to_thread(profile, html, now_year)
         data["checked_url"] = root + "/"
         signals: list[SignalIn] = []
-        if not data["has_metrika"]:   # без Метрики не видят, откуда заявки с Директа (GA этого не заменяет)
-            signals.append(SignalIn("no_analytics", {"has_ga": data["has_ga"], "gtm": data["has_gtm"]}))
+        # Через Google Tag Manager Метрику и коллтрекинг часто ставят так, что в html их не видно. Тогда
+        # «нет Метрики / нет коллтрекинга» не утверждаем: ложный сигнал = письмо с неправдой о сайте клиента.
+        hidden = data["has_gtm"]
+        if not data["has_metrika"] and not hidden:   # без Метрики не видят, откуда заявки (GA этого не заменяет)
+            signals.append(SignalIn("no_analytics", {"has_ga": data["has_ga"]}))
         if data["calltracking"]:
             signals.append(SignalIn("has_calltracking", {"services": data["calltracking"]}))
-        else:
+        elif not hidden:
             signals.append(SignalIn("no_calltracking", {}))
         years = int(settings.get("outdated_years") or 2)
         if data["footer_year"] and now_year - data["footer_year"] >= years:
@@ -104,7 +130,7 @@ class SiteTechSource(CompanySource):
 
         # Переменные письма — готовыми строками.
         data["site_platform"] = data["platform_title"] or ""
-        data["has_metrika_text"] = "да" if data["has_metrika"] else "нет"
+        data["has_metrika_text"] = "да" if data["has_metrika"] else ("" if hidden else "нет")
         data["calltracking_text"] = ", ".join(TRACKING_TITLES.get(c, c) for c in data["calltracking"])
         return Enrichment(status="done", profile=data, signals=signals)
 

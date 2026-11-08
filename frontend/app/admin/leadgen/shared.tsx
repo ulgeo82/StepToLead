@@ -142,6 +142,7 @@ export type TechProfile = {
   privacy_policy: boolean;
   footer_year: number | null;
   pagespeed_mobile: number | null;
+  tag_manager?: boolean;   // стоит Google Tag Manager — Метрика и коллтрекинг могут быть не видны в коде страницы
 };
 export type CompanyDetail = Company & {
   tech?: TechProfile | null;

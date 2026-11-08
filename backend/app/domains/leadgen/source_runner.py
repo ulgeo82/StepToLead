@@ -294,13 +294,14 @@ async def _enrich_all(db, run, adapter, settings, tracker, result) -> int:
     failures: dict[str, int] = {}
 
     async def one(view: CompanyView) -> Enrichment:
-        tracker.tick(adapter.code)
         try:
             return await adapter.enrich(view, settings, ctx)
         except SourceSkipped as skip:
             return Enrichment(status="skipped", error=str(skip)[:120])
         except Exception as exc:  # noqa: BLE001 — один сайт не валит запуск
             return Enrichment(status="failed", error=short_error(exc))
+        finally:   # отметка по готовности: «проверено 3 из 5» — честно, а не «начато»
+            tracker.tick(adapter.code)
 
     saved = 0
     for start in range(0, len(with_site), CHUNK):
@@ -440,4 +441,5 @@ async def tech_for(db: AsyncSession, company_id: int) -> dict | None:
         "privacy_policy": bool(p.get("has_privacy_policy")),
         "footer_year": p.get("footer_year"),
         "pagespeed_mobile": p.get("mobile_speed"),
+        "tag_manager": bool(p.get("has_gtm")),   # счётчики могут стоять через GTM и не видны в html
     }

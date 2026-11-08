@@ -131,7 +131,10 @@ Tech = {
   "crm_forms": ["amocrm"|"bitrix24"|...],
   "quiz": bool, "privacy_policy": bool,
   "footer_year": int|null,
-  "pagespeed_mobile": int|null                                  // 0–100; null — не проверяли (нет ключа)
+  "pagespeed_mobile": int|null,                                 // 0–100; null — не проверяли (нет ключа)
+  "tag_manager": bool                                           // стоит Google Tag Manager: Метрика и коллтрекинг
+                                                                // могут грузиться через него и не быть видны —
+                                                                // тогда сигналы no_analytics / no_calltracking не ставятся
 }
 ```
 Подписи значений — на экране, неизвестный код показывать как есть.

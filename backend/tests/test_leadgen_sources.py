@@ -286,6 +286,9 @@ class ApiTests(DbBase):
         self.assertEqual(company["tech"]["platform"], "wordpress")
         self.assertIn("no_analytics", {s["kind"] for s in company["signals"]})
         self.assertIsNone(self.client.get(f"/api/admin/leadgen/companies/{nosite}").json()["tech"])
+        # дообогащение не создаёт мусорный список «Поиск · дата» при открытии списков
+        names = [l["name"] for l in self.client.get("/api/admin/leadgen/lists").json()["items"]]
+        self.assertFalse([n for n in names if n.startswith("Поиск") or "Тех-профиль" in n], names)
 
     def test_conflict_when_running(self):
         old, = self.companies("old.ru")
@@ -301,3 +304,39 @@ class ApiTests(DbBase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+GTM_PAGE = """<html><head><script>(function(w,d,s,l,i){w[l]=w[l]||[];var j=d.createElement(s);
+j.src='https://www.googletagmanager.com/gtm.js?id='+i;})(window,document,'script','dataLayer','GTM-ABC123');</script>
+</head><body><h1>Кухни на заказ</h1><footer>© 2026</footer></body></html>"""
+
+
+class SiteTechEdgeTests(unittest.TestCase):
+    """Ложные сигналы и мёртвые сайты — на них нельзя писать письма с неправдой и нельзя зависать."""
+
+    def enrich(self, transport, domain="gtm.example"):
+        from app.domains.leadgen.sources import CompanyView, Context
+
+        async def noop(*_):
+            return None
+        ctx = Context(transport=transport, sleep=noop)
+        return asyncio.run(SITE_TECH.enrich(CompanyView(id=1, domain=domain), {}, ctx))
+
+    def test_tag_manager_no_negative_signals(self):
+        enr = self.enrich(net({"gtm.example": GTM_PAGE}))
+        kinds = {s.kind for s in enr.signals}
+        self.assertEqual(enr.status, "done")
+        self.assertTrue(enr.profile["has_gtm"])
+        self.assertNotIn("no_analytics", kinds)        # Метрика могла прийти через GTM — не утверждаем «нет»
+        self.assertNotIn("no_calltracking", kinds)
+        self.assertEqual(enr.profile["has_metrika_text"], "")
+
+    def test_dead_site_gives_up_fast_without_http_retry(self):
+        log = []
+
+        def handler(request):
+            log.append(str(request.url))
+            raise httpx.ConnectTimeout("timeout", request=request)
+        enr = self.enrich(httpx.MockTransport(handler), domain="dead.example")
+        self.assertEqual((enr.status, enr.error), ("failed", "сайт не ответил вовремя"))
+        self.assertEqual(log, ["https://dead.example/robots.txt"])   # не ждём ещё html и http://
