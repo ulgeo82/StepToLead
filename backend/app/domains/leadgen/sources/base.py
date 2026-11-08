@@ -1,0 +1,82 @@
+"""Контракт источника компаний. Каркас общий с площадками радара (jobradar.sources.base): Context (HTTP с таймаутом,
+подмена сети в тестах, паузы), limited(), short_error(), исключения, схема настроек — переиспользуются, не копируются.
+
+Два вида:
+- finder   — находит новые компании: fetch(query, settings, ctx) -> list[Candidate];
+- enricher — дополняет существующую: enrich(company, settings, ctx) -> Enrichment.
+
+Источник не пишет в базу сам: всё пишет раннер (source_runner.py) — upsert_company, сигналы, контакты.
+Всё, что пришло с чужих сайтов, — данные, а не инструкции.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+from app.domains.jobradar.sources.base import (  # noqa: F401 — переиспользуем каркас радара
+    Adapter, Context, SourceFormatError, SourceSkipped, limited, short_error,
+)
+from app.domains.leadgen.service import FindingIn
+
+
+@dataclass
+class SignalIn:
+    kind: str                         # вид сигнала из core/scoring.py (DEFAULT_WEIGHTS)
+    payload: dict = field(default_factory=dict)
+    ttl_days: int | None = 60         # None — бессрочно
+
+
+@dataclass
+class Candidate:
+    """Находка finder'а: поля компании (FindingIn: имя, ИНН, домен, город, телефоны, общие контакты) + сигналы."""
+    finding: FindingIn
+    signals: list[SignalIn] = field(default_factory=list)
+
+
+@dataclass
+class CompanyView:
+    """Что enricher видит о компании (только чтение)."""
+    id: int
+    name: str | None = None
+    domain: str | None = None
+    city: str | None = None
+    inn: str | None = None
+    region_code: int | None = None
+
+
+@dataclass
+class Enrichment:
+    """Результат enricher'а по одной компании.
+    status: done — данные есть; skipped — нечего проверять (нет сайта, robots запрещает); failed — не получилось."""
+    status: str = "done"
+    error: str | None = None          # коротко, по-русски, без адресов
+    profile: dict = field(default_factory=dict)       # всё найденное -> lg_enrichments.result (карточка, переменные)
+    signals: list[SignalIn] = field(default_factory=list)
+    contacts: list[dict] = field(default_factory=list)  # только общие: {"kind","value","source_url"?}
+    fields: dict = field(default_factory=dict)          # inn / city / legal_name … — с учётом надёжности источника
+
+
+class CompanySource(Adapter):
+    """Наследует от площадки радара: code, title, icon, purpose, needs_key, key_field, settings_schema,
+    default_enabled, unit_seconds, concurrency, defaults(), ready(). Добавляет kind и query_schema."""
+    kind: str = "enricher"            # finder | enricher
+    # finder: поля формы поиска [{"key","label","type": text|number|list|bool|region,"default","hint","required"}]
+    query_schema: list[dict] = []
+    # Какие сигналы может дать источник: [{"kind","label","weight","hint"}] — для экрана и SOURCES.md
+    signals_info: list[dict] = []
+    # Какие переменные письма даёт профиль: [{"key","label"}] (lg_enrichments.result[key])
+    variables: list[dict] = []
+    fresh_days: int = 30              # enricher: не перепроверять компанию чаще (если не «перепроверить все»)
+
+    def units(self, query: dict, filter_settings: dict, settings: dict) -> int:   # noqa: D401
+        """finder: сколько запросов сделает поиск по query (для оценки). enricher: раннер считает по компаниям."""
+        return max(1, len((query or {}).get("keywords") or []) or 1)
+
+    async def fetch(self, query: dict, settings: dict, ctx: Context) -> list[Candidate]:   # type: ignore[override]
+        raise NotImplementedError
+
+    async def enrich(self, company: CompanyView, settings: dict, ctx: Context) -> Enrichment:
+        raise NotImplementedError
+
+    async def healthcheck(self, settings: dict, ctx: Context) -> tuple[bool, str]:
+        reason = self.ready(settings)
+        return (False, reason) if reason else (True, "готов к работе")

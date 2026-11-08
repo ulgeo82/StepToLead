@@ -268,6 +268,7 @@ export default function ListsPage() {
                           <summary aria-label={`Ещё действия со списком ${list.name}`}>⋯</summary>
                           <div>
                             <Link href={`/admin/leadgen/companies?list_id=${list.id}`}>Открыть в базе</Link>
+                            <Link href={`/admin/leadgen/sources?list_id=${list.id}`}>Дообогатить из источника</Link>
                             <button type="button" onClick={() => setRenaming({ id: list.id, name: list.name })}>
                               Переименовать
                             </button>

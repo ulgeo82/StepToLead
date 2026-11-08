@@ -33,6 +33,8 @@ import EnrollDialog from "../../outreach/email/EnrollDialog";
 import AddToCampaignDialog from "../../outreach/campaigns/AddToCampaignDialog";
 import ExportDialog from "../ExportDialog";
 import ImportDialog from "../ImportDialog";
+import { CompanyTech } from "../company-tech";
+import type { CompanySource } from "../sources/source-types";
 
 const channels: Record<string, string> = {
   whatsapp: "WhatsApp",
@@ -57,7 +59,7 @@ const channelLabel: Record<string, string> = {
   whatsapp: "WhatsApp",
   telegram: "Telegram",
 };
-function signalText(kind: string, payload: unknown): string {
+function signalText(kind: string, payload: unknown, labels: Record<string, string>): string {
   const p = (payload && typeof payload === "object" ? payload : {}) as Record<string, unknown>;
   const extra = [
     p.reason,
@@ -66,7 +68,7 @@ function signalText(kind: string, payload: unknown): string {
   ]
     .filter((v) => typeof v === "string" || typeof v === "number")
     .join(" · ");
-  return extra ? `${signalLabels[kind] || kind} — ${extra}` : signalLabels[kind] || kind;
+  return extra ? `${labels[kind] || kind} — ${extra}` : labels[kind] || kind;
 }
 function readFilters(params: URLSearchParams): Filters {
   const number = (key: string) =>
@@ -144,6 +146,7 @@ function useDialog(close: () => void) {
 
 function CompanyCard({
   id,
+  labels,
   onClose,
   revision,
   busy,
@@ -152,6 +155,7 @@ function CompanyCard({
   feedback,
 }: {
   id: number;
+  labels: Record<string, string>;
   onClose: () => void;
   revision: number;
   busy: boolean;
@@ -258,6 +262,7 @@ function CompanyCard({
               <br />
               Последний раз: {date(company.last_seen_at)}
             </p>
+            <CompanyTech tech={company.tech}/>
             <h3>Почему {company.score}</h3>
             {company.score_reasons?.length ? (
               <ul className={styles.reasons}>
@@ -316,7 +321,7 @@ function CompanyCard({
             {company.signals?.length ? (
               company.signals.map((signal, index) => (
                 <article key={index} className={styles.contact}>
-                  <strong>{signalText(signal.kind, signal.payload)}</strong>
+                  <strong>{signalText(signal.kind, signal.payload, labels)}</strong>
                   <small>
                     {date(signal.observed_at)}
                     {signal.expires_at ? ` · До ${date(signal.expires_at)}` : ""}
@@ -537,6 +542,15 @@ function AddToListDialog({
 }
 
 function CompaniesPage() {
+  const [labels, setLabels] = useState<Record<string, string>>(signalLabels);
+  useEffect(() => {
+    const controller = new AbortController();
+    api<{ items: CompanySource[] }>(`${base}/sources`, { signal: controller.signal }).then(value => {
+      if (!controller.signal.aborted) setLabels({ ...Object.fromEntries(value.items.flatMap(source =>
+        source.signals.map(signal => [signal.kind, signal.label]))), ...signalLabels });
+    }).catch(() => undefined);
+    return () => controller.abort();
+  }, []);
   const router = useRouter();
   const search = useSearchParams();
   const raw = search.toString();
@@ -961,6 +975,13 @@ function CompaniesPage() {
             ))}
           </details>
           <details>
+            <summary>Сигналы{filters.signals?.length ? ` · ${filters.signals.length}` : ""}</summary>
+            {Object.entries(labels).map(([value, label]) => <label key={value} className={styles.check}>
+              <input type="checkbox" checked={filters.signals?.includes(value) || false}
+                onChange={e => multi("signal", filters.signals, value, e.target.checked)}/>{label}
+            </label>)}
+          </details>
+          <details>
             <summary>Стадия{filters.stages?.length ? ` · ${filters.stages.length}` : ""}</summary>
             {Object.entries(stages).map(([value, label]) => (
               <label key={value} className={styles.check}>
@@ -1038,7 +1059,9 @@ function CompaniesPage() {
           ))}
           {filters.signals?.map((signal) => (
             <span key={signal} className={styles.chip}>
-              {signal}
+              {labels[signal] || signal}
+              <button type="button" className={styles.close} aria-label="Убрать фильтр по сигналу"
+                onClick={() => multi("signal", filters.signals, signal, false)}>×</button>
             </span>
           ))}
         </div>
@@ -1284,6 +1307,7 @@ function CompaniesPage() {
       {companyId && (
         <CompanyCard
           id={companyId}
+          labels={labels}
           onClose={closeCard}
           revision={revision}
           busy={busy}

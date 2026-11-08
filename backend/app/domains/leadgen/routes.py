@@ -21,6 +21,7 @@ from app.db import SessionLocal, get_db
 from app.domains.leadgen import (
     analytics, dadata, direct_search, export, fit_ai, importer, inbox, lists, outreach, sequences, service, site_enrich,
 )
+from app.domains.leadgen import source_runner
 from app.domains.leadgen.core import table_import
 from app.domains.leadgen.core import sequence as seq_core
 from app.domains.leadgen.models import LgCampaign, LgEnrollment, LgMailbox, LgSequence
@@ -122,7 +123,9 @@ def run_row(r: LgSourceRun) -> dict:
              if k not in ("company_ids", "new_company_ids", "organic_company_ids", "organic_new_ids")}
     return {"id": r.id, "source": r.source, "status": r.status, "params": r.params, "stats": stats,
             "error": r.error, "created_at": iso(r.created_at), "started_at": iso(r.started_at),
-            "finished_at": iso(r.finished_at)}
+            "finished_at": iso(r.finished_at),
+            # источники компаний (source_routes): список finder'а и итог запуска; у прежних запусков — null
+            "list_id": (r.stats or {}).get("list_id"), "result": (r.stats or {}).get("result")}
 
 
 # ---------------------------------------------------------------- запуски
@@ -416,6 +419,7 @@ async def get_company(company_id: int, db: AsyncSession = Depends(get_db), admin
                      "expires_at": iso(s.expires_at)} for s in signals],
         "touches": [{"channel": t.channel, "direction": t.direction, "status": t.status, "subject": t.subject,
                      "happened_at": iso(t.happened_at)} for t in touches],
+        "tech": await source_runner.tech_for(db, c.id),
     }
 
 

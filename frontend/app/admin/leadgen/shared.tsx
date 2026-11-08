@@ -48,6 +48,17 @@ export const signalLabels: Record<string, string> = {
   twogis_card: "Есть в 2ГИС",
   slow_response: "Медленно отвечают на заявки",
   chain: "Федеральная сеть",
+  no_analytics: "Нет Метрики на сайте",
+  no_calltracking: "Нет коллтрекинга",
+  has_calltracking: "Есть коллтрекинг",
+  slow_site: "Медленный сайт на телефоне",
+  outdated_site: "Сайт давно не обновлялся",
+  new_company: "Новая компания (до 12 мес.)",
+  revenue_fit: "Выручка в целевом диапазоне",
+  lost_leads_reviews: "Отзывы: теряют заявки",
+  vk_active: "Активное сообщество ВК",
+  vk_abandoned: "Заброшенное сообщество ВК",
+  new_site: "Новый сайт",
 };
 export const blocked = (stage: string) => ["dnc", "rejected", "converted"].includes(stage);
 export const safeUrl = (value?: string | null): string | undefined => {
@@ -120,7 +131,20 @@ export type Ad = {
   first_seen_at?: string;
   last_seen_at?: string;
 };
+export type TechProfile = {
+  checked_at: string;
+  platform: string | null;
+  analytics: string[];
+  calltracking: string[];
+  chat: string[];
+  crm_forms: string[];
+  quiz: boolean;
+  privacy_policy: boolean;
+  footer_year: number | null;
+  pagespeed_mobile: number | null;
+};
 export type CompanyDetail = Company & {
+  tech?: TechProfile | null;
   ogrn?: string | null;
   okved?: string | null;
   director_name?: string | null;

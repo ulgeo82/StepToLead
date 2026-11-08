@@ -4,6 +4,36 @@
   min-height: 100dvh;
   padding-bottom: 40px;
 }
+.companySources { min-width: 0; overflow-wrap: anywhere; }
+.companySources :global(.pageHeader) { flex-wrap: wrap; gap: 14px; }
+.companySources :global(.pageHeader) > div { min-width: 0; }
+.companySourceGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+  align-items: flex-start;
+}
+.companySourceCard { min-width: 0; margin-bottom: 0 !important; }
+.companySourceCard :is(input, select, textarea, fieldset) { min-width: 0; max-width: 100%; }
+.companySourceCard :is(input, select, textarea) { box-sizing: border-box; }
+.companySourceCard button { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.sourceCardHead { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.sourceCardHead > div { min-width: 0; }
+.sourceCardHead h2 { overflow-wrap: anywhere; }
+.sourceFields { display: grid; gap: 14px; margin: 14px 0; }
+.sourceSettings, .sourceLaunch { border-top: 1px solid #26324d; padding-top: 16px; margin-top: 16px; }
+.sourceSettings summary { cursor: pointer; min-height: 44px; }
+.sourceLaunch .field { margin-bottom: 14px; }
+.sourceResult { margin-top: 14px; overflow-wrap: anywhere; }
+.companyTech { min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 850px) { .companySourceGrid { grid-template-columns: 1fr; } }
+@media (max-width: 430px) {
+  .companySources .card { padding: 16px; }
+  .companySources :global(.pageHeader) h1 { font-size: 28px; }
+  .sourceCardHead { flex-wrap: wrap; }
+  .companySources :global(.topbar) { gap: 8px; }
+  .companySources :global(.crumbs) { min-width: 0; flex-wrap: wrap; }
+}
 .formFieldset {
   border: 0;
   margin: 0;

@@ -170,6 +170,7 @@ export default function SearchPage() {
         title="Поиск компаний"
         subtitle="Найдите компании, которые рекламируются в Яндекс Директе, и соберите публичные контакты."
       >
+        <Link className={styles.secondary} href="/admin/leadgen/sources">Источники компаний</Link>
         <Link className={styles.secondary} href="/admin/leadgen/companies">
           База компаний →
         </Link>

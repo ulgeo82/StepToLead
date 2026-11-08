@@ -20,6 +20,12 @@ DEFAULT_WEIGHTS: dict[str, int] = {
     "chain": -3,
     "organic_top": 1,     # в топ-10 органики по ключам ниши (вкладываются в сайт)
     "merged": 0,
+    # Источники компаний (sources/): тех-профиль сайта
+    "no_analytics": 2,     # нет Метрики — не видят, откуда заявки (прямо наша боль)
+    "no_calltracking": 1,  # звонки с рекламы не размечены
+    "has_calltracking": 0, # продвинутый покупатель — другой текст письма, не балл
+    "slow_site": 1,        # PageSpeed мобильной версии ниже порога
+    "outdated_site": 1,    # год в подвале старше порога
 }
 
 REASON_LABELS: dict[str, str] = {
@@ -37,6 +43,17 @@ REASON_LABELS: dict[str, str] = {
     "slow_response": "Медленно отвечают на заявки",
     "chain": "Федеральная сеть",
     "organic_top": "В топ-10 поиска",
+    "no_analytics": "Нет Метрики на сайте",
+    "no_calltracking": "Нет коллтрекинга",
+    "has_calltracking": "Есть коллтрекинг",
+    "slow_site": "Медленный сайт на телефоне",
+    "outdated_site": "Сайт давно не обновлялся",
+    "new_company": "Новая компания (до 12 мес.)",
+    "revenue_fit": "Выручка в целевом диапазоне",
+    "lost_leads_reviews": "Отзывы: теряют заявки",
+    "vk_active": "Активное сообщество ВК",
+    "vk_abandoned": "Заброшенное сообщество ВК",
+    "new_site": "Новый сайт",
 }
 
 MIN_SCORE, MAX_SCORE, FIT_NO_CAP = 0, 10, 2

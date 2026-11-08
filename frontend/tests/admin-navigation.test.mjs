@@ -16,7 +16,7 @@ const flatten = (nodes) =>
   Array.from(nodes).flatMap((node) => (node.kind === "item" ? [node] : flatten(node.children)));
 const plain = (value) => JSON.parse(JSON.stringify(value));
 
-test("все 19 действующих маршрутов доступны", () => {
+test("все действующие маршруты доступны", () => {
   assert.deepEqual(
     flatten(adminNavigation)
       .filter((item) => item.href)
@@ -42,12 +42,19 @@ test("все 19 действующих маршрутов доступны", () 
       "/admin/leadgen/analytics",
       "/admin/leadgen/dnc",
       "/admin/leadgen/settings",
+      "/admin/leadgen/sources",
+      "/admin/leadgen/lists",
+      "/admin/jobradar",
+      "/admin/outreach/campaigns",
+      "/admin/outreach/inbox",
+      "/admin/outreach/warmup",
+      "/admin/team",
     ].sort(),
   );
 });
-test("четыре будущих пункта disabled без маршрутов", () => {
+test("будущий пункт AI-настроек disabled без маршрута", () => {
   const future = flatten(adminNavigation).filter((item) => item.disabled);
-  assert.equal(future.length, 4);
+  assert.deepEqual(future.map(item => item.id), ["ai-settings"]);
   assert.ok(future.every((item) => !item.href));
 });
 test("Telegram находится внутри Аутрича и Роста агентства", () => {
@@ -64,6 +71,7 @@ test("экраны лидогенерации раскрывают папку и
     "/admin/leadgen/analytics",
     "/admin/leadgen/dnc",
     "/admin/leadgen/settings",
+    "/admin/leadgen/sources",
   ])
     assert.deepEqual(plain(activeParents(adminNavigation, path)), ["growth", "leadgen"]);
 });
@@ -98,9 +106,10 @@ test("номера двузначные, сбрасываются в групп�
   assert.equal(nums.overview, "01");
   assert.equal(nums.results, "01");
   assert.equal(nums["growth-leads"], "01");
-  assert.equal(nums.monitor, "01");
+  assert.equal(nums.team, "01");
+  assert.equal(nums.monitor, "02");
   assert.ok(Object.values(nums).every((number) => /^\d{2}$/.test(number)));
-  assert.equal(nums.accounts, "13");
+  assert.equal(nums.accounts, "16");
 });
 test("нет дублирующихся id", () => {
   const ids = [];
