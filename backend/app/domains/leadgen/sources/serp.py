@@ -13,6 +13,7 @@ from app.domains.leadgen.core.yandex_regions import lr_for
 from app.domains.leadgen.sources.base import Candidate, CompanySource, Context, SignalIn, SourceSkipped, limited, \
     short_error
 
+RUSSIA = 225   # код Яндекса «Россия» — когда город не указан
 TOP = 10   # organic_top — в первой десятке хотя бы по одному запросу
 
 
@@ -33,7 +34,8 @@ class SerpSource(CompanySource):
     query_schema = [
         {"key": "queries", "type": "list", "label": "Запросы (по одному на строку)", "required": True,
          "ai": {"purpose": "search"}},
-        {"key": "region", "type": "region", "label": "Город или регион", "required": True},
+        {"key": "region", "type": "region", "label": "Город или регион",
+         "hint": "Пусто — вся Россия; можно код региона Яндекса числом"},
         {"key": "depth", "type": "number", "label": "Страниц выдачи на запрос", "default": 2, "min": 1, "max": 5},
         {"key": "niche", "type": "text", "label": "Ниша (метка в базе)"},
     ]
@@ -68,7 +70,7 @@ class SerpSource(CompanySource):
         return {"requests": requests, "rub": rub}
 
     async def fetch(self, query: dict, settings: dict, ctx: Context) -> list[Candidate]:
-        lr = lr_for(query.get("region"))
+        lr = lr_for(query.get("region")) if query.get("region") else RUSSIA
         if lr is None:
             raise SourceSkipped(f"не знаю код региона «{query.get('region')}» — укажите его числом (коды Яндекса lr)")
         try:

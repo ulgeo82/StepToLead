@@ -199,7 +199,7 @@ POST /sources/{code}/estimate → прежний ответ + "cost"?: {"request
 query_schema = [
   {"key": "queries", "type": "list", "label": "Запросы (по одному на строку)", "required": true,
    "ai": {"purpose": "search"}},
-  {"key": "region", "type": "region", "label": "Город или регион", "required": true},
+  {"key": "region", "type": "region", "label": "Город или регион"},          // пусто — вся Россия (lr 225)
   {"key": "depth", "type": "number", "label": "Страниц выдачи на запрос", "default": 2, "min": 1, "max": 5},
   {"key": "niche", "type": "text", "label": "Ниша (метка в базе)"}
 ]
@@ -217,7 +217,7 @@ settings_schema = [{"key": "price_per_1000", "type": "number", "label": "Цен�
 query_schema = [
   {"key": "titles", "type": "list", "label": "Кого ищут (названия вакансий)", "required": true,
    "ai": {"purpose": "jobs"}},
-  {"key": "region", "type": "region", "label": "Город или регион", "required": true},
+  {"key": "region", "type": "region", "label": "Город или регион"},          // пусто — вся Россия
   {"key": "days", "type": "number", "label": "Вакансии за последние, дней", "default": 14, "min": 1, "max": 30},
   {"key": "platforms", "type": "multi", "label": "Площадки", "default": ["trudvsem", "hh"],
    "options": [{"value": "trudvsem", "label": "Работа России"}, {"value": "hh", "label": "hh.ru"}]},

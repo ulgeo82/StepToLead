@@ -77,7 +77,8 @@ class HiringSource(CompanySource):
     query_schema = [
         {"key": "titles", "type": "list", "label": "Кого ищут (названия вакансий)", "required": True,
          "ai": {"purpose": "jobs"}},
-        {"key": "region", "type": "region", "label": "Город или регион", "required": True},
+        {"key": "region", "type": "region", "label": "Город или регион",
+         "hint": "Пусто — вся Россия"},
         {"key": "days", "type": "number", "label": "Вакансии за последние, дней", "default": 14, "min": 1, "max": 30},
         {"key": "platforms", "type": "multi", "label": "Площадки", "default": ["trudvsem", "hh"],
          "options": [{"value": "trudvsem", "label": "Работа России"}, {"value": "hh", "label": "hh.ru"}]},

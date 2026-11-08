@@ -368,3 +368,22 @@ class HiringCopiesTests(FinderBase):
                       company_inn="7709969870", employer={"inn": "7709969870", "site": "jaket.ru"})
         self.assertIsNone(HiringSource._candidate([copy], {}).finding.domain)        # доска вакансий — не сайт
         self.assertEqual(HiringSource._candidate([copy, own], {}).finding.domain, "jaket.ru")
+
+
+class WholeCountryTests(FinderBase):
+    """Город не указан — ищем по всей России, а не просим заполнить."""
+
+    def test_serp_empty_region_is_russia(self):
+        fake = FakeSerp({})
+        serp.provider_factory = lambda: fake
+        run = self.run_find("serp", {"queries": ["кухни на заказ"], "depth": 1})
+        self.assertEqual(run.status, "done", run.error)
+        self.assertEqual(fake.calls[0][1], 225)
+
+    def test_hiring_empty_region_whole_country(self):
+        log = []
+        source_settings.transport = jobs_net(log)
+        run = self.run_find("hiring", {"titles": ["дизайнер кухонь"], "platforms": ["trudvsem"]})
+        self.assertEqual(run.status, "done", run.error)
+        tv = [u for u in log if "trudvsem" in u]
+        self.assertTrue(tv and all("/region/" not in u for u in tv), tv)   # без региона — общий поиск по стране
