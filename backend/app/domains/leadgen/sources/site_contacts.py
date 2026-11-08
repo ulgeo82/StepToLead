@@ -1,4 +1,7 @@
-"""Sequential wrapper around the existing website contact collector, not another crawler."""
+"""Обёртка над существующим сбором контактов с сайта (site_enrich), не новый обходчик.
+
+Сеть — в enrich (параллельно по разным сайтам, общий кеш обходов запуска), запись в базу — в persist
+(по одной компании, тем же site_enrich.apply_result)."""
 from sqlalchemy import delete, select
 
 from app.domains.leadgen import site_enrich
@@ -12,19 +15,27 @@ class SiteContactsSource(CompanySource):
     icon = "📬"
     purpose = "Публичные общие контакты с сайта компании"
     chain_default = True
-    unit_seconds = 8
-    concurrency = 1
+    unit_seconds = 5
+    concurrency = 12          # разные сайты — параллельно; внутри одного сайта страницы по очереди с паузой
     persist_work = True
 
     async def enrich(self, company, settings, ctx):
-        return Enrichment() if company.domain else Enrichment(status="skipped", error="нет сайта")
+        if not company.domain:
+            return Enrichment(status="skipped", error="нет сайта")
+        crawl = await site_enrich.crawl(company.domain, transport=ctx.transport, cache=ctx.cache,
+                                        delay=ctx.cache.get("crawl_delay", site_enrich.DELAY_SECONDS))
+        enr = Enrichment()
+        enr.crawl = crawl   # для persist: запись найденного — уже без сети
+        return enr
 
     async def persist(self, db, company, enrichment, ctx):
         if enrichment.status != "done":
             return enrichment
         before = set((await db.scalars(select(LgContact.id).where(LgContact.company_id == company.id))).all())
-        summary = await site_enrich.enrich_company(db, company, transport=ctx.transport,
-                                                 delay=ctx.cache.get("crawl_delay", site_enrich.DELAY_SECONDS))
+        crawl = getattr(enrichment, "crawl", None)
+        summary = await (site_enrich.apply_result(db, company, crawl) if crawl is not None else
+                         site_enrich.enrich_company(db, company, transport=ctx.transport, cache=ctx.cache,
+                                                    delay=ctx.cache.get("crawl_delay", site_enrich.DELAY_SECONDS)))
         # The legacy collector marks personal addresses. New sources never retain newly collected personal data.
         await db.execute(delete(LgContact).where(LgContact.company_id == company.id, LgContact.is_personal.is_(True),
                                                LgContact.id.notin_(before)))

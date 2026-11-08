@@ -78,7 +78,7 @@ class FakeSerp:
     def __init__(self, pages):
         self.pages, self.calls = pages, []
 
-    async def search_page(self, keyword, region_code, device="desktop", page_no=0):
+    async def search_page(self, keyword, region_code, device="desktop", page_no=0, want_ads=True):
         self.calls.append((keyword, region_code, page_no))
         items = [SerpOrganic(keyword=keyword, url=u, title=f"title {u}", position=i)
                  for i, u in enumerate(self.pages.get((keyword, page_no), []), 1)]

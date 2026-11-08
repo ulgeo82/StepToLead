@@ -16,6 +16,7 @@ class FitAiSource(CompanySource):
     requires_site = False
     persist_work = True
     unit_seconds = 3.0
+    concurrency = 4   # ИИ — несколько запросов одновременно
     ai_tokens_per_company = 1500
     signals_info = [{"kind": "chain", "label": "Федеральная сеть"}]
 

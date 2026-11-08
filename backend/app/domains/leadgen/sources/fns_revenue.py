@@ -14,7 +14,7 @@ from app.domains.leadgen.core.normalize import validate_inn
 from app.domains.leadgen.sources.base import CompanySource, Enrichment, SignalIn, SourceFormatError
 
 BASE = "https://bo.nalog.gov.ru"
-PAUSE = 0.5
+PAUSE = 0.3
 
 
 def pick_revenue(reports: list) -> tuple[int, int] | None:
@@ -40,7 +40,7 @@ class FnsRevenueSource(CompanySource):
     requires_site = False
     persist_work = True
     unit_seconds = 2.0       # два запроса + пауза
-    concurrency = 2
+    concurrency = 4   # вежливо к сайту ФНС, с паузой
     settings_schema = [
         {"key": "revenue_min", "label": "Целевая выручка от, ₽", "type": "number", "default": 10_000_000},
         {"key": "revenue_max", "label": "Целевая выручка до, ₽", "type": "number", "default": 500_000_000,

@@ -88,8 +88,8 @@ class SerpSource(CompanySource):
             if ctx.on_request:
                 ctx.on_request()
             try:
-                result = await provider.search_page(keyword, lr, page_no=page) if page else \
-                    await provider.search_page(keyword, lr)
+                result = await provider.search_page(keyword, lr, page_no=page, want_ads=False) if page else \
+                    await provider.search_page(keyword, lr, want_ads=False)
             except providers.ProviderUnavailable:
                 raise
             except Exception as exc:  # noqa: BLE001 — один запрос не валит весь поиск

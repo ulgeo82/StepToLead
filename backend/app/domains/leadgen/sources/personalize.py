@@ -98,6 +98,7 @@ class PersonalizeSource(CompanySource):
     requires_site = False
     persist_work = True
     unit_seconds = 3.0
+    concurrency = 4   # ИИ — несколько запросов одновременно
     ai_tokens_per_company = 700
     variables = [{"key": "personal_line", "field": "line", "label": "Первая строка письма (персонализация)"}]
 

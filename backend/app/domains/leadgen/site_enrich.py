@@ -22,8 +22,9 @@ from app.domains.leadgen.models import LgCompany, LgCompanyKey, LgContact, LgEnr
 USER_AGENT = "StepToLeadBot/1.0 (+https://steptolead.ru; contact collection from public company pages)"
 MAX_PAGES = 6
 MAX_BYTES = 1_500_000
-TIMEOUT = 10.0
-DELAY_SECONDS = 1.0
+TIMEOUT = httpx.Timeout(8.0, connect=5.0)   # первая попытка: живые сайты отвечают быстро
+SLOW_TIMEOUT = httpx.Timeout(20.0, connect=10.0)   # вторая — только для не ответивших: медленный ≠ мёртвый
+DELAY_SECONDS = 0.5   # пауза между страницами ОДНОГО сайта; разные сайты качаются параллельно
 SIGNAL_TTL_DAYS = 60
 STEP = "site_check"
 
@@ -35,6 +36,9 @@ class CrawlResult:
     errors: dict[str, str] = field(default_factory=dict)
     blocked_by_robots: bool = False
     text: str = ""
+    home_html: str | None = None   # главная — её же берёт тех-профиль, второй раз не качаем
+    root: str = ""
+    dead: bool = False             # сайт не ответил (таймаут/нет соединения) — остальные функции его пропускают
 
     @property
     def ok(self) -> bool:
@@ -51,6 +55,20 @@ async def _robots(client: httpx.AsyncClient, root: str) -> RobotFileParser | Non
         return None
     parser.parse(resp.text.splitlines())
     return parser
+
+
+async def _robots_or_down(client: httpx.AsyncClient, root: str) -> tuple[RobotFileParser | None, str | None]:
+    """robots.txt и признак «сайт не отвечает» (таймаут/нет соединения) — тогда главную уже не ждём."""
+    try:
+        resp = await client.get(f"{root}/robots.txt")
+    except httpx.HTTPError as exc:
+        name = type(exc).__name__
+        return None, (name if any(m in name for m in DEAD_ERRORS) else None)
+    if resp.status_code >= 400:
+        return None, None
+    parser = RobotFileParser()
+    parser.parse(resp.text.splitlines())
+    return parser, None
 
 
 async def _get_html(client: httpx.AsyncClient, url: str) -> tuple[str | None, str | None]:
@@ -73,16 +91,45 @@ async def _get_html(client: httpx.AsyncClient, url: str) -> tuple[str | None, st
         return None, type(exc).__name__
 
 
+DEAD_ERRORS = ("Timeout", "ConnectError", "ConnectTimeout", "ReadTimeout", "PoolTimeout", "RemoteProtocolError")
+
+
 async def crawl(domain: str, *, transport: httpx.AsyncBaseTransport | None = None,
-                delay: float = DELAY_SECONDS) -> CrawlResult:
+                delay: float = DELAY_SECONDS, cache: dict | None = None) -> CrawlResult:
+    """Обход сайта. cache — общий на запуск (ctx.cache): один сайт за запуск качается один раз, сколько бы
+    функций его ни просили (поиск сайта, контакты, тех-профиль); одновременные просьбы ждут первую."""
+    if cache is None:
+        return await _crawl_twice(domain, transport=transport, delay=delay)
+    crawls = cache.setdefault("site_crawls", {})
+    if domain not in crawls:
+        crawls[domain] = asyncio.ensure_future(_crawl_twice(domain, transport=transport, delay=delay))
+    return await asyncio.shield(crawls[domain])
+
+
+async def _crawl_twice(domain: str, *, transport=None, delay: float = DELAY_SECONDS) -> CrawlResult:
+    """Быстрая попытка; не ответил — ещё одна с длинным таймаутом (медленные сайты не теряем)."""
+    result = await _crawl(domain, transport=transport, delay=delay)
+    if result.dead:
+        result = await _crawl(domain, transport=transport, delay=delay, timeout=SLOW_TIMEOUT)
+    return result
+
+
+async def _crawl(domain: str, *, transport: httpx.AsyncBaseTransport | None = None,
+                 delay: float = DELAY_SECONDS, timeout=TIMEOUT) -> CrawlResult:
     result = CrawlResult(facts=SiteFacts())
-    async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=True, transport=transport,
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, transport=transport,
                                  headers={"User-Agent": USER_AGENT, "Accept": "text/html,*/*;q=0.5",
                                           "Accept-Language": "ru,en;q=0.5"}) as client:
         html, robots, root = None, None, ""
         for scheme in ("https", "http"):
             root = f"{scheme}://{domain}"
-            robots = await _robots(client, root)
+            robots, down = await _robots_or_down(client, root)
+            if down == "ConnectTimeout":   # даже не подключились — главная тоже не откроется, не ждём её
+                result.errors[f"{scheme}:/"] = down
+                break
+            if down and down.startswith("Connect"):   # соединение отклонено — по https сайта нет, пробуем http
+                result.errors[f"{scheme}:/"] = down
+                continue
             if robots is not None and not robots.can_fetch(USER_AGENT, root + "/"):
                 result.blocked_by_robots = True
                 return result
@@ -90,9 +137,14 @@ async def crawl(domain: str, *, transport: httpx.AsyncBaseTransport | None = Non
             if html is not None:
                 break
             result.errors[f"{scheme}:/"] = err or "unreachable"
+            if err and "Timeout" in err:
+                break
         if html is None:
+            result.dead = bool(result.errors) and all(any(m in (e or "") for m in DEAD_ERRORS)
+                                                      for e in result.errors.values())
             return result
         result.errors.clear()
+        result.home_html, result.root = html, root
         result.fetched.append(root + "/")
         # Разбор HTML — в отдельном потоке, чтобы тяжёлая страница не тормозила ответы портала клиентам.
         first = await asyncio.to_thread(extract, html, root + "/")
@@ -240,8 +292,8 @@ async def _apply_inn(db: AsyncSession, company: LgCompany, inns: set[str], url: 
 
 
 async def enrich_company(db: AsyncSession, company: LgCompany, *, transport=None, delay: float = DELAY_SECONDS,
-                         now: datetime | None = None) -> dict:
+                         now: datetime | None = None, cache: dict | None = None) -> dict:
     if not company.domain:
         return {"skipped": "no domain"}
-    result = await crawl(company.domain, transport=transport, delay=delay)
+    result = await crawl(company.domain, transport=transport, delay=delay, cache=cache)
     return await apply_result(db, company, result, now=now)

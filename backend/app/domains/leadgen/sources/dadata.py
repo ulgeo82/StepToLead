@@ -21,6 +21,7 @@ class DadataSource(CompanySource):
     requires_site = False
     persist_work = True
     unit_seconds = 0.6
+    concurrency = 5   # лимит DaData ~30 запросов/с — с запасом
     signals_info = [{"kind": "legal_active", "label": "Действующее юрлицо"}]
 
     def ready(self, settings):

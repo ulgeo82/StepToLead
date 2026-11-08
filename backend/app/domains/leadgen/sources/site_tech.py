@@ -42,7 +42,7 @@ class SiteTechSource(CompanySource):
     purpose = "Метрика, коллтрекинг, чат, CRM, платформа и свежесть сайта — для сигналов и текста письма"
     needs_key = False
     unit_seconds = 2.5          # главная + robots (+ PageSpeed — добавляется в оценке, см. unit_cost)
-    concurrency = 4             # разные сайты — параллельно; к одному сайту — один запрос за раз
+    concurrency = 12            # разные сайты — параллельно; к одному сайту — один запрос за раз
     fresh_days = 30
     settings_schema = [
         {"key": "pagespeed_key", "label": "Ключ Google PageSpeed Insights", "type": "secret", "default": None,
@@ -84,23 +84,32 @@ class SiteTechSource(CompanySource):
             return Enrichment(status="skipped", error="нет сайта")
         now_year = datetime.now(timezone.utc).year
         html, root, blocked, error = None, "", False, None
-        async with ctx.http(**{"User-Agent": site_enrich.USER_AGENT, "Accept": "text/html,*/*;q=0.5"}) as http:
-            http.timeout = SITE_TIMEOUT
-            for scheme in ("https", "http"):
-                root = f"{scheme}://{company.domain}"
-                robots, down = await _robots(http, root)
-                if down:   # не ответил вовремя — по http он тоже не ответит
-                    error = "Timeout"
-                    break
-                if robots is not None and not robots.can_fetch(site_enrich.USER_AGENT, root + "/"):
-                    blocked = True
-                    break
-                html, err = await site_enrich._get_html(http, root + "/")
-                if html is not None:
-                    break
-                error = err
-                if err and "Timeout" in err:
-                    break
+        shared = (ctx.cache.get("site_crawls") or {}).get(company.domain)
+        if shared is not None:   # сайт в этом запуске уже скачан (поиск сайта, контакты) — второй раз не качаем
+            crawl = await asyncio.shield(shared)
+            if crawl.blocked_by_robots:
+                return Enrichment(status="skipped", error="robots.txt запрещает обход")
+            if crawl.dead:
+                return Enrichment(status="failed", error="сайт не ответил вовремя")
+            html, root = crawl.home_html, crawl.root
+        if html is None and shared is None:
+            async with ctx.http(**{"User-Agent": site_enrich.USER_AGENT, "Accept": "text/html,*/*;q=0.5"}) as http:
+                http.timeout = SITE_TIMEOUT
+                for scheme in ("https", "http"):
+                    root = f"{scheme}://{company.domain}"
+                    robots, down = await _robots(http, root)
+                    if down:   # не ответил вовремя — по http он тоже не ответит
+                        error = "Timeout"
+                        break
+                    if robots is not None and not robots.can_fetch(site_enrich.USER_AGENT, root + "/"):
+                        blocked = True
+                        break
+                    html, err = await site_enrich._get_html(http, root + "/")
+                    if html is not None:
+                        break
+                    error = err
+                    if err and "Timeout" in err:
+                        break
         if blocked:
             return Enrichment(status="skipped", error="robots.txt запрещает обход")
         if html is None:

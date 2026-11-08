@@ -56,8 +56,10 @@ async def check_email(value, ctx):
     if host in TYPOS:
         return "risky", {"reason": "возможная опечатка", "suggestion": f"{local}@{TYPOS[host]}"}
     cache = ctx.cache.setdefault("email_dns", {})
-    if host not in cache:
-        cache[host] = await asyncio.to_thread(dns_mail, host)
+    if host not in cache:   # одновременные проверки одного домена ждут один DNS-запрос
+        cache[host] = asyncio.ensure_future(asyncio.to_thread(dns_mail, host))
+    if isinstance(cache[host], asyncio.Future):
+        cache[host] = await asyncio.shield(cache[host])
     if cache[host] is False:
         return "invalid", {"reason": "у домена нет почты"}
     if cache[host] is None:
@@ -75,7 +77,7 @@ class EmailCheckSource(CompanySource):
     requires_site = False
     chain_default = True
     unit_seconds = 3
-    concurrency = 4
+    concurrency = 20   # только DNS (с кешем на запуск) — дёшево
     settings_schema = [{"key": "force", "type": "bool", "label": "Перепроверить почты за последние 30 дней",
                         "default": False}]
 

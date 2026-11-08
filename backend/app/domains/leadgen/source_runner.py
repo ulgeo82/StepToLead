@@ -6,6 +6,7 @@ enricher: компании из target -> enrich (параллельно, с л�
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import math
 import time
@@ -31,7 +32,6 @@ from app.services import progress
 
 logger = logging.getLogger("uvicorn.error.leadgen")
 MAX_COMPANIES = 500
-CHUNK = 20                 # компаний между коммитами
 SAVE_SECONDS = 0.05        # запись одной компании
 _running: set[str] = set()
 
@@ -207,6 +207,16 @@ def _sum_cost(current, extra):
     return {"requests": current["requests"] + extra["requests"], "rub": round(rub, 4) if rub is not None else None}
 
 
+def pipeline_seconds(companies: int, steps: list[tuple[int, float]]) -> float:
+    """Время конвейера: шаги идут одновременно по разным компаниям. Не меньше самого медленного шага и не меньше
+    «компаний / PIPELINE_WORKERS × сумма шагов на одну компанию». steps: [(concurrency, секунд на компанию)]."""
+    if not companies or not steps:
+        return 0.0
+    slowest = max(math.ceil(companies / max(1, conc)) * sec for conc, sec in steps)
+    flow = math.ceil(companies / PIPELINE_WORKERS) * sum(sec for _, sec in steps)
+    return max(slowest, flow)
+
+
 async def estimate(db: AsyncSession, ws: int, code: str, *, query: dict | None, target: dict | None,
                    then: list[str] | None = None) -> dict:
     adapter, row = await adapter_row(db, code)
@@ -234,17 +244,19 @@ async def estimate(db: AsyncSession, ws: int, code: str, *, query: dict | None, 
             LgCompany.id.in_(ids), LgCompany.domain.is_(None)))
         cost_query = {"companies": missing_site}
     cost = adapter.cost(cost_query, settings)
+    expected = min(MAX_COMPANIES, max(1, units * 10))
+    flow = []
     for child_code in chain:
         child, child_row = await adapter_row(db, child_code)
         child_settings = source_settings.plain(child, child_row.settings)
-        expected = min(MAX_COMPANIES, max(1, units * 10))
         available = child_row.enabled and child.ready(child_settings) is None
-        duration = (math.ceil(expected / max(1, child.concurrency)) * _unit_seconds(child, child_row, child_settings)
-                    if available else 0)
-        out["steps"].append({"code": child_code, "name": child.title, "seconds": round(duration, 1)})
-        out["seconds"] += round(duration)
+        per = _unit_seconds(child, child_row, child_settings)
+        duration = math.ceil(expected / max(1, child.concurrency)) * per if available else 0
+        out["steps"].append({"code": child_code, "name": child.title, "seconds": round(duration, 1), "parallel": True})
         if available:
+            flow.append((child.concurrency, per))
             cost = _sum_cost(cost, child.cost({"companies": expected}, child_settings))
+    out["seconds"] += round(pipeline_seconds(expected, flow))
     if cost:
         out["cost"] = cost
     return out
@@ -283,7 +295,7 @@ async def create_run(db: AsyncSession, ws: int, code: str, *, query: dict | None
     await db.flush()
     _running.add(code)
     progress.start(run_key(run.id), f"{adapter.title}",
-                   [(s["code"], s["name"], s["seconds"]) for s in est["steps"]], queued=True)
+                   [(s["code"], s["name"], s["seconds"], "pipe" if s.get("parallel") else None) for s in est["steps"]], queued=True)
     return run
 
 
@@ -316,32 +328,24 @@ async def _execute(run_id: int, session_factory) -> None:
         result = {"found": 0, "new": 0, "updated": 0, "skipped": 0, "signals": {}, "errors": {}}
         started = time.monotonic()
         primary_duration = None
+        per_company = None   # enricher: средняя работа на компанию (конвейер) — для оценки следующего запуска
         try:
             if adapter.kind == "enricher":
-                units = await _enrich_all(db, run, adapter, settings, tracker, result)
+                ids = [int(i) for i in run.params.get("company_ids") or []]
+                run.stats = {"company_ids": ids}
+                timing = await _pipeline(db, run, [(adapter, settings, result)], ids, tracker, chained=False)
+                tracker.begin("save")
+                tracker.end("save")
+                seconds, units = timing[adapter.code]
+                per_company = seconds / units if units else None
             else:
                 units = await _find(db, run, adapter, settings, tracker, result)
                 primary_duration = time.monotonic() - started
                 await db.commit()  # preserve the search/list even if a subsequent optional step fails
                 if run.params.get("then"):
                     result["chain"] = {}
-                for child_code in run.params.get("then") or []:
-                    child, child_row = await adapter_row(db, child_code)
-                    child_settings = source_settings.plain(child, child_row.settings)
-                    summary = {"found": 0, "updated": 0, "done": 0, "skipped": 0, "failed": 0,
-                               "signals": {}, "errors": {}, "reasons": {}}
-                    result["chain"][child_code] = summary
-                    if not child_row.enabled or child.ready(child_settings):
-                        summary["skipped"] = len((run.stats or {}).get("company_ids") or [])
-                        summary["reasons"]["источник выключен или не настроен"] = summary["skipped"]
-                        tracker.end(child_code, "skipped", "источник выключен или не настроен")
-                        continue
-                    child_started = time.monotonic()
-                    child_units = await _enrich_all(db, run, child, child_settings, tracker, summary,
-                                                    ids=list((run.stats or {}).get("company_ids") or []))
-                    if child_units:
-                        jr_timing.learn(child, child_row, time.monotonic() - child_started, child_units, persist=True)
-                    source_settings.mark(child_row, service.utcnow(), next(iter(summary["errors"].values()), None))
+                    await _run_steps(db, run, list(run.params.get("then") or []),
+                                     list((run.stats or {}).get("company_ids") or []), tracker, result)
                     run.stats = {**(run.stats or {}), "result": deepcopy(result)}
                     await db.commit()
         except Exception as exc:  # noqa: BLE001
@@ -358,9 +362,10 @@ async def _execute(run_id: int, session_factory) -> None:
             await db.commit()
             tracker.finish("error", f"Ошибка: {message}")
             return
-        if units:
-            jr_timing.learn(adapter, row, primary_duration if primary_duration is not None
-                            else time.monotonic() - started, units, persist=True)
+        if per_company:
+            jr_timing.learn(adapter, row, per_company, 1, persist=True)
+        elif units and primary_duration is not None:
+            jr_timing.learn(adapter, row, primary_duration, units, persist=True)
         source_settings.mark(row, service.utcnow(), None)
         run.status, run.finished_at = "done", service.utcnow()
         run.stats = {**(run.stats or {}), "result": deepcopy(result)}
@@ -382,86 +387,141 @@ def _summary(adapter: CompanySource, r: dict) -> str:
 
 # ---------------------------------------------------------------- enricher
 
-async def _enrich_all(db, run, adapter, settings, tracker, result, *, ids=None) -> int:
-    chained = ids is not None
-    ids = [int(i) for i in (ids if chained else run.params.get("company_ids") or [])]
-    companies = (await db.scalars(select(LgCompany).where(LgCompany.id.in_(ids),
-                                                        LgCompany.workspace_id == run.workspace_id))).all()
-    with_site = [c for c in companies if c.domain or not adapter.requires_site]
-    result["skipped"] += len(companies) - len(with_site)
-    result["found"] = len(companies)
-    if not chained:
-        run.stats = {"company_ids": ids}
-    result.setdefault("reasons", {})
-    result.setdefault("done", 0)
-    result.setdefault("failed", 0)
-    if len(companies) > len(with_site):
-        result["reasons"]["нет сайта"] = len(companies) - len(with_site)
-    tracker.begin(adapter.code, total=len(with_site))
+PIPELINE_WORKERS = 20      # компаний одновременно; у каждого шага ещё свой лимит (adapter.concurrency)
+COMMIT_EVERY = 20          # компаний между коммитами (без ожидания «пачки»: следующая стартует сразу)
+
+
+async def _run_steps(db, run, codes, ids, tracker, result, *, list_mode: bool = False) -> None:
+    """Шаги цепочки или «функций по базе» — одним конвейером. Выключенные и ненастроенные — сразу «пропущено»."""
+    steps, rows = [], {}
+    for code in codes:
+        adapter, row = await adapter_row(db, code)
+        settings = source_settings.plain(adapter, row.settings)
+        summary = {"found": 0, "updated": 0, "done": 0, "skipped": 0, "failed": 0,
+                   "signals": {}, "errors": {}, "reasons": {}}
+        result["chain"][code] = summary
+        reason = "источник выключен" if not row.enabled else adapter.ready(settings)
+        if reason:
+            summary["skipped"] = len(ids)
+            summary["reasons"][reason if list_mode else "источник выключен или не настроен"] = len(ids)
+            if list_mode:
+                result["errors"][code] = f"{adapter.title}: {reason}"
+            tracker.end(code, "skipped", reason if list_mode else "источник выключен или не настроен")
+            continue
+        steps.append((adapter, settings, summary))
+        rows[code] = row
+    if not steps:
+        return
+    timing = await _pipeline(db, run, steps, ids, tracker)
+    for adapter, _settings, summary in steps:
+        seconds, units = timing[adapter.code]
+        if units:   # средняя работа на компанию — по ней оценка следующего запуска
+            jr_timing.learn(adapter, rows[adapter.code], seconds / units, 1, persist=True)
+        source_settings.mark(rows[adapter.code], service.utcnow(), next(iter(summary["errors"].values()), None))
+        if list_mode:
+            result["updated"] += summary["done"]
+            for kind, n in summary["signals"].items():
+                result["signals"][kind] = result["signals"].get(kind, 0) + n
+            if summary["errors"]:
+                result["errors"][adapter.code] = next(iter(summary["errors"].values()))
+
+
+async def _safe_enrich(adapter, view, settings, ctx) -> Enrichment:
+    try:
+        return await adapter.enrich(view, settings, ctx)
+    except SourceSkipped as skip:
+        return Enrichment(status="skipped", error=str(skip)[:120])
+    except Exception as exc:  # noqa: BLE001 — один сайт не валит запуск
+        return Enrichment(status="failed", error=short_error(exc))
+
+
+async def _pipeline(db, run, steps, ids, tracker, *, chained: bool = True) -> dict[str, tuple[float, int]]:
+    """Конвейер: каждая компания проходит свои шаги по порядку (сайт → контакты → проверка почт → …), и так
+    одновременно идут до PIPELINE_WORKERS компаний. Сеть — параллельно (у шага свой лимит), запись в базу —
+    строго по одной под замком: AsyncSession не терпит одновременных запросов. Общий Context запуска —
+    общий кеш обходов: один сайт качается один раз на все функции.
+    steps: [(adapter, settings, summary)]. -> {code: (секунд работы в сумме, компаний обработано)}."""
     ctx = source_settings.context()
     ctx.cache["leadgen_settings"] = await service.get_settings(db)
     if source_settings.sleep is not None:
         ctx.cache["crawl_delay"] = 0
-    failures: dict[str, int] = {}
+    lock = asyncio.Lock()
+    gates = {a.code: asyncio.Semaphore(max(1, a.concurrency)) for a, _, _ in steps}
+    spent = {a.code: [0.0, 0] for a, _, _ in steps}
+    failures: dict[str, dict[str, int]] = {a.code: {} for a, _, _ in steps}
+    present = set((await db.scalars(select(LgCompany.id).where(
+        LgCompany.id.in_(ids), LgCompany.workspace_id == run.workspace_id))).all())
+    ids = [i for i in ids if i in present]
+    for adapter, _settings, summary in steps:
+        summary.setdefault("reasons", {})
+        summary.setdefault("done", 0)
+        summary.setdefault("failed", 0)
+        summary["found"] = len(ids)
+        tracker.begin(adapter.code, total=len(ids))
+    finished = 0
 
-    async def one(view: CompanyView) -> Enrichment:
-        try:
-            return await adapter.enrich(view, settings, ctx)
-        except SourceSkipped as skip:
-            return Enrichment(status="skipped", error=str(skip)[:120])
-        except Exception as exc:  # noqa: BLE001 — один сайт не валит запуск
-            return Enrichment(status="failed", error=short_error(exc))
-        finally:   # отметка по готовности: «проверено 3 из 5» — честно, а не «начато»
-            if not adapter.persist_work:
-                tracker.tick(adapter.code)
+    async def one_company(cid: int) -> None:
+        nonlocal finished
+        for adapter, settings, summary in steps:
+            code = adapter.code
+            async with lock:
+                company = await db.get(LgCompany, cid)
+                if adapter.requires_site and not company.domain:
+                    summary["skipped"] += 1
+                    summary["reasons"]["нет сайта"] = summary["reasons"].get("нет сайта", 0) + 1
+                    tracker.tick(code)
+                    continue
+                contacts = (await db.scalars(select(LgContact).where(LgContact.company_id == cid))).all()
+                view = CompanyView(id=company.id, name=company.display_name, domain=company.domain, city=company.city,
+                                   inn=company.inn, region_code=company.region_code, legal_name=company.legal_name,
+                                   provenance=company.provenance or {},
+                                   contacts=[{"id": x.id, "kind": x.kind, "value": x.value, "is_personal": x.is_personal,
+                                              "verified_at": x.verified_at} for x in contacts])
+            started = time.monotonic()
+            async with gates[code]:
+                enr = await _safe_enrich(adapter, view, settings, ctx)
+            async with lock:
+                company = await db.get(LgCompany, cid)
+                try:
+                    async with db.begin_nested():
+                        enr = await adapter.persist(db, company, enr, ctx)
+                        await apply_enrichment(db, company, code, enr, run_id=run.id)
+                except Exception as exc:  # noqa: BLE001
+                    await db.refresh(company)
+                    enr = Enrichment(status="failed", error=short_error(exc))
+                    await apply_enrichment(db, company, code, enr, run_id=run.id)
+                spent[code][0] += time.monotonic() - started
+                spent[code][1] += 1
+                for key, count in enr.counters.items():
+                    summary[key] = summary.get(key, 0) + count
+                if enr.status == "done":
+                    summary["done"] += 1
+                    summary["updated"] += 1
+                    for sig in enr.signals:
+                        summary["signals"][sig.kind] = summary["signals"].get(sig.kind, 0) + 1
+                else:
+                    if enr.status != "failed" or not chained:
+                        summary["skipped"] += 1
+                    reason = enr.error or "нет данных"
+                    summary["reasons"][reason] = summary["reasons"].get(reason, 0) + 1
+                    if enr.status == "failed":
+                        summary["failed"] += 1
+                        failures[code][reason] = failures[code].get(reason, 0) + 1
+            tracker.tick(code)
+        async with lock:
+            finished += 1
+            if finished % COMMIT_EVERY == 0:
+                await db.commit()
 
-    saved = 0
-    for start in range(0, len(with_site), CHUNK):
-        chunk = with_site[start:start + CHUNK]
-        contacts = (await db.scalars(select(LgContact).where(LgContact.company_id.in_([c.id for c in chunk])))).all()
-        views = [CompanyView(id=c.id, name=c.display_name, domain=c.domain, city=c.city, inn=c.inn,
-                             region_code=c.region_code, legal_name=c.legal_name, provenance=c.provenance or {},
-                             contacts=[{"id": x.id, "kind": x.kind, "value": x.value, "is_personal": x.is_personal,
-                                        "verified_at": x.verified_at} for x in contacts if x.company_id == c.id])
-                 for c in chunk]
-        found = await limited(ctx, views, one, adapter.concurrency)
-        for company, enr in zip(chunk, found):
-            await db.refresh(company)
-            try:
-                async with db.begin_nested():
-                    enr = await adapter.persist(db, company, enr, ctx)
-                    await apply_enrichment(db, company, adapter.code, enr, run_id=run.id)
-            except Exception as exc:
-                await db.refresh(company)
-                enr = Enrichment(status="failed", error=short_error(exc))
-                await apply_enrichment(db, company, adapter.code, enr, run_id=run.id)
-            if adapter.persist_work:
-                tracker.tick(adapter.code)
-            for key, count in enr.counters.items():
-                result[key] = result.get(key, 0) + count
-            if enr.status == "done":
-                result["done"] += 1
-                result["updated"] += 1
-                for s in enr.signals:
-                    result["signals"][s.kind] = result["signals"].get(s.kind, 0) + 1
-            else:
-                if enr.status != "failed" or not chained:
-                    result["skipped"] += 1
-                reason = enr.error or "нет данных"
-                result["reasons"][reason] = result["reasons"].get(reason, 0) + 1
-                if enr.status == "failed":
-                    result["failed"] += 1
-                    failures[enr.error or "ошибка"] = failures.get(enr.error or "ошибка", 0) + 1
-            saved += 1
+    await limited(ctx, ids, one_company, PIPELINE_WORKERS)
+    async with lock:
         await db.commit()
-    tracker.end(adapter.code, note=f"проверено {result['updated']}")
-    if not chained:
-        tracker.begin("save")
-        tracker.end("save")
-    if failures:
-        top = max(failures, key=failures.get)
-        result["errors"][adapter.code] = f"не проверено {sum(failures.values())}: {top}"[:120]
-    return len(with_site)
+    for adapter, _settings, summary in steps:
+        tracker.end(adapter.code, note=f"сделано {summary['updated']}")
+        if failures[adapter.code]:
+            top = max(failures[adapter.code], key=failures[adapter.code].get)
+            summary["errors"][adapter.code] = f"не проверено {sum(failures[adapter.code].values())}: {top}"[:120]
+    return {code: (sec, n) for code, (sec, n) in spent.items()}
 
 
 async def apply_enrichment(db: AsyncSession, company: LgCompany, code: str, enr: Enrichment, *,
@@ -668,24 +728,26 @@ async def list_estimate(db: AsyncSession, ws: int, list_id: int, *, steps, compa
     missing_site = await db.scalar(select(func.count()).select_from(LgCompany).where(
         LgCompany.id.in_(ids), LgCompany.domain.is_(None)))
     out = {"seconds": 0, "steps": [], "companies": len(ids)}
-    cost, tokens = None, 0
+    cost, tokens, flow = None, 0, []
     for code in order:
         adapter, row = await adapter_row(db, code)
         settings = source_settings.plain(adapter, row.settings)
         available = row.enabled and adapter.ready(settings) is None
         units = (with_site if adapter.requires_site else len(ids)) if available else 0
         rounds = math.ceil(units / max(1, adapter.concurrency)) if units else 0
-        seconds = round(rounds * _unit_seconds(adapter, row, settings) + SAVE_SECONDS * units, 1)
-        step = {"code": code, "name": adapter.title, "seconds": seconds}
+        per = _unit_seconds(adapter, row, settings)
+        seconds = round(rounds * per + SAVE_SECONDS * units, 1)
+        step = {"code": code, "name": adapter.title, "seconds": seconds, "parallel": True}
+        if units:
+            flow.append((adapter.concurrency, per))
         if not available:
             step["skip"] = "источник выключен" if not row.enabled else adapter.ready(settings)
         out["steps"].append(step)
-        out["seconds"] += seconds
         if available:
             cost = _sum_cost(cost, adapter.cost({"companies": missing_site if code == "find_site" else units},
                                                 settings))
             tokens += int(getattr(adapter, "ai_tokens_per_company", 0) or 0) * units
-    out["seconds"] = round(out["seconds"])
+    out["seconds"] = round(pipeline_seconds(len(ids), flow) + SAVE_SECONDS * len(ids))
     if cost:
         out["cost"] = cost
     if tokens:
@@ -711,7 +773,7 @@ async def create_list_run(db: AsyncSession, ws: int, list_id: int, *, steps, com
     db.add(run)
     await db.flush()
     _running.add(source)
-    progress.start(run_key(run.id), "Функции по базе", [(s["code"], s["name"], s["seconds"]) for s in est["steps"]],
+    progress.start(run_key(run.id), "Функции по базе", [(s["code"], s["name"], s["seconds"], "pipe" if s.get("parallel") else None) for s in est["steps"]],
                    queued=True)
     return run
 
@@ -742,31 +804,9 @@ async def _execute_list(run_id: int, session_factory) -> None:
         ids = list(run.params.get("company_ids") or [])
         result = {"found": len(ids), "new": 0, "updated": 0, "skipped": 0, "signals": {}, "errors": {}, "chain": {}}
         try:
-            for code in run.params.get("steps") or []:
-                adapter, row = await adapter_row(db, code)
-                settings = source_settings.plain(adapter, row.settings)
-                summary = {"found": 0, "updated": 0, "done": 0, "skipped": 0, "failed": 0,
-                           "signals": {}, "errors": {}, "reasons": {}}
-                result["chain"][code] = summary
-                reason = "источник выключен" if not row.enabled else adapter.ready(settings)
-                if reason:
-                    summary["skipped"] = len(ids)
-                    summary["reasons"][reason] = len(ids)
-                    result["errors"][code] = f"{adapter.title}: {reason}"
-                    tracker.end(code, "skipped", reason)
-                    continue
-                started = time.monotonic()
-                units = await _enrich_all(db, run, adapter, settings, tracker, summary, ids=ids)
-                if units:
-                    jr_timing.learn(adapter, row, time.monotonic() - started, units, persist=True)
-                source_settings.mark(row, service.utcnow(), next(iter(summary["errors"].values()), None))
-                result["updated"] += summary["done"]
-                for kind, n in summary["signals"].items():
-                    result["signals"][kind] = result["signals"].get(kind, 0) + n
-                if summary["errors"]:
-                    result["errors"][code] = next(iter(summary["errors"].values()))
-                run.stats = {**(run.stats or {}), "result": deepcopy(result)}
-                await db.commit()
+            await _run_steps(db, run, list(run.params.get("steps") or []), ids, tracker, result, list_mode=True)
+            run.stats = {**(run.stats or {}), "result": deepcopy(result)}
+            await db.commit()
         except Exception as exc:  # noqa: BLE001
             logger.exception("leadgen list run %s failed", run_id)
             await db.rollback()

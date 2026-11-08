@@ -168,7 +168,9 @@ class XmlStockLiveProvider:
         return (await self.search_page(keyword, region_code)).ads
 
     async def search_page(self, keyword: str, region_code: int | None, device: str = "desktop",
-                          page_no: int = 0) -> SerpPage:
+                          page_no: int = 0, want_ads: bool = True) -> SerpPage:
+        """want_ads=False — нужна только органика (поиск сайта, поисковая выдача): без рекламы не повторяем
+        запрос через retry_pause — это +10 с и вдвое больше денег на каждый запрос."""
         if page_no and not PAGE_PARAM:
             raise ProviderError("страницы выдачи дальше первой ещё не включены")
         last: Exception | None = None
@@ -182,7 +184,7 @@ class XmlStockLiveProvider:
                     await self.fetch_raw(keyword, region_code, device)
                 page = parse_xmlstock_page(raw, keyword)
                 # Без рекламных блоков повторяем один раз; если и во второй раз нет — значит, её правда нет.
-                if page.has_ad_blocks or attempt >= 1:
+                if page.has_ad_blocks or attempt >= 1 or not want_ads:
                     return page
                 last = None
             except ProviderUnavailable:
@@ -223,7 +225,8 @@ class StaticProvider:
         self.calls: list[tuple[str, int | None]] = []
         self.devices: list[str] = []
 
-    async def search_page(self, keyword: str, region_code: int | None, device: str = "desktop") -> SerpPage:
+    async def search_page(self, keyword: str, region_code: int | None, device: str = "desktop",
+                          page_no: int = 0, want_ads: bool = True) -> SerpPage:
         self.devices.append(device)
         source = self.mobile if device == "mobile" else None
         ads = ([SerpAd(**{**ad.__dict__, "keyword": keyword}) for ad in source.get(keyword.lower(), [])]

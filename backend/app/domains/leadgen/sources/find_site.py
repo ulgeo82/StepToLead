@@ -55,11 +55,9 @@ def unique_party(items, name, city):
 
 
 async def checked_site(domain, ctx):
-    cache = ctx.cache.setdefault("find_site_crawls", {})
-    if domain not in cache:
-        cache[domain] = await site_enrich.crawl(domain, transport=ctx.transport,
-                                              delay=ctx.cache.get("crawl_delay", site_enrich.DELAY_SECONDS))
-    return cache[domain]
+    """Общий кеш обходов запуска: найденный здесь сайт потом не качают заново «Контакты» и «Тех-профиль»."""
+    return await site_enrich.crawl(domain, transport=ctx.transport, cache=ctx.cache,
+                                   delay=ctx.cache.get("crawl_delay", site_enrich.DELAY_SECONDS))
 
 
 class FindSiteSource(CompanySource):
@@ -70,8 +68,8 @@ class FindSiteSource(CompanySource):
     requires_site = False
     chain_default = True
     field_source = "site_search"
-    unit_seconds = 12
-    concurrency = 2
+    unit_seconds = 6
+    concurrency = 6           # XMLStock сам держит паузу между запросами (min_interval), сайты — разные
     settings_schema = [{"key": "price_per_1000", "label": "Цена 1000 запросов, ₽", "type": "number", "default": 25}]
 
     def cost(self, query, settings):
@@ -119,7 +117,7 @@ class FindSiteSource(CompanySource):
         seen = set()
         for query in queries:
             try:
-                page = await provider.search_page(query.strip(), company.region_code or 225)
+                page = await provider.search_page(query.strip(), company.region_code or 225, want_ads=False)
             except Exception:
                 return Enrichment(status="done" if fields else "failed", error="поиск не ответил",
                                   fields=fields, counters={"inn_found": int(bool(fields))})

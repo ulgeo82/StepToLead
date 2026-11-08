@@ -62,7 +62,7 @@ class Provider:
     def __init__(self):
         self.calls = []
 
-    async def search_page(self, query, region):
+    async def search_page(self, query, region, want_ads=True):
         self.calls.append((query, region))
         return SerpPage(organic=[SerpOrganic(query, "https://rusprofile.ru/1"),
                                   SerpOrganic(query, "https://hh.ru/employer/1"),

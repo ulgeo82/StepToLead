@@ -38,6 +38,7 @@ class NameCleanSource(CompanySource):
     requires_site = False
     chain_default = True
     unit_seconds = 1
+    concurrency = 50   # без сети — чистая функция
 
     async def enrich(self, company, settings, ctx):
         if (company.provenance.get("display_name") or {}).get("source") == "manual":
