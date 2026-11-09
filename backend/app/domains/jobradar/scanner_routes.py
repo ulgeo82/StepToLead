@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -399,10 +400,16 @@ async def test_scanner(scanner_id: int, db: AsyncSession = Depends(get_db), admi
     return {"ok": True}
 
 
+PREVIEW_KEEP_SECONDS = 600
+_previews: dict[int, dict] = {}   # scanner_id -> {"at": time, "result": {...}} — последний предпросмотр, 10 минут
+
+
 @router.post("/scanners/{scanner_id}/preview")
 async def preview_scanner(scanner_id: int, payload: PreviewIn, db: AsyncSession = Depends(get_db),
                           admin: AdminUser = Depends(require_admin)):
-    """«Посмотреть, что найдёт»: по включённым запросам сканера или по черновикам из формы. Ничего не сохраняет."""
+    """«Посмотреть, что найдёт»: по включённым запросам сканера или по черновикам из формы. Ничего не сохраняет.
+    Считается отдельной задачей со своей сессией: если уйти со страницы, предпросмотр досчитается, и результат
+    можно забрать при возвращении (GET …/preview/last)."""
     f = await scanner_or_404(db, scanner_id)
     named = await _named_queries(db, f, payload.queries)
     checks = [c for _, _, c in named]
@@ -413,18 +420,39 @@ async def preview_scanner(scanner_id: int, payload: PreviewIn, db: AsyncSession 
     if progress.active(timing.preview_key(f.id)):
         raise HTTPException(409, "Предпросмотр этого сканера уже идёт — дождитесь результата")
     track = await timing.start(db, f, scanners.merged(checks), kind="preview")
-    ctx = await platforms.context(db, first_run_days=payload.days, ai_extract=runner.ai_extractor(workspace_id()))
-    try:
-        found, by_source, _ = await asyncio.wait_for(runner.collect(
-            db, f, runner.now() - timedelta(days=payload.days), ctx, runner.now(), record=False,
-            query=scanners.merged(checks), checks=checks, track=track), 150)
-    except asyncio.TimeoutError:
-        track.finish("error", "Площадки отвечают слишком долго")
-        raise HTTPException(504, "Площадки отвечают слишком долго — попробуйте меньше слов или период")
-    except Exception:
-        track.finish("error", "Предпросмотр прервался из-за ошибки")
-        raise
-    await db.rollback()   # предпросмотр ничего не пишет (состояние каналов тоже)
+    await db.commit()
+    task = asyncio.create_task(_preview_job(f.id, named, payload.days, track))
+    _tasks.add(task)
+    task.add_done_callback(_tasks.discard)
+    return await asyncio.shield(task)
+
+
+@router.get("/scanners/{scanner_id}/preview/last")
+async def last_preview(scanner_id: int, db: AsyncSession = Depends(get_db),
+                       admin: AdminUser = Depends(require_admin)):
+    await scanner_or_404(db, scanner_id)
+    last = _previews.get(scanner_id)
+    if not last or time.time() - last["at"] > PREVIEW_KEEP_SECONDS:
+        return {"state": "none"}
+    return {"state": "done", "at": last["at"], "result": last["result"]}
+
+
+async def _preview_job(scanner_id: int, named: list[tuple], days: int, track) -> dict:
+    checks = [c for _, _, c in named]
+    async with runner.session_factory() as db:
+        f = await db.get(JrFilter, scanner_id)
+        ctx = await platforms.context(db, first_run_days=days, ai_extract=runner.ai_extractor(workspace_id()))
+        try:
+            found, by_source, _ = await asyncio.wait_for(runner.collect(
+                db, f, runner.now() - timedelta(days=days), ctx, runner.now(), record=False,
+                query=scanners.merged(checks), checks=checks, track=track), 150)
+        except asyncio.TimeoutError:
+            track.finish("error", "Площадки отвечают слишком долго")
+            raise HTTPException(504, "Площадки отвечают слишком долго — попробуйте меньше слов или период")
+        except Exception:
+            track.finish("error", "Предпросмотр прервался из-за ошибки")
+            raise
+        await db.rollback()   # предпросмотр ничего не пишет (состояние каналов тоже)
     track.begin("match", note=f"{len(found)} вакансий")
     by_query = [{"id": qid, "name": name, "found": 0, "passed": 0} for qid, name, _ in named]
     items = []
@@ -449,14 +477,16 @@ async def preview_scanner(scanner_id: int, payload: PreviewIn, db: AsyncSession 
                       "query": named[hit][1] if hit is not None else None})
     items.sort(key=lambda i: (not i["ok"], (i["company"] or "").lower()))
     matched = [i for i in items if i["ok"]]
-    track.finish("done", f"Готово: найдено {len(items)}, подходит {len(matched)}")
     sources = [{"code": code, "name": posting.source_name(code),
                 "found": b.get("found", 0) if b.get("state") == "ok" else None,
                 "skipped": b.get("note") if b.get("state") == "skipped" else None,
                 "error": b.get("error") if b.get("state") == "error" else None} for code, b in by_source.items()]
-    return {"days": payload.days, "sources": sources, "total": len(items), "matched": len(matched),
-            "companies": len({(i["company"] or "").lower() for i in matched}), "by_query": by_query,
-            "items": items[:300]}
+    result = {"days": days, "sources": sources, "total": len(items), "matched": len(matched),
+              "companies": len({(i["company"] or "").lower() for i in matched}), "by_query": by_query,
+              "items": items[:300]}
+    _previews[scanner_id] = {"at": time.time(), "result": result}
+    track.finish("done", f"Готово: найдено {len(items)}, подходит {len(matched)}")
+    return result
 
 
 @router.get("/scanners/{scanner_id}/feed")

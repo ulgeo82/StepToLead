@@ -64,6 +64,7 @@ class EmailByInnSource(CompanySource):
     unit_seconds = 1.0
     concurrency = 4                 # платные API — вежливо
     fresh_days = 90                 # реестры меняются редко, а запрос стоит денег
+    skip_recent = True
     settings_schema = [
         {"key": "checko_key", "label": "Ключ API Checko", "type": "secret", "default": None,
          "hint": "checko.ru → Личный кабинет → API. Без ключа ищем только в DaData."},
@@ -118,7 +119,8 @@ class EmailByInnSource(CompanySource):
         if not company.inn:
             return Enrichment(status="skipped", error="нет ИНН")
         if settings.get("only_missing", True) and any(
-                c.get("kind") == "email" and not c.get("is_personal") for c in company.contacts):
+                c.get("kind") == "email" and not c.get("is_personal")
+                and c.get("verify_status") != "invalid" and not c.get("bounced") for c in company.contacts):
             return Enrichment(status="skipped", error="почта уже есть")
         tried, errors, emails, sites, used = [], [], [], [], None
         token = self._dadata_token() if settings.get("use_dadata", True) else None

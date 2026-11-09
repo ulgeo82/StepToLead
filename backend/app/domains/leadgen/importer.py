@@ -18,7 +18,7 @@ SOURCE = "import"
 
 def _personal(email: str, domain: str | None) -> bool:
     from app.domains.leadgen.site_enrich import _looks_personal
-    return bool(domain) and _looks_personal(email, domain)
+    return _looks_personal(email, domain or "")
 
 
 async def import_parsed(db: AsyncSession, workspace_id: int, parsed: Parsed, *, niche: str | None = None,
@@ -30,8 +30,11 @@ async def import_parsed(db: AsyncSession, workspace_id: int, parsed: Parsed, *, 
     db.add(run)
     await db.flush()
     created, attached, review, skipped = [], [], 0, []
+    personal_dropped = 0
     for row in parsed.rows:
-        contacts = [{"kind": "email", "value": e, "is_personal": _personal(e, row.domain)} for e in row.emails]
+        shared = [email for email in row.emails if not _personal(email, row.domain)]
+        personal_dropped += len(row.emails) - len(shared)
+        contacts = [{"kind": "email", "value": email} for email in shared]
         contacts += [{"kind": "telegram", "value": t} for t in row.telegram]
         contacts += [{"kind": "whatsapp", "value": w} for w in row.whatsapp]
         result = await service.upsert_company(db, workspace_id, service.FindingIn(
@@ -51,6 +54,6 @@ async def import_parsed(db: AsyncSession, workspace_id: int, parsed: Parsed, *, 
                  "already_in_base": len(set(attached) - set(created)), "needs_review": review,
                  "invalid": len(parsed.invalid) + len(skipped), "truncated": parsed.truncated,
                  "columns": parsed.columns, "errors": (parsed.invalid + skipped)[:50],
-                 "company_ids": ids, "new_company_ids": created}
+                 "company_ids": ids, "new_company_ids": created, "personal_dropped": personal_dropped}
     await db.flush()
     return run

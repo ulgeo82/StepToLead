@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
+import { ContactProgress, ContactRun } from "../../contact-progress";
 import AddToCampaignDialog from "../../../outreach/campaigns/AddToCampaignDialog";
 import { AddToListDialog, CompanyAction, CompanyCard } from "../../company-dialogs";
 import ExportDialog from "../../ExportDialog";
@@ -49,6 +50,7 @@ function Workspace({ id }: { id: number }) {
   const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [contactRun, setContactRun] = useState<ContactRun | null>(null);
   const [verified, setVerified] = useState<number | null>(null);
   const [withEmail, setWithEmail] = useState<number | null>(null);
   const [companyId, setCompanyId] = useState<number | null>(null);
@@ -238,7 +240,11 @@ function Workspace({ id }: { id: number }) {
     await execute(async signal => {
       if (action === "dnc") await post("/dnc", { kind: "company", value: String(ids[0]), reason: "refused" }, signal);
       else if (action === "restore") await post("/companies/hide", { company_ids: ids, hidden: false }, signal);
-      else await post(`/companies/${action}`, { company_ids: ids, ...(action === "assess" ? { force: true } : {}) }, signal);
+      else if (action === "enrich") {
+        const since = Date.now() / 1000;
+        const data = await post<{ run_id: number }>("/companies/enrich", { company_ids: ids }, signal);
+        setContactRun({ id: data.run_id, since, active: true });
+      } else await post(`/companies/${action}`, { company_ids: ids, ...(action === "assess" ? { force: true } : {}) }, signal);
       setNotice("Действие выполнено");
       changed();
     });
@@ -270,7 +276,11 @@ function Workspace({ id }: { id: number }) {
     } else setSelected(current => checked ? [...new Set([...current, id])] : current.filter(value => value !== id));
   }
   const feedback = <>{error && <p role="alert" className={styles.error}>{error}</p>}
-    {notice && <p role="status" className={styles.notice}>{notice}</p>}</>;
+    {notice && <p role="status" className={styles.notice}>{notice}</p>}
+    <ContactProgress run={contactRun} finished={() => {
+      setContactRun(current => current ? { ...current, active: false } : null);
+      changed();
+    }}/></>;
 
 
   const actions: WorkspaceAction[] = [
@@ -320,7 +330,7 @@ function Workspace({ id }: { id: number }) {
     {metaError && <p role="alert" className={css.cellError}>{metaError}</p>}
     {!list && !metaError && <p role="status">Загружаем базу…</p>}
     {list && <>
-      {(error || notice) && <div className={css.feedback}>{feedback}</div>}
+      {!companyId && (error || notice || contactRun) && <div className={css.feedback}>{feedback}</div>}
       {sourceError && <p role="alert" className={css.cellError}>{sourceError}</p>}
       <FunctionPanel listId={id} sources={sources} ids={selected} total={list.total} allSelected={allSelected}
         locked={busy} changed={changed} running={setRunning} actions={<CompactActions items={actions}/>}/>

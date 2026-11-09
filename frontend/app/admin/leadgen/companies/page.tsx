@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
+import { ContactProgress, ContactRun } from "../contact-progress";
+import { notifyTasks, useResumeTask } from "@/components/tasks";
 import {
   base,
   blocked,
@@ -180,6 +182,16 @@ function CompaniesPage() {
   const [selected, setSelected] = useState<number[]>([]);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
+  const [contactRun, setContactRun] = useState<ContactRun | null>(null);
+  const resumedContacts = useResumeTask(task => task.page === "contacts");
+  useEffect(() => {
+    if (!resumedContacts?.run_id || contactRun?.active) return;
+    setContactRun({ id: resumedContacts.run_id, since: resumedContacts.started_at ?? 0, active: true });
+  }, [resumedContacts?.key]); // eslint-disable-line react-hooks/exhaustive-deps
+  function contactsFinished() {
+    setContactRun(current => current ? { ...current, active: false } : null);
+    setRevision(value => value + 1);
+  }
   const [outreach, setOutreach] = useState<Outreach | null>(null);
   const [revision, setRevision] = useState(0);
   const [segmentDialog, setSegmentDialog] = useState(false);
@@ -287,12 +299,15 @@ function CompaniesPage() {
     setOutreach(null);
     try {
       if (action === "enrich") {
-        const data = await post<{ queued: number; skipped: number }>("/companies/enrich", {
+        const since = Date.now() / 1000;
+        const data = await post<{ queued: number; skipped: number; run_id: number }>("/companies/enrich", {
           company_ids: ids,
         });
         setNotice(
-          `Сбор контактов поставлен в очередь: ${data.queued}. Пропущено: ${data.skipped}. Обновите базу после завершения сбора.`,
+          `Сбор контактов поставлен в очередь: ${data.queued}. Пропущено: ${data.skipped}.`,
         );
+        setContactRun({ id: data.run_id, since, active: true });
+        notifyTasks();
       } else if (action === "assess") {
         const data = await post<{ queued: number; skipped: number }>("/companies/assess", {
           company_ids: ids,
@@ -431,6 +446,7 @@ function CompaniesPage() {
           {notice}
         </p>
       )}
+      {!companyId && <ContactProgress run={contactRun} finished={contactsFinished}/>}
       {outreach && (
         <div className={styles.notice} role="status">
           <strong>
@@ -911,6 +927,7 @@ function CompaniesPage() {
           pipeline={pipeline}
           feedback={
             <>
+              <ContactProgress run={contactRun} finished={contactsFinished}/>
               {error && (
                 <p role="alert" className={styles.error}>
                   {error}

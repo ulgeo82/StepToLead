@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { Estimate, EstimateHint, TaskProgress } from "@/components/task-progress";
+import { notifyTasks, useResumeTask } from "@/components/tasks";
 import { api } from "@/lib/api";
 import styles from "../leadgen/leadgen.module.css";
 import local from "./jobradar.module.css";
@@ -32,12 +33,33 @@ export function Queries({ scanner, changed }: { scanner: Scanner; changed: () =>
   const [preview, setPreview] = useState<Preview | null>(null);
   const [looking, setLooking] = useState(false);
   const [since, setSince] = useState(0);
+  const [resumedLook, setResumedLook] = useState(false);
+  const [lastAt, setLastAt] = useState<number | null>(null);
   const estimate = useEstimate(scanner, null, looking);
+  // Предпросмотр считается на сервере, даже если уйти со страницы: при возвращении показываем его ход,
+  // а готовый результат (последние 10 минут) забираем с сервера.
+  const resumed = useResumeTask(task => task.page === "jobradar-preview" && task.run_id === scanner.id);
+  useEffect(() => {
+    if (!resumed || looking) return;
+    setSince(resumed.started_at ?? 0);
+    setResumedLook(true);
+    setLooking(true);
+  }, [resumed?.key]); // eslint-disable-line react-hooks/exhaustive-deps
+  async function loadLast() {
+    try {
+      const last = await api<{ state: string; at?: number; result?: Preview }>(`${base}/scanners/${scanner.id}/preview/last`);
+      if (last.state === "done" && last.result) { setPreview(last.result); setLastAt(last.at ?? null); }
+    } catch { /* нет — значит, нет */ }
+  }
+  useEffect(() => { void loadLast(); }, [scanner.id]); // eslint-disable-line react-hooks/exhaustive-deps
   async function look(queries?: QueryDraft[]) {
     setSince(Date.now() / 1000);
     setLooking(true);
+    setResumedLook(false);
     setPreview(null);
+    setLastAt(null);
     setError("");
+    notifyTasks();
     try { setPreview(await send<Preview>(`/scanners/${scanner.id}/preview`, { days, ...(queries ? { queries } : {}) })); }
     catch (e) { setError(scannerError(e)); }
     finally { setLooking(false); }
@@ -100,7 +122,10 @@ export function Queries({ scanner, changed }: { scanner: Scanner; changed: () =>
       {!looking && <EstimateHint estimate={estimate}/>}
     </div>
     <small className={styles.hint}>Без сохранения находок и отправки в Telegram, базу компаний или CRM.</small>
-    {looking && <TaskProgress url={`${base}/scanners/${scanner.id}/progress?kind=preview`} active since={since}/>}
+    {looking && <TaskProgress url={`${base}/scanners/${scanner.id}/progress?kind=preview`} active since={since}
+      onFinish={() => { if (resumedLook) { setLooking(false); setResumedLook(false); void loadLast(); } }}/>}
+    {preview && lastAt && !looking && <small className={styles.hint}>
+      Последний предпросмотр — {new Date(lastAt * 1000).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}</small>}
     {preview && <PreviewResults preview={preview}/>}
   </section>;
 }

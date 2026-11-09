@@ -195,7 +195,8 @@ async def clean_chain(db, adapter, then):
         if code in out:
             raise RunError(422, "Шаги цепочки не должны повторяться")
         out.append(code)
-    return out
+    order = {code: i for i, code in enumerate(WORKSPACE_ORDER)}
+    return sorted(out, key=lambda code: order.get(code, len(order)))
 
 
 def _sum_cost(current, extra):
@@ -265,7 +266,8 @@ async def estimate(db: AsyncSession, ws: int, code: str, *, query: dict | None, 
 # ---------------------------------------------------------------- запуск
 
 async def create_run(db: AsyncSession, ws: int, code: str, *, query: dict | None, target: dict | None,
-                     list_name: str | None, admin_id: int | None, then: list[str] | None = None) -> LgSourceRun:
+                     list_name: str | None, admin_id: int | None, then: list[str] | None = None,
+                     recheck: bool = False) -> LgSourceRun:
     adapter, row = await adapter_row(db, code)
     settings = source_settings.plain(adapter, row.settings)
     chain = await clean_chain(db, adapter, then)
@@ -279,7 +281,7 @@ async def create_run(db: AsyncSession, ws: int, code: str, *, query: dict | None
         LgSourceRun.created_at > service.utcnow() - timedelta(hours=3)))   # зависший после перезапуска — не держит
     if busy:
         raise RunError(409, "Этот источник уже запущен")
-    params: dict = {"kind": adapter.kind}
+    params: dict = {"kind": adapter.kind, "recheck": recheck}
     if adapter.kind == "enricher":
         params["company_ids"] = await resolve_target(db, ws, target)
         params["target"] = {k: v for k, v in (target or {}).items() if k != "company_ids"} or {"company_ids": True}
@@ -466,6 +468,22 @@ async def _pipeline(db, run, steps, ids, tracker, *, chained: bool = True) -> di
             code = adapter.code
             async with lock:
                 company = await db.get(LgCompany, cid)
+                if adapter.skip_recent and not (run.params or {}).get("recheck"):
+                    previous = await db.scalar(select(LgEnrichment).where(
+                        LgEnrichment.company_id == cid, LgEnrichment.step == code))
+                    if (previous and previous.status in ("done", "skipped") and previous.ran_at
+                            and (previous.result or {}).get("tried")
+                            and service._aware(previous.ran_at) > service.utcnow() - timedelta(days=adapter.fresh_days)):
+                        summary["skipped"] += 1
+                        summary["reasons"]["проверяли недавно"] = summary["reasons"].get("проверяли недавно", 0) + 1
+                        tracker.tick(code)
+                        continue
+                if code == "fit_ai" and (run.params or {}).get("kind") == "enrichment" and company.fit_label:
+                    summary["skipped"] += 1
+                    reason = "компания уже оценена"
+                    summary["reasons"][reason] = summary["reasons"].get(reason, 0) + 1
+                    tracker.tick(code)
+                    continue
                 if adapter.requires_site and not company.domain:
                     summary["skipped"] += 1
                     summary["reasons"]["нет сайта"] = summary["reasons"].get("нет сайта", 0) + 1
@@ -476,7 +494,8 @@ async def _pipeline(db, run, steps, ids, tracker, *, chained: bool = True) -> di
                                    inn=company.inn, region_code=company.region_code, legal_name=company.legal_name,
                                    provenance=company.provenance or {},
                                    contacts=[{"id": x.id, "kind": x.kind, "value": x.value, "is_personal": x.is_personal,
-                                              "verified_at": x.verified_at} for x in contacts])
+                                              "verified_at": x.verified_at, "verify_status": x.verify_status,
+                                              "bounced": x.bounced} for x in contacts])
             started = time.monotonic()
             async with gates[code]:
                 enr = await _safe_enrich(adapter, view, settings, ctx)
@@ -538,8 +557,8 @@ async def apply_enrichment(db: AsyncSession, company: LgCompany, code: str, enr:
                             expires_at=now + timedelta(days=s.ttl_days) if s.ttl_days else None))
         await _add_contacts(db, company, code, enr.contacts, now)
         if enr.fields:
-            if code == "find_site":
-                await _identity_fields(db, company, enr, now)
+            if code in {"find_site", "email_by_inn"}:
+                await _identity_fields(db, company, enr, now, code=code)
             else:
                 service._apply_fields(company, enr.fields, REGISTRY[code].field_source or code, None, now)
         for update in enr.contact_updates:
@@ -560,7 +579,7 @@ async def apply_enrichment(db: AsyncSession, company: LgCompany, code: str, enr:
         await service.recalc_score(db, company, now=now)
 
 
-async def _identity_fields(db, company, enr, now):
+async def _identity_fields(db, company, enr, now, *, code="find_site"):
     keys = {k: v for k, v in enr.fields.items() if k in {"inn", "domain"}}
     for key, value in keys.items():
         other = await db.scalar(select(LgCompany.id).where(LgCompany.workspace_id == company.workspace_id,
@@ -568,6 +587,11 @@ async def _identity_fields(db, company, enr, now):
         keyed = await db.scalar(select(LgCompanyKey.id).where(LgCompanyKey.workspace_id == company.workspace_id,
             LgCompanyKey.company_id != company.id, LgCompanyKey.kind == key, LgCompanyKey.value_norm == value))
         if other or keyed:
+            if code == "email_by_inn":
+                keys.pop(key, None)
+                enr.fields.pop(key, None)
+                enr.counters.pop("sites", None)
+                break
             company.needs_review = "find_site:duplicate"
             enr.profile["conflict"] = "find_site:duplicate"
             enr.counters.clear()
@@ -580,6 +604,10 @@ async def _identity_fields(db, company, enr, now):
             await db.flush()
     except IntegrityError:
         await db.refresh(company)
+        if code == "email_by_inn":
+            enr.fields.pop("domain", None)
+            enr.counters.pop("sites", None)
+            return
         company.needs_review = "find_site:duplicate"
         enr.profile["conflict"] = "find_site:duplicate"
         enr.counters.clear()
@@ -722,18 +750,26 @@ async def list_targets(db: AsyncSession, ws: int, list_id: int, company_ids: lis
 
 
 async def list_estimate(db: AsyncSession, ws: int, list_id: int, *, steps, company_ids=None) -> dict:
-    order = ordered_steps(steps)
     ids = await list_targets(db, ws, list_id, company_ids)
+    return await steps_estimate(db, ids, steps)
+
+
+async def steps_estimate(db: AsyncSession, ids: list[int], steps, *, companies: int | None = None) -> dict:
+    """Общая оценка конвейера: база, кнопка контактов и цепочка Директа."""
+    order = ordered_steps(steps)
+    count = len(ids) if companies is None else companies
     with_site = await _with_site(db, ids)
     missing_site = await db.scalar(select(func.count()).select_from(LgCompany).where(
         LgCompany.id.in_(ids), LgCompany.domain.is_(None)))
-    out = {"seconds": 0, "steps": [], "companies": len(ids)}
+    if companies is not None:
+        with_site = missing_site = count  # до поиска состав базы неизвестен: верхняя оценка
+    out = {"seconds": 0, "steps": [], "companies": count}
     cost, tokens, flow = None, 0, []
     for code in order:
         adapter, row = await adapter_row(db, code)
         settings = source_settings.plain(adapter, row.settings)
         available = row.enabled and adapter.ready(settings) is None
-        units = (with_site if adapter.requires_site else len(ids)) if available else 0
+        units = (with_site if adapter.requires_site else count) if available else 0
         rounds = math.ceil(units / max(1, adapter.concurrency)) if units else 0
         per = _unit_seconds(adapter, row, settings)
         seconds = round(rounds * per + SAVE_SECONDS * units, 1)
@@ -747,7 +783,7 @@ async def list_estimate(db: AsyncSession, ws: int, list_id: int, *, steps, compa
             cost = _sum_cost(cost, adapter.cost({"companies": missing_site if code == "find_site" else units},
                                                 settings))
             tokens += int(getattr(adapter, "ai_tokens_per_company", 0) or 0) * units
-    out["seconds"] = round(pipeline_seconds(len(ids), flow) + SAVE_SECONDS * len(ids))
+    out["seconds"] = round(pipeline_seconds(count, flow) + SAVE_SECONDS * count)
     if cost:
         out["cost"] = cost
     if tokens:
@@ -756,7 +792,7 @@ async def list_estimate(db: AsyncSession, ws: int, list_id: int, *, steps, compa
 
 
 async def create_list_run(db: AsyncSession, ws: int, list_id: int, *, steps, company_ids=None,
-                          admin_id: int | None = None) -> LgSourceRun:
+                          admin_id: int | None = None, recheck: bool = False) -> LgSourceRun:
     order = ordered_steps(steps)
     source = list_run_source(list_id)
     busy = source in _running or await db.scalar(select(LgSourceRun.id).where(
@@ -768,13 +804,32 @@ async def create_list_run(db: AsyncSession, ws: int, list_id: int, *, steps, com
     est = await list_estimate(db, ws, list_id, steps=order, company_ids=company_ids)
     run = LgSourceRun(workspace_id=ws, source=source, status="queued", created_by_id=admin_id,
                       params={"kind": "list", "list_id": list_id, "steps": order, "company_ids": ids,
-                              "scope": "selected" if company_ids is not None else "all"},
+                              "scope": "selected" if company_ids is not None else "all", "recheck": recheck},
                       stats={"company_ids": ids, "list_id": list_id})
     db.add(run)
     await db.flush()
     _running.add(source)
     progress.start(run_key(run.id), "Функции по базе", [(s["code"], s["name"], s["seconds"], "pipe" if s.get("parallel") else None) for s in est["steps"]],
                    queued=True)
+    return run
+
+
+def plan_steps(run_id: int, estimate: dict, title: str = "Сбор контактов"):
+    return progress.start(run_key(run_id), title,
+                          [(s["code"], s["name"], s["seconds"], "pipe") for s in estimate["steps"]], queued=True)
+
+
+async def create_steps_run(db, ws, ids, steps, *, admin_id=None):
+    """Запуск существующих компаний без создания списка; исполняется тем же execute_list."""
+    order = ordered_steps(steps)
+    ids = list(dict.fromkeys(ids))
+    estimate = await steps_estimate(db, ids, order)
+    run = LgSourceRun(workspace_id=ws, source="company_enrichment", status="queued", created_by_id=admin_id,
+                      params={"kind": "enrichment", "steps": order, "company_ids": ids},
+                      stats={"company_ids": ids})
+    db.add(run)
+    await db.flush()
+    plan_steps(run.id, estimate)
     return run
 
 
@@ -799,7 +854,7 @@ async def _execute_list(run_id: int, session_factory) -> None:
         run = await db.get(LgSourceRun, run_id)
         tracker = progress.tracker(run_key(run_id)) or progress.start(run_key(run_id), "Функции по базе", [])
         tracker.run()
-        run.status, run.started_at = "running", service.utcnow()
+        run.status, run.started_at = "running", run.started_at or service.utcnow()
         await db.commit()
         ids = list(run.params.get("company_ids") or [])
         result = {"found": len(ids), "new": 0, "updated": 0, "skipped": 0, "signals": {}, "errors": {}, "chain": {}}
@@ -812,7 +867,10 @@ async def _execute_list(run_id: int, session_factory) -> None:
             await db.rollback()
             run = await db.get(LgSourceRun, run_id)
             message = short_error(exc)
-            run.status, run.error, run.finished_at = "failed", message, service.utcnow()
+            status = "done" if run.source == "yandex_direct" else "failed"
+            run.status, run.error, run.finished_at = status, message, service.utcnow()
+            if run.source == "yandex_direct":
+                result["errors"]["chain"] = message
             run.stats = {**(run.stats or {}), "result": deepcopy(result)}
             await db.commit()
             tracker.finish("error", f"Ошибка: {message}")

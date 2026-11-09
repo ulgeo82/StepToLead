@@ -77,6 +77,7 @@ class RunIn(BaseModel):
     target: dict | None = None
     list_name: str | None = Field(default=None, max_length=180)
     then: list[str] | None = Field(default=None, max_length=10)
+    recheck: bool = False
 
 
 @router.post("/sources/{code}/estimate")
@@ -95,7 +96,7 @@ async def run_source(code: str, payload: RunIn, tasks: BackgroundTasks, db: Asyn
     try:
         run = await source_runner.create_run(db, lg_routes.workspace_id(), code, query=payload.query,
                                              target=payload.target, list_name=payload.list_name, admin_id=admin.id,
-                                             then=payload.then)
+                                             then=payload.then, recheck=payload.recheck)
     except source_runner.RunError as exc:
         raise _http(exc)
     await db.commit()

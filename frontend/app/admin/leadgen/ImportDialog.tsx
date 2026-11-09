@@ -14,6 +14,7 @@ type ImportResult = {
     already_in_base?: number;
     needs_review?: number;
     invalid?: number;
+    personal_dropped?: number;
     truncated?: boolean;
     columns?: Record<string, number>;
     errors?: { line: number; reason: string; value: string }[];
@@ -129,6 +130,7 @@ export default function ImportDialog({ close, completed, listId }: {
             </strong>
             {!!s.needs_review && <p>На проверке (возможный дубль): {s.needs_review}</p>}
             {!!s.invalid && <p>Пропущено строк: {s.invalid}</p>}
+            {!!s.personal_dropped && <p>Личных адресов пропущено: {s.personal_dropped}</p>}
             {s.truncated && <p>Взяли первые 2000 строк — остальное загрузите отдельным файлом.</p>}
             {s.columns && Object.keys(s.columns).length > 0 && (
               <p>

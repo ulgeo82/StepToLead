@@ -156,7 +156,8 @@ class ApplyTests(DbBase):
         self.assertIn(("whatsapp", "+79120001122", False), contacts)
         self.assertIn(("telegram", "kuhni_sever", False), contacts)
         self.assertIn(("email", "info@kuhni-sever.ru", False), contacts)
-        self.assertIn(("email", "ivan.petrov@kuhni-sever.ru", True), contacts)
+        self.assertNotIn(("email", "ivan.petrov@kuhni-sever.ru", True), contacts)
+        self.assertNotIn("ivan.petrov@kuhni-sever.ru", summary["emails"])
         self.assertEqual(kinds, {"has_messenger", "site_quiz", "no_crm"})
         self.assertEqual(c.score, 4)  # мессенджер 2 + квиз 1 + нет CRM 1
         self.assertEqual(step.status, "done")
@@ -170,7 +171,7 @@ class ApplyTests(DbBase):
             await site_enrich.enrich_company(db, c, transport=site(SITE), delay=0, now=NOW)
             return first, await count()
         first, second = self.run_db(fn)
-        self.assertEqual((first, second), (7, 7))  # 2 телефона, WhatsApp, Telegram, 3 почты
+        self.assertEqual((first, second), (6, 6))  # личная почта не сохраняется
 
     def test_inn_owned_by_other_company_goes_to_review(self):
         async def fn(db):
@@ -204,20 +205,29 @@ class ApplyTests(DbBase):
 class EnrichApiTests(DbBase):
     def setUp(self):
         super().setUp()
+        from unittest.mock import patch
+        dns = patch("app.domains.leadgen.sources.email_check.dns_mail", return_value=True)
+        dns.start()
+        self.addCleanup(dns.stop)
 
         async def database():
             async with self.sessions() as db:
                 yield db
-        self._old = (settings.agency_workspace_id, routes.session_factory, routes.site_transport, routes.site_delay)
+        from app.domains.leadgen import source_settings
+        self._source_settings = source_settings
+        self._old = (settings.agency_workspace_id, routes.session_factory, source_settings.transport, source_settings.sleep)
         settings.agency_workspace_id = 7
-        routes.session_factory, routes.site_transport, routes.site_delay = self.sessions, site(SITE), 0
+        async def no_sleep(*args):
+            pass
+        routes.session_factory, source_settings.transport, source_settings.sleep = self.sessions, site(SITE), no_sleep
         app = FastAPI(); app.include_router(api_router, prefix="/api")
         app.dependency_overrides[get_db] = database
         self.client = TestClient(app)
         self.client.cookies.set(COOKIE, "a" * 43)
 
     def tearDown(self):
-        settings.agency_workspace_id, routes.session_factory, routes.site_transport, routes.site_delay = self._old
+        (settings.agency_workspace_id, routes.session_factory,
+         self._source_settings.transport, self._source_settings.sleep) = self._old
         super().tearDown()
 
     def test_enrich_endpoint(self):
@@ -228,7 +238,8 @@ class EnrichApiTests(DbBase):
         a, b = self.run_db(fn)
         r = self.client.post("/api/admin/leadgen/companies/enrich", headers={"Origin": "http://localhost:3000"},
                              json={"company_ids": [a, b, 999]})
-        self.assertEqual(r.json(), {"queued": 1, "skipped": 2})
+        self.assertEqual((r.json()["queued"], r.json()["skipped"]), (2, 1))
+        self.assertIsInstance(r.json()["run_id"], int)
         card = self.client.get(f"/api/admin/leadgen/companies/{a}").json()
         self.assertEqual(card["inn"], INN)
         self.assertIn("whatsapp", {c["kind"] for c in card["contacts"]})

@@ -35,7 +35,7 @@ export type CompanySource = {
   chain_default?: boolean;
 };
 export type Target = { list_id: number } | { segment_id: number };
-export type RunBody = { query?: Values; target?: Target; list_name?: string; then?: string[] };
+export type RunBody = { query?: Values; target?: Target; list_name?: string; then?: string[]; recheck?: boolean };
 export type ChainSummary = {
   done: number; skipped: number; failed: number;
   reasons?: Record<string, number>; errors?: Record<string, string>;

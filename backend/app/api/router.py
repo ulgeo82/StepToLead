@@ -77,3 +77,5 @@ from app.domains.jobradar import routes as jobradar_routes  # noqa: E402
 api_router.include_router(jobradar_routes.router)
 from app.domains.jobradar import scanner_routes as jobradar_scanners  # noqa: E402
 api_router.include_router(jobradar_scanners.router)
+from app.api.routes import tasks as admin_tasks  # noqa: E402
+api_router.include_router(admin_tasks.router)

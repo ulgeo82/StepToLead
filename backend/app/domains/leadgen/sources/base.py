@@ -72,6 +72,7 @@ class CompanySource(Adapter):
     # Какие переменные письма даёт профиль: [{"key","label"}] (lg_enrichments.result[key])
     variables: list[dict] = []
     fresh_days: int = 30              # enricher: не перепроверять компанию чаще (если не «перепроверить все»)
+    skip_recent: bool = False         # opt-in: проверять fresh_days до сетевых запросов
     requires_site: bool = True
     chainable: bool = True
     chain_default: bool = False

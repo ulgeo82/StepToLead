@@ -203,26 +203,24 @@ async def apply_result(db: AsyncSession, company: LgCompany, result: CrawlResult
     now = now or service.utcnow()
     f = result.facts
     source_url = result.fetched[0] if result.fetched else None
+    emails = {email for email in f.emails if not _looks_personal(email, company.domain or "")}
     summary = {
         "pages": result.fetched, "errors": result.errors, "blocked_by_robots": result.blocked_by_robots,
         "phones": sorted(f.phones), "whatsapp": sorted(f.whatsapp), "telegram": sorted(f.telegram),
-        "emails": sorted(f.emails), "inns": sorted(f.inns), "has_quiz": f.has_quiz, "crm": sorted(f.crm),
+        "emails": sorted(emails), "inns": sorted(f.inns), "has_quiz": f.has_quiz, "crm": sorted(f.crm),
         "chats": sorted(f.chats), "has_metrika": f.has_metrika, "inn_status": None,
         "text_excerpt": result.text[:3000],
     }
     if result.ok:
         existing = set((await db.execute(select(LgContact.kind, LgContact.value_norm)
                                          .where(LgContact.company_id == company.id))).all())
-        site_domain = company.domain or ""
         for kind, values in (("phone", f.phones), ("whatsapp", f.whatsapp), ("telegram", f.telegram),
-                             ("email", f.emails)):
+                             ("email", emails)):
             for value in sorted(values):
                 if (kind, value) in existing:
                     continue
-                # Адрес не на домене компании (gmail, mail.ru) — тоже общий канал, но не «именной» по домену.
-                personal = kind == "email" and _looks_personal(value, site_domain)
                 db.add(LgContact(company_id=company.id, kind=kind, value=value, value_norm=value,
-                                 is_personal=personal, source="site", source_url=source_url, found_at=now))
+                                 is_personal=False, source="site", source_url=source_url, found_at=now))
                 existing.add((kind, value))
                 if kind in ("phone", "whatsapp"):
                     await _add_key(db, company, "phone", value)

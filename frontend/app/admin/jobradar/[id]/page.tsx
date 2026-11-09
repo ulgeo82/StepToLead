@@ -13,6 +13,7 @@ import { Queries } from "../scanner-queries";
 import { Platforms, ScannerActions, ScannerAI, ScannerStatistics } from "../scanner-panels";
 import { ScannerFeed } from "../scanner-feed";
 import { Estimate, EstimateHint, ProgressSnapshot, TaskProgress } from "@/components/task-progress";
+import { notifyTasks } from "@/components/tasks";
 
 const tabs = ["Запросы", "Площадки", "Действия", "ИИ", "Лента", "Статистика"];
 
@@ -110,6 +111,7 @@ export default function ScannerPage() {
         const since = Date.now() / 1000;
         await send(`/scanners/${id}/run`, {});
         setRunning({ since });
+        notifyTasks();
       } else {
         await send(`/scanners/${id}/test`, {});
         setNotice("Тестовый пост отправлен — проверьте чат.");

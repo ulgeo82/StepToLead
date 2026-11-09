@@ -117,17 +117,22 @@ class DadataTests(Base_):
 
 
     def test_enrich_chain_site_then_dadata(self):
-        from app.domains.leadgen import routes
+        from unittest.mock import patch
+        from app.domains.leadgen import routes, source_settings, source_runner
         from test_leadgen_site import SITE, site
-        old = (routes.session_factory, routes.site_transport, routes.site_delay, routes.dadata_factory)
-        routes.session_factory, routes.site_transport, routes.site_delay = self.sessions, site(SITE), 0
+        old = (routes.session_factory, source_settings.transport, source_settings.sleep, routes.dadata_factory)
+        async def no_sleep(*args):
+            pass
+        routes.session_factory, source_settings.transport, source_settings.sleep = self.sessions, site(SITE), no_sleep
         routes.dadata_factory = lambda: dadata_mock()
         try:
             cid = self.run_db(lambda db: self.company(db)).id
-            asyncio.run(routes._enrich([cid], only_stale=True))
+            run, _ = self.run_db(lambda db: routes.queue_contacts(db, 7, [cid]))
+            with patch("app.domains.leadgen.sources.email_check.dns_mail", return_value=True):
+                asyncio.run(source_runner.execute_list(run.id, self.sessions))
             c = self.run_db(lambda db: db.get(LgCompany, cid))
         finally:
-            routes.session_factory, routes.site_transport, routes.site_delay, routes.dadata_factory = old
+            routes.session_factory, source_settings.transport, source_settings.sleep, routes.dadata_factory = old
         self.assertEqual((c.inn, c.director_name, c.legal_status), (INN, "Иванов Иван Иванович", "active"))
 
 class RepeatTests(Base_):

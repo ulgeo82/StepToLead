@@ -27,6 +27,39 @@ const fieldMocks = {
     createElement("button", { type: "button", "data-purpose": purpose }, "✨ Подобрать ИИ") },
 };
 
+test("общий блок после поиска выбирает только chainable и не добавляет платный шаг сам", () => {
+  const { AfterSearch, defaultChain } = load("../app/admin/leadgen/sources/after-search.tsx", {
+    "./source-types": types, "../leadgen.module.css": { default: {} },
+  });
+  const sources = [
+    { code: "find_site", kind: "enricher", title: "Найти сайт", chainable: true, chain_default: true,
+      enabled: true, ready: true },
+    { code: "email_by_inn", kind: "enricher", title: "Почта по ИНН", chainable: true,
+      enabled: false, ready: false, ready_reason: "Нужен ключ" },
+    { code: "serp", kind: "finder", title: "Поиск", chainable: false, chain_default: true },
+  ];
+  assert.deepEqual(plain(defaultChain(sources)), ["find_site"]);
+  const html = renderToStaticMarkup(AfterSearch({ sources, selected: ["find_site"], changed() {} }));
+  assert.match(html, /После поиска/);
+  assert.match(html, /Нужен ключ/);
+  assert.equal((html.match(/type="checkbox"/g) || []).length, 2);
+  assert.equal((html.match(/checked=""/g) || []).length, 1);
+});
+
+test("Директ и источник используют один компонент, база отправляет recheck, карточка получает прогресс", () => {
+  const direct = readFileSync(new URL("../app/admin/leadgen/search/page.tsx", import.meta.url), "utf8");
+  const source = readFileSync(new URL("../app/admin/leadgen/sources/source-run.tsx", import.meta.url), "utf8");
+  const workspace = readFileSync(new URL("../app/admin/leadgen/lists/[id]/function-panel.tsx", import.meta.url), "utf8");
+  for (const content of [direct, source]) assert.match(content, /<AfterSearch/);
+  assert.doesNotMatch(direct, /Сразу собрать контакты с сайтов/);
+  assert.match(direct, /TaskProgress/);
+  assert.match(workspace, /recheck/);
+  assert.match(workspace, /Перепроверить недавно проверенные/);
+  const companies = readFileSync(new URL("../app/admin/leadgen/companies/page.tsx", import.meta.url), "utf8");
+  assert.match(companies, /ContactProgress/);
+  assert.match(companies, /run_id/);
+});
+
 test("город, регион и секрет не подставляются из схемы по умолчанию", () => {
   assert.deepEqual(plain(types.defaults([
     { key: "city", type: "text", default: "Город" },

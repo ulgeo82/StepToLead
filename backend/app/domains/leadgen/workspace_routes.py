@@ -130,6 +130,7 @@ class ListRunIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     steps: list[str] = Field(min_length=1, max_length=20)
     company_ids: list[int] | None = Field(default=None, max_length=10000)
+    recheck: bool = False
 
 
 @router.post("/lists/{list_id}/estimate")
@@ -147,7 +148,8 @@ async def list_run(list_id: int, payload: ListRunIn, tasks: BackgroundTasks, db:
                    admin: AdminUser = Depends(require_admin)):
     try:
         run = await source_runner.create_list_run(db, lg_routes.workspace_id(), list_id, steps=payload.steps,
-                                                  company_ids=payload.company_ids, admin_id=admin.id)
+                                                  company_ids=payload.company_ids, admin_id=admin.id,
+                                                  recheck=payload.recheck)
     except source_runner.RunError as exc:
         raise HTTPException(exc.status, exc.detail)
     await db.commit()

@@ -4,11 +4,13 @@ import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { EstimateHint, ProgressSnapshot, TaskProgress } from "@/components/task-progress";
+import { notifyTasks, useResumeTask } from "@/components/tasks";
 import { base, LeadList, Segment, signalLabels } from "../shared";
 import styles from "../leadgen.module.css";
 import { SourceFields } from "./source-fields";
 import { SourceCost } from "./source-cost";
 import { ChainResult, CheckCounters } from "./chain-result";
+import { AfterSearch, defaultChain } from "./after-search";
 import {
   CompanySource, defaults, normalize, RunBody, shortError, SourceEstimate, SourceRun, Target, valid, Values,
 } from "./source-types";
@@ -17,7 +19,8 @@ export function SourceRunner({ source, lists, segments, targetError, initialList
   source: CompanySource; lists: LeadList[]; segments: Segment[]; targetError: string; initialList: string;
   chainSources?: CompanySource[];
 }) {
-  const [after, setAfter] = useState<string[]>(() => chainSources.filter(item => item.chain_default).map(item => item.code));
+  const [after, setAfter] = useState<string[]>(() => defaultChain(chainSources));
+  const [recheck, setRecheck] = useState(false);
   const [query, setQuery] = useState<Values>(() => defaults(source.query_schema));
   const [listName, setListName] = useState("");
   const [targetKind, setTargetKind] = useState<"list" | "segment">("list");
@@ -34,6 +37,12 @@ export function SourceRunner({ source, lists, segments, targetError, initialList
   const [resultRevision, setResultRevision] = useState(0);
   const [error, setError] = useState("");
   const finder = source.kind === "finder";
+  const resumed = useResumeTask(task => task.page === "source" && task.source === source.code);
+  useEffect(() => {
+    if (!resumed?.run_id || run) return;
+    setRun({ id: resumed.run_id, since: resumed.started_at ?? 0 });
+    setActive(true);
+  }, [resumed?.key]); // eslint-disable-line react-hooks/exhaustive-deps
   const target: Target | undefined = targetId ? targetKind === "list"
     ? { list_id: Number(targetId) } : { segment_id: Number(targetId) } : undefined;
   const targetSize = targetKind === "list" ? lists.find(l => String(l.id) === targetId)?.total
@@ -83,13 +92,15 @@ export function SourceRunner({ source, lists, segments, targetError, initialList
     setResult(null);
     setFinished(null);
     const since = Date.now() / 1000;
-    const body: RunBody = { ...estimateBody, ...(finder && listName.trim() ? { list_name: listName.trim() } : {}) };
+    const body: RunBody = { ...estimateBody, recheck,
+      ...(finder && listName.trim() ? { list_name: listName.trim() } : {}) };
     try {
       const value = await api<{ run_id: number }>(`${base}/sources/${encodeURIComponent(source.code)}/run`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
       });
       setRun({ id: value.run_id, since, ...(finder ? {} : { target }) });
       setActive(true);
+      notifyTasks();
     } catch (e) { setError(shortError(e)); }
     finally { setBusy(false); }
   }
@@ -105,14 +116,7 @@ export function SourceRunner({ source, lists, segments, targetError, initialList
           <SourceFields schema={source.query_schema} values={query} prefix={`query-${source.code}`} changed={setQuery}/>
           <label className={styles.field}>Название нового списка (необязательно)<input value={listName}
             onChange={e => setListName(e.target.value)}/></label>
-          {!!chainSources.length && <fieldset className={styles.multiOptions}><legend>После поиска</legend>
-            {chainSources.map(item => <label className={styles.check} key={item.code}>
-              <input type="checkbox" checked={after.includes(item.code)} onChange={e => setAfter(e.target.checked
-                ? [...after, item.code] : after.filter(code => code !== item.code))}/>
-              <span>{item.icon} {item.title}{!item.ready && <small className={styles.hint}>
-                {shortError(new Error(item.ready_reason || "Шаг будет пропущен: источник не готов"))}</small>}</span>
-            </label>)}
-          </fieldset>}
+          {!!chainSources.length && <AfterSearch sources={chainSources} selected={after} changed={setAfter}/>}
         </> : <>
           <label className={styles.field}>Кого дополнить<select value={targetKind} onChange={e => {
             setTargetKind(e.target.value as "list" | "segment"); setTargetId("");
@@ -128,6 +132,10 @@ export function SourceRunner({ source, lists, segments, targetError, initialList
           {targetSize != null && targetSize > 500 && <p role="alert" className={styles.error}>
             Не больше 500 компаний за запуск. Выберите меньший список или сегмент.</p>}
           <small className={styles.hint}>Компании без необходимых для этого шага данных будут пропущены.</small>
+          {source.code === "email_by_inn" && <label className={styles.check}>
+            <input type="checkbox" checked={recheck} onChange={e => setRecheck(e.target.checked)}/>
+            Перепроверить недавно проверенные
+          </label>}
         </>}
         {estimating && <p role="status">Оцениваем время…</p>}
         {estimate?.key === key && <p><EstimateHint estimate={estimate.value}/>

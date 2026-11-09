@@ -7,6 +7,11 @@ import { Advertisement, base, companyName, date, message, money, PageHeader, pos
 import styles from "../leadgen.module.css";
 import { AiQueryPicker } from "../ai-query-picker";
 import { mergeQueries, queryLines } from "../ai-query-utils";
+import { AfterSearch, defaultChain } from "../sources/after-search";
+import { CompanySource, SourceRun } from "../sources/source-types";
+import { ChainResult } from "../sources/chain-result";
+import { Estimate, EstimateHint, TaskProgress } from "@/components/task-progress";
+import { notifyTasks, useResumeTask } from "@/components/tasks";
 
 const statusNames: Record<string, string> = {
   queued: "В очереди",
@@ -21,7 +26,9 @@ export default function SearchPage() {
   const [niche, setNiche] = useState("");
   const [city, setCity] = useState("");
   const [region, setRegion] = useState("");
-  const [enrich, setEnrich] = useState(true);
+  const [sources, setSources] = useState<CompanySource[]>([]);
+  const [after, setAfter] = useState<string[]>([]);
+  const [sourcesError, setSourcesError] = useState("");
   const [repeat, setRepeat] = useState(false);
   const [organic, setOrganic] = useState(true);
   const [mobile, setMobile] = useState(false);
@@ -37,7 +44,7 @@ export default function SearchPage() {
     ],
     [text],
   );
-  const [estimate, setEstimate] = useState<{ requests: number; cost_rub: number } | null>(null);
+  const [estimate, setEstimate] = useState<(Estimate & { requests: number; cost_rub: number | null }) | null>(null);
   const [estimating, setEstimating] = useState(false);
   const [estimateError, setEstimateError] = useState("");
   const [runs, setRuns] = useState<Run[]>([]);
@@ -50,6 +57,31 @@ export default function SearchPage() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [refresh, setRefresh] = useState(0);
+  const [since, setSince] = useState(0);
+  const [completed, setCompleted] = useState<number | null>(null);
+  const [chain, setChain] = useState<SourceRun["result"]["chain"]>();
+  const resumed = useResumeTask(task => task.page === "search");
+  useEffect(() => {
+    if (!resumed?.run_id || selected !== null) return;
+    setSelected(resumed.run_id);
+    setSince(resumed.started_at ?? 0);
+  }, [resumed?.key]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const controller = new AbortController();
+    api<{ items: CompanySource[] }>(`${base}/sources`, { signal: controller.signal }).then(data => {
+      if (!controller.signal.aborted) { setSources(data.items); setAfter(defaultChain(data.items)); }
+    }).catch(e => !controller.signal.aborted && setSourcesError(message(e)));
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    if (!selected || detail?.id !== selected) {
+      setChain(undefined);
+      return;
+    }
+    setChain((detail as Run & { result?: SourceRun["result"] }).result?.chain);
+  }, [selected, detail]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -59,10 +91,10 @@ export default function SearchPage() {
     if (!keywords.length || keywords.length > 500) return () => controller.abort();
     setEstimating(true);
     const timer = setTimeout(() => {
-      api<{ requests: number; cost_rub: number }>(`${base}/runs/estimate`, {
+      api<Estimate & { requests: number; cost_rub: number | null }>(`${base}/runs/estimate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ keywords, devices }),
+        body: JSON.stringify({ keywords, devices, then: after }),
         signal: controller.signal,
       })
         .then((value) => {
@@ -79,7 +111,7 @@ export default function SearchPage() {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [keywords, devices]);
+  }, [keywords, devices, after]);
   useEffect(() => {
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout>;
@@ -153,12 +185,16 @@ export default function SearchPage() {
         ...(region ? { region_code: Number(region) } : {}),
         ...(niche.trim() ? { niche: niche.trim() } : {}),
         ...(city.trim() ? { city: city.trim() } : {}),
-        enrich,
+        then: after,
         repeat,
         organic,
         devices,
       });
       setSelected(run.id);
+      setSince(Date.now() / 1000);
+      notifyTasks();
+      setCompleted(null);
+      setChain(undefined);
       setRefresh((n) => n + 1);
     } catch (e) {
       setError(message(e));
@@ -241,10 +277,8 @@ export default function SearchPage() {
                 setText(current => mergeQueries(queryLines(current), queries).join("\n"))}/>
             </div>
           </div>
-          <label className={styles.check}>
-            <input type="checkbox" checked={enrich} onChange={(e) => setEnrich(e.target.checked)} />
-            Сразу собрать контакты с сайтов
-          </label>
+          <AfterSearch sources={sources} selected={after} changed={setAfter} disabled={busy}/>
+          {sourcesError && <p role="alert" className={styles.error}>{sourcesError}</p>}
           <label className={styles.check}>
             <input type="checkbox" checked={organic} onChange={(e) => setOrganic(e.target.checked)} />
             Сохранить и компании из топ-10 поиска (органика) — в тех же запросах, бесплатно
@@ -261,9 +295,10 @@ export default function SearchPage() {
             {estimating
               ? "Рассчитываем стоимость…"
               : estimate
-                ? `≈ ${estimate.requests} запросов · ${money(estimate.cost_rub)}`
+                ? `≈ ${estimate.requests} запросов${estimate.cost_rub == null ? "" : ` · ${money(estimate.cost_rub)}`}`
                 : "Введите ключевые слова для оценки стоимости"}
           </p>
+          {estimate && <EstimateHint estimate={estimate}/>}
           {estimateError && (
             <p className={styles.error} role="alert">
               {estimateError}
@@ -272,7 +307,7 @@ export default function SearchPage() {
           <button
             type="submit"
             className={styles.primary}
-            disabled={busy || !keywords.length || keywords.length > 500}
+            disabled={busy || !sources.length || !keywords.length || keywords.length > 500}
           >
             {busy ? "Запускаем…" : "Запустить поиск"}
           </button>
@@ -307,7 +342,7 @@ export default function SearchPage() {
                 className={styles.run}
                 aria-pressed={selected === run.id}
                 key={run.id}
-                onClick={() => setSelected(run.id)}
+                onClick={() => { setSelected(run.id); setSince(0); }}
               >
                 <span className={styles.row}>
                   <strong>
@@ -352,6 +387,10 @@ export default function SearchPage() {
             </Link>
           </div>
           {detailLoading && <p role="status">Загружаем результаты…</p>}
+          <TaskProgress key={selected} url={`${base}/runs/${selected}/progress`}
+            active={!!detail && pending(detail) && completed !== selected} since={since}
+            onFinish={() => { setCompleted(selected); setRefresh(value => value + 1); }}/>
+          {chain && <ChainResult chain={chain} names={Object.fromEntries(sources.map(item => [item.code, item.title]))}/>}
           {detailError && (
             <p className={styles.error} role="alert">
               {detailError}

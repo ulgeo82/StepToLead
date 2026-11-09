@@ -238,8 +238,8 @@ class DbTests(base.DbBase):
         async def profiles(db):
             return list((await db.scalars(select(LgEnrichment).where(LgEnrichment.company_id == cid))).all())
         for profile in self.run_db(profiles):
-            self.assertNotIn("text_excerpt", profile.result)
-            self.assertNotIn("ivan.petrov", str(profile.result))
+            self.assertIn("text_excerpt", profile.result)  # нужен fit_ai.build_prompt
+            self.assertNotIn("ivan.petrov@brand.test", profile.result.get("emails", []))
         async def bounce(db):
             c = await db.get(LgContact, found[0].id)
             c.bounced = True

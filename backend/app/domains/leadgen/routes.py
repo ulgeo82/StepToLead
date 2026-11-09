@@ -8,7 +8,7 @@ import asyncio
 import re
 
 from zoneinfo import ZoneInfo
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
@@ -36,22 +36,20 @@ from app.domains.leadgen.providers import ProviderNotConfigured, XmlStockLivePro
 from app.domains.leadgen.queries import SORTS, FilterError, clean_filters, company_query
 from app.models.access import AdminUser
 from app.models.system import AppSetting
+from app.services import progress
 
 router = APIRouter(prefix="/admin/leadgen", tags=["admin-leadgen"])
 
 # Подменяются в тестах.
 session_factory = SessionLocal
 provider_factory = XmlStockLiveProvider
-site_transport = None          # httpx-транспорт для тестов
 dadata_factory = dadata.DadataProvider
 mail_transport_factory = sequences.SmtpImapTransport
 fit_complete = None            # подмена ai.complete в тестах
 fit_available = fit_ai.available
 inbox_complete = None          # подмена ai.complete для разметки входящих в тестах
 inbox_available = inbox.available
-site_delay = site_enrich.DELAY_SECONDS
 ENRICH_FRESH_DAYS = 30
-ENRICH_THREADS = 6             # сколько сайтов обходим одновременно
 
 # Фоновые задачи лидогенерации идут по одной на вид: повторные нажатия встают в очередь,
 # а не запускают параллельные обходы сайтов — портал у клиентов не должен проседать.
@@ -70,12 +68,7 @@ async def _execute(run_id: int) -> None:
     async with job_lock("search"):
         enrich_ids = await _execute_now(run_id)
     if enrich_ids:
-        await _enrich(enrich_ids, only_stale=True)  # уже после того, как очередь поиска освободилась
-
-
-async def _enrich(company_ids: list[int], *, only_stale: bool) -> None:
-    async with job_lock("enrich"):
-        await _enrich_now(company_ids, only_stale=only_stale)
+        await source_runner.execute_list(run_id, session_factory, job_lock("enrich"))
 
 
 async def _assess(company_ids: list[int], force: bool) -> None:
@@ -137,6 +130,7 @@ class RunIn(BaseModel):
     niche: str | None = Field(default=None, max_length=120)
     city: str | None = Field(default=None, max_length=120)
     enrich: bool = True  # после поиска сразу собрать контакты с сайтов новых компаний
+    then: list[str] | None = Field(default=None, max_length=10)
     repeat: bool = False  # повторять каждую неделю (новые и пропавшие рекламодатели)
     organic: bool = False  # сохранить и компании из топ-10 поиска (в тех же запросах, бесплатно)
     devices: list[str] = Field(default_factory=lambda: ["desktop"], max_length=2)  # desktop / mobile
@@ -146,11 +140,41 @@ class EstimateIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     keywords: list[str] = Field(min_length=1, max_length=500)
     devices: list[str] = Field(default_factory=lambda: ["desktop"], max_length=2)
+    then: list[str] | None = Field(default=None, max_length=10)
+    enrich: bool = True
+
+
+async def direct_chain(db, then, enrich=True):
+    from types import SimpleNamespace
+    if then is None:
+        then = [code for code, adapter in source_runner.REGISTRY.items()
+                if adapter.kind == "enricher" and adapter.chain_default] if enrich else []
+    try:
+        return await source_runner.clean_chain(db, SimpleNamespace(kind="finder"), then)
+    except source_runner.RunError as exc:
+        raise HTTPException(exc.status, exc.detail)
 
 
 @router.post("/runs/estimate")
-async def estimate(payload: EstimateIn, admin: AdminUser = Depends(require_admin)):
-    return direct_search.estimate(payload.keywords, make_provider(), payload.devices)
+async def estimate(payload: EstimateIn, db: AsyncSession = Depends(get_db),
+                   admin: AdminUser = Depends(require_admin)):
+    out = direct_search.estimate(payload.keywords, make_provider(), payload.devices)
+    chain = await direct_chain(db, payload.then, payload.enrich)
+    count = min(500, out["requests"] * 10)
+    extra = await source_runner.steps_estimate(db, [], chain, companies=count) if chain else None
+    # Поиск: не обещаем точное число компаний до ответа провайдера.
+    search_seconds = source_runner.pipeline_seconds(out["requests"], [(direct_search.SEARCH_THREADS, 2.0)])
+    out["seconds"] = round(search_seconds + (extra["seconds"] if extra else 0))
+    out["steps"] = [{"code": "search", "name": "Поиск компаний", "seconds": search_seconds}]
+    if extra:
+        out["steps"] += extra["steps"]
+        cost = extra.get("cost")
+        if cost:
+            out["requests"] += cost["requests"]
+            out["cost_rub"] = (round(out["cost_rub"] + cost["rub"], 4)
+                               if cost["rub"] is not None else None)
+    await db.commit()
+    return out
 
 
 async def _execute_now(run_id: int) -> list[int]:
@@ -159,18 +183,33 @@ async def _execute_now(run_id: int) -> list[int]:
         run = await db.get(LgSourceRun, run_id)
         if run is None or run.status != "queued":
             return []
+        tracker = progress.tracker(source_runner.run_key(run_id)) or source_runner.plan_steps(
+            run_id, {"steps": [{"code": "search", "name": "Поиск компаний", "seconds": 5}]}, "Поиск компаний")
+        tracker.begin("search")
         try:
             await direct_search.execute_run(db, run, make_provider())
             await lists.sync_run(db, run)  # каждый запуск — свой список
-            await db.commit()
             stats = run.stats or {}
-            enrich_ids = (list(stats.get("new_company_ids") or []) + list(stats.get("organic_new_ids") or [])
-                          if (run.params or {}).get("enrich") else [])
+            chain = await direct_chain(db, run.params.get("then"), run.params.get("enrich", True))
+            enrich_ids = list(dict.fromkeys(list(stats.get("new_company_ids") or [])
+                                           + list(stats.get("organic_new_ids") or []))) if chain else []
+            if enrich_ids:
+                run.params = {**run.params, "steps": chain, "company_ids": enrich_ids}
+                run.status, run.finished_at = "running", None
+            await db.commit()  # поиск и список не теряются при ошибке подготовки необязательной цепочки
+            tracker.end("search")
+            if enrich_ids:
+                est = await source_runner.steps_estimate(db, enrich_ids, chain)
+                source_runner.plan_steps(run.id, est, "После поиска")
+                await db.commit()
+            else:
+                tracker.finish("done", "Поиск завершён")
         except Exception as exc:  # noqa: BLE001 — запуск помечается упавшим, причина видна в интерфейсе
             await db.rollback()
             run = await db.get(LgSourceRun, run_id)
             run.status, run.error, run.finished_at = "failed", f"{type(exc).__name__}: {exc}"[:500], service.utcnow()
             await db.commit()
+            tracker.finish("error", "Не удалось завершить поиск или подготовить обогащение")
             return []
     return enrich_ids
 
@@ -179,6 +218,7 @@ async def _execute_now(run_id: int) -> list[int]:
 async def create_run(payload: RunIn, tasks: BackgroundTasks, db: AsyncSession = Depends(get_db),
                      admin: AdminUser = Depends(require_admin)):
     ws = workspace_id()
+    chain = await direct_chain(db, payload.then, payload.enrich)
     make_provider()  # 400 сразу, если источник не настроен
     try:
         run = await direct_search.create_run(db, ws, keywords=payload.keywords, region_code=payload.region_code,
@@ -186,8 +226,11 @@ async def create_run(payload: RunIn, tasks: BackgroundTasks, db: AsyncSession = 
     except ValueError as exc:
         raise HTTPException(422, str(exc))
     run.params = {**run.params, "enrich": payload.enrich, "repeat": payload.repeat, "organic": payload.organic,
-                  "devices": direct_search.clean_devices(payload.devices)}
+                  "devices": direct_search.clean_devices(payload.devices), "then": chain}
     await db.commit()
+    source_runner.plan_steps(run.id, {"steps": [{"code": "search", "name": "Поиск компаний",
+        "seconds": source_runner.pipeline_seconds(len(payload.keywords) * len(payload.devices),
+                                                   [(direct_search.SEARCH_THREADS, 2.0)])}]}, "Поиск компаний")
     tasks.add_task(_execute, run.id)
     return run_row(run)
 
@@ -663,53 +706,23 @@ class EnrichIn(BaseModel):
     only_stale: bool = True  # пропускать компании, сайт которых проверяли за последние 30 дней
 
 
-async def _enrich_now(company_ids: list[int], *, only_stale: bool) -> None:
-    from datetime import timedelta
-    try:
-        provider = dadata_factory()
-    except dadata.DadataNotConfigured:
-        provider = None  # без ключа DaData собираем только сайт
-    with_fit = fit_available()
-    gate = asyncio.Semaphore(ENRICH_THREADS)
-
-    async def one(cid: int) -> None:
-        async with gate:
-            await _enrich_one(cid, provider, with_fit, only_stale)
-
-    # Разные сайты обходим параллельно; вежливость к одному сайту (robots, пауза между страницами) сохраняется.
-    await asyncio.gather(*(one(cid) for cid in dict.fromkeys(company_ids)))
+async def queue_contacts(db, ws, ids, *, only_stale=True, admin_id=None):
+    ids = list(dict.fromkeys(ids))
+    valid = list((await db.scalars(select(LgCompany.id).where(
+        LgCompany.workspace_id == ws, LgCompany.id.in_(ids)))).all())
+    if only_stale:
+        recent = set((await db.scalars(select(LgEnrichment.company_id).where(
+            LgEnrichment.company_id.in_(valid), LgEnrichment.step == site_enrich.STEP,
+            LgEnrichment.status == "done",
+            LgEnrichment.ran_at > service.utcnow() - timedelta(days=ENRICH_FRESH_DAYS)))).all())
+        valid = [cid for cid in valid if cid not in recent]
+    run = await source_runner.create_steps_run(
+        db, ws, valid, ["site_contacts", "email_check", "name_clean", "dadata", "fit_ai"], admin_id=admin_id)
+    return run, {"queued": len(valid), "skipped": len(ids) - len(valid), "run_id": run.id}
 
 
-async def _enrich_one(cid: int, provider, with_fit: bool, only_stale: bool) -> None:
-    from datetime import timedelta
-    async with session_factory() as db:
-        company = await db.get(LgCompany, cid)
-        if company is None or not company.domain:
-            return
-        if only_stale:
-            done = await db.scalar(select(LgEnrichment.ran_at).where(
-                LgEnrichment.company_id == cid, LgEnrichment.step == site_enrich.STEP,
-                LgEnrichment.status == "done"))
-            if done and service._aware(done) > service.utcnow() - timedelta(days=ENRICH_FRESH_DAYS):
-                return
-        try:
-            await site_enrich.enrich_company(db, company, transport=site_transport, delay=site_delay)
-            await db.commit()
-        except Exception:  # noqa: BLE001 — одна компания не должна останавливать очередь
-            await db.rollback()
-            return
-        if provider is not None and company.inn:
-            try:
-                await dadata.enrich_legal(db, company, provider)
-                await db.commit()
-            except Exception:  # noqa: BLE001
-                await db.rollback()
-        if with_fit and not company.fit_label:
-            try:
-                await fit_ai.assess(db, company, complete=fit_complete)
-                await db.commit()
-            except Exception:  # noqa: BLE001
-                await db.rollback()
+async def _contacts_background(run_id):
+    await source_runner.execute_list(run_id, session_factory, job_lock("enrich"))
 
 
 @router.post("/companies/enrich", status_code=202)
@@ -725,12 +738,10 @@ async def enrich(payload: EnrichIn, tasks: BackgroundTasks, db: AsyncSession = D
         ids += [i for (i,) in (await db.execute(q)).all() if i not in ids]
     if not ids:
         raise HTTPException(422, "Передайте company_ids или segment_id")
-    rows = (await db.execute(select(LgCompany.id).where(LgCompany.workspace_id == ws, LgCompany.id.in_(ids),
-                                                        LgCompany.domain.is_not(None)))).all()
-    valid = [i for (i,) in rows]
-    await db.commit()  # закрываем транзакцию чтения: фоновая задача пишет в своей сессии
-    tasks.add_task(_enrich, valid, only_stale=payload.only_stale)
-    return {"queued": len(valid), "skipped": len(ids) - len(valid)}
+    run, result = await queue_contacts(db, ws, ids, only_stale=payload.only_stale, admin_id=admin.id)
+    await db.commit()
+    tasks.add_task(_contacts_background, run.id)
+    return result
 
 
 # ---------------------------------------------------------------- в аутрич (CRM)
@@ -1517,10 +1528,14 @@ async def import_companies(tasks: BackgroundTasks, file: UploadFile | None = Fil
     run.params = {**run.params, "enrich": enrich}
     enrich_ids = list(run.stats.get("company_ids") or []) if enrich else []  # only_stale пропустит свежие
     await lists.sync_run(db, run)
+    contacts_run = None
+    if enrich_ids:
+        contacts_run, _ = await queue_contacts(db, ws, enrich_ids, admin_id=admin.id)
     await db.commit()
     if enrich_ids:
-        tasks.add_task(_enrich, enrich_ids, only_stale=True)
-    return {**run_row(run), "enrich_queued": len(enrich_ids)}
+        tasks.add_task(_contacts_background, contacts_run.id)
+    return {**run_row(run), "enrich_queued": len(enrich_ids),
+            "enrich_run_id": contacts_run.id if contacts_run else None}
 
 
 # ---------------------------------------------------------------- чистка базы

@@ -193,6 +193,13 @@ def tracker(key: str) -> Tracker | None:
     return _items.get(key)
 
 
+def listing() -> list[dict]:
+    """Все операции процесса — идущие, в очереди и законченные за последние KEEP_SECONDS — для общего
+    индикатора задач: запущенное видно с любой страницы, а работа идёт на сервере, что бы ни делала вкладка."""
+    _cleanup()
+    return [{**t.snapshot(), "key": key} for key, t in sorted(_items.items(), key=lambda kv: -kv[1].started_wall)]
+
+
 def active(key: str) -> bool:
     t = _items.get(key)
     return bool(t and t.state in ("queued", "running"))

@@ -48,6 +48,8 @@ async def schedule_due(db: AsyncSession, now: datetime | None = None) -> list[in
                                              region_code=p.get("region_code"), niche=p.get("niche"), city=p.get("city"))
         run.params = {**run.params, "repeat": True, "enrich": p.get("enrich", True), "repeat_of": prev.id,
                       "organic": p.get("organic", False), "devices": p.get("devices") or ["desktop"]}
+        if "then" in p:
+            run.params = {**run.params, "then": p["then"]}
         created.append(run.id)
     await db.flush()
     return created

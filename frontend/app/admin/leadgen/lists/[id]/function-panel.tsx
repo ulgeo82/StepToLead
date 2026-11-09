@@ -3,6 +3,7 @@
 import { ReactNode, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { Estimate, EstimateHint, TaskProgress } from "@/components/task-progress";
+import { notifyTasks, useResumeTask } from "@/components/tasks";
 import { base, post } from "../../shared";
 import { ChainResult } from "../../sources/chain-result";
 import { SourceCost } from "../../sources/source-cost";
@@ -20,6 +21,7 @@ export function FunctionPanel({ listId, sources, ids, total, allSelected, locked
   const storageKey = `stl:leadgen:list:${listId}:steps`;
   const [selected, setSelected] = useState<string[]>([]);
   const [scope, setScope] = useState<"all" | "selected">("all");
+  const [recheck, setRecheck] = useState(false);
   const [hydrated, setHydrated] = useState(false);
   const [estimate, setEstimate] = useState<{ key: string; data: RunEstimate } | null>(null);
   const [estimateError, setEstimateError] = useState("");
@@ -32,6 +34,15 @@ export function FunctionPanel({ listId, sources, ids, total, allSelected, locked
   const [result, setResult] = useState<SourceRun | null>(null);
   const [retry, setRetry] = useState(0);
   const selectionCount = allSelected ? total : ids.length;
+  useEffect(() => setRecheck(false), [listId]);
+  // Вернулись на страницу, а запуск по этой базе ещё идёт — снова показываем его прогресс.
+  const resumed = useResumeTask(task => task.page === "list" && task.link === `/admin/leadgen/lists/${listId}`);
+  useEffect(() => {
+    if (!resumed?.run_id || run) return;
+    setRun({ id: resumed.run_id, since: resumed.started_at ?? 0 });
+    setActive(true);
+    running(true);
+  }, [resumed?.key]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => setScope(scopeForSelection(selectionCount)), [selectionCount]);
   useEffect(() => {
     if (!sources.length) return;
@@ -84,10 +95,11 @@ export function FunctionPanel({ listId, sources, ids, total, allSelected, locked
     setFailed(false);
     const since = Date.now() / 1000;
     try {
-      const data = await post<{ run_id: number }>(`/lists/${listId}/run`, body);
+      const data = await post<{ run_id: number }>(`/lists/${listId}/run`, { ...body, recheck });
       setRun({ id: data.run_id, since });
       setActive(true);
       running(true);
+      notifyTasks();
     } catch (e) { setError(shortError(e)); }
     finally { setBusy(false); }
   }
@@ -121,6 +133,10 @@ export function FunctionPanel({ listId, sources, ids, total, allSelected, locked
         <div className={css.functionItems}>{buttons}</div>
       </Popover>
       <div className={css.launch}>
+        {steps.includes("email_by_inn") && <label>
+          <input type="checkbox" checked={recheck} disabled={active || busy || locked}
+            onChange={event => setRecheck(event.target.checked)}/> Перепроверить недавно проверенные
+        </label>}
         <select aria-label="Область запуска" value={scope} disabled={active || busy || locked}
           onChange={e => setScope(e.target.value as "all" | "selected")}>
           <option value="all">Вся база ({total})</option>

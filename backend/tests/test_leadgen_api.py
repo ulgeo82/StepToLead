@@ -15,7 +15,7 @@ from app.api.router import api_router
 from app.core.access import COOKIE, hash_password, token_digest
 from app.core.config import settings
 from app.db import Base, get_db
-from app.domains.leadgen import routes
+from app.domains.leadgen import routes, source_runner
 from app.domains.leadgen.core.serp import SerpAd
 from app.domains.leadgen.providers import ProviderNotConfigured, StaticProvider
 from app.models.access import AdminSession, AdminUser
@@ -48,11 +48,12 @@ class LeadgenApiTests(unittest.TestCase):
         async def database():
             async with self.sessions() as db:
                 yield db
+        from app.domains.leadgen import source_settings
+        self._source_settings = source_settings
         self._old = (settings.agency_workspace_id, routes.session_factory, routes.provider_factory,
-                     routes.site_transport, routes.site_delay)
+                     source_settings.transport)
         # Авто-сбор контактов после поиска: в тестах сайты «недоступны», в сеть не ходим.
-        routes.site_transport = httpx.MockTransport(lambda request: httpx.Response(404))
-        routes.site_delay = 0
+        source_settings.transport = httpx.MockTransport(lambda request: httpx.Response(404))
         settings.agency_workspace_id = 7
         routes.session_factory = self.sessions
         routes.provider_factory = lambda: StaticProvider(DATA)
@@ -63,7 +64,7 @@ class LeadgenApiTests(unittest.TestCase):
 
     def tearDown(self):
         (settings.agency_workspace_id, routes.session_factory, routes.provider_factory,
-         routes.site_transport, routes.site_delay) = self._old
+         self._source_settings.transport) = self._old
         asyncio.run(self.engine.dispose())
         os.unlink(self.path)
 
@@ -95,7 +96,11 @@ class LeadgenApiTests(unittest.TestCase):
 
     def test_estimate(self):
         r = self.post("/api/admin/leadgen/runs/estimate", {"keywords": KEYS})
-        self.assertEqual(r.json(), {"requests": 3, "cost_rub": 0.04})
+        self.assertGreaterEqual(r.json()["requests"], 3)
+        self.assertGreater(r.json()["seconds"], 0)
+        self.assertTrue(r.json()["steps"])
+        plain = self.post("/api/admin/leadgen/runs/estimate", {"keywords": KEYS, "then": []}).json()
+        self.assertEqual((plain["requests"], plain["cost_rub"]), (3, 0.04))
 
     def test_run_then_results_and_company_card(self):
         run_id = self.run_search()
@@ -274,23 +279,24 @@ class JobQueueTests(unittest.TestCase):
     def test_background_jobs_run_one_at_a_time(self):
         """Повторные нажатия «Собрать контакты» не запускают параллельные обходы сайтов."""
         state = {"now": 0, "max": 0, "order": []}
-        original = routes._enrich_now
+        original = source_runner.execute_list
 
-        async def fake(ids, *, only_stale):
-            state["now"] += 1
-            state["max"] = max(state["max"], state["now"])
-            await asyncio.sleep(0.01)
-            state["order"].append(ids[0])
-            state["now"] -= 1
+        async def fake(run_id, session_factory, lock):
+            async with lock:
+                state["now"] += 1
+                state["max"] = max(state["max"], state["now"])
+                await asyncio.sleep(0.01)
+                state["order"].append(run_id)
+                state["now"] -= 1
 
         async def go():
-            await asyncio.gather(*(routes._enrich([i], only_stale=True) for i in (1, 2, 3)),
+            await asyncio.gather(*(routes._contacts_background(i) for i in (1, 2, 3)),
                                  routes._assess_now([], False))  # другая очередь — не ждёт
-        routes._enrich_now = fake
+        source_runner.execute_list = fake
         try:
             asyncio.run(go())
         finally:
-            routes._enrich_now = original
+            source_runner.execute_list = original
         self.assertEqual((state["max"], sorted(state["order"])), (1, [1, 2, 3]))
 
 if __name__ == "__main__":
