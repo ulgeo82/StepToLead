@@ -227,7 +227,7 @@ async def auth_request_code(payload: AuthRequestCode, db: AsyncSession = Depends
         await db.commit()
     await db.refresh(account)
     await status_hub.broadcast(account)
-    return account
+    return (await _with_health(db, [account]))[0]
 
 
 @router.post("/auth/confirm", response_model=AuthResult)
@@ -254,7 +254,7 @@ async def assign_proxy(account_id: int, payload: AccountProxyUpdate, db: AsyncSe
     await db.commit()
     await db.refresh(account)
     await status_hub.broadcast(account)
-    return account
+    return (await _with_health(db, [account]))[0]
 
 
 @router.post("/{account_id}/sync", response_model=TelegramAccountRead)
@@ -266,7 +266,7 @@ async def sync_account(account_id: int, db: AsyncSession = Depends(get_db)):
         await db.commit()
     await db.refresh(account)
     await status_hub.broadcast(account)
-    return account
+    return (await _with_health(db, [account]))[0]
 
 
 @router.patch("/{account_id}/profile", response_model=TelegramAccountRead)
@@ -294,7 +294,7 @@ async def update_profile(
         await db.commit()
     await db.refresh(account)
     await status_hub.broadcast(account)
-    return account
+    return (await _with_health(db, [account]))[0]
 
 
 @router.post("/{account_id}/username/check", response_model=UsernameAvailability)

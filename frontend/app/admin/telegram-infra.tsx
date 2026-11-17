@@ -53,8 +53,8 @@ export function safeDiagnostic(value: string) {
 export function HealthBadge({ health, level }: { health?: Health | null; level?: HealthLevel }) {
   const state = health?.level ?? level ?? "unknown";
   return <span className={css.health} data-level={state}
-    title={health?.reasons.map(safeDiagnostic).join("\n") || undefined}>
-    {healthLabels[state]}{health && state !== "unknown" ? ` · ${health.score}/100` : ""}
+    title={health?.reasons?.map(safeDiagnostic).join("\n") || undefined}>
+    {healthLabels[state]}{health && state !== "unknown" && health.score != null ? ` · ${health.score}/100` : ""}
   </span>;
 }
 

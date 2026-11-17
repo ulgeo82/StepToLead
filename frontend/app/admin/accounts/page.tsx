@@ -9,6 +9,16 @@ import { accountName, AvatarDialog, ImportDialog } from "./batch-dialogs";
 import css from "../telegram-infra.module.css";
 import { MoveToClient } from "../move-to-client";
 
+/* Синхронизация и живые статусы (WebSocket) приходят без посчитанного здоровья и без данных прокси —
+   не затираем ими то, что уже показано, иначе экран падал на health.reasons. */
+function mergeAccount(current: InfraAccount | undefined, update: InfraAccount): InfraAccount {
+  const merged = { ...current, ...update } as InfraAccount;
+  const health = update.health as InfraAccount["health"] | null | undefined;
+  if (!health || !Array.isArray(health.reasons)) merged.health = current?.health as InfraAccount["health"];
+  if (update.proxy == null && current?.proxy && update.proxy_id === current.proxy_id) merged.proxy = current.proxy;
+  return merged;
+}
+
 export default function TelegramAccountsPage() {
   const [accounts, setAccounts] = useState<InfraAccount[]>([]);
   const [proxies, setProxies] = useState<InfraProxy[]>([]);
@@ -62,9 +72,9 @@ export default function TelegramAccountsPage() {
         const updates: InfraAccount[] = payload.type === "snapshot" ? payload.accounts : [payload.account];
         setAccounts(current => {
           const byId = new Map(current.map(account => [account.id, account]));
-          const merged = updates.map(account => ({ ...byId.get(account.id), ...account }));
-          return payload.type === "snapshot" ? merged
-            : [...current.filter(account => account.id !== merged[0].id), ...merged].sort((a, b) => a.id - b.id);
+          // Сокет общий на весь портал: обновляем только аккаунты, которые уже на экране (этого клиента).
+          const known = new Map(updates.filter(account => byId.has(account.id)).map(account => [account.id, account]));
+          return current.map(item => known.has(item.id) ? mergeAccount(item, known.get(item.id)!) : item);
         });
       };
       socket.onclose = () => { if (!stopped) retry = setTimeout(connect, 3000); };
@@ -107,7 +117,7 @@ export default function TelegramAccountsPage() {
     setNotice("Синхронизируем профиль…");
     try {
       const updated = await api<InfraAccount>(`/telegram-accounts/${accountId}/sync`, { method: "POST" });
-      setAccounts((current) => current.map((item) => item.id === updated.id ? { ...item, ...updated } : item));
+      setAccounts((current) => current.map((item) => item.id === updated.id ? mergeAccount(item, updated) : item));
       setNotice("Данные обновлены из Telegram");
     } catch (error) { setNotice("Не удалось выполнить операцию с аккаунтами."); }
   }
@@ -123,7 +133,7 @@ export default function TelegramAccountsPage() {
     data.append("bio", bio); data.append("username", username.replace("@", "")); if (avatar) data.append("avatar", avatar);
     try {
       const updated = await api<InfraAccount>(`/telegram-accounts/${profile.id}/profile`, { method: "PATCH", body: data });
-      setAccounts((current) => current.map((item) => item.id === updated.id ? { ...item, ...updated } : item));
+      setAccounts((current) => current.map((item) => item.id === updated.id ? mergeAccount(item, updated) : item));
       setProfile(null); setNotice("Профиль синхронизирован с Telegram");
     } catch (error) { setNotice("Не удалось выполнить операцию с аккаунтами."); }
     finally { setBusy(false); }
