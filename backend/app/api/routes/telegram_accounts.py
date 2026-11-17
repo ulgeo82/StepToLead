@@ -209,17 +209,23 @@ async def auth_request_code(payload: AuthRequestCode, db: AsyncSession = Depends
     proxy = await db.get(Proxy, payload.proxy_id) if payload.proxy_id else None
     if payload.proxy_id and not own_proxy(proxy):
         raise HTTPException(status_code=404, detail="Выбранный прокси не найден")
+    if proxy is None and account is not None and account.proxy_id:
+        proxy = await db.get(Proxy, account.proxy_id)      # повторный запрос кода — тот же прокси
+    if proxy is None:                                       # «Автоматически» — свободный прокси клиента
+        from app.services import telegram_jobs
+        free = await telegram_jobs.free_proxies(db, 1, workspace_id=tg_space.current())
+        proxy = free[0] if free else None
     if proxy is None:
-        raise HTTPException(status_code=422, detail="Выберите прокси: без него аккаунт не подключаем")
+        raise HTTPException(status_code=422, detail="Нет свободного прокси — добавьте прокси: без него аккаунт не подключаем")
     if account and account.session_encrypted:
         raise HTTPException(status_code=409, detail="Этот аккаунт уже подключён")
     if not account:
-        account = TelegramAccount(phone=phone, proxy_id=payload.proxy_id, status="connecting",
+        account = TelegramAccount(phone=phone, proxy_id=proxy.id, status="connecting",
                                   workspace_id=tg_space.current())
         db.add(account)
         await db.flush()
     else:
-        account.proxy_id = payload.proxy_id
+        account.proxy_id = proxy.id
         account.status = "connecting"
     try:
         await request_login_code(account, proxy)
@@ -239,7 +245,7 @@ async def auth_confirm(payload: AuthConfirmCode, db: AsyncSession = Depends(get_
         await db.commit()
     await db.refresh(account)
     await status_hub.broadcast(account)
-    return AuthResult(account=TelegramAccountRead.model_validate(account), requires_2fa=requires_2fa)
+    return AuthResult(account=(await _with_health(db, [account]))[0], requires_2fa=requires_2fa)
 
 
 @router.patch("/{account_id}/proxy", response_model=TelegramAccountRead)

@@ -8,6 +8,7 @@ import { accountStatuses, HealthBadge, healthLabels, InfraProgress, isFreeProxy,
 import { accountName, AvatarDialog, ImportDialog } from "./batch-dialogs";
 import css from "../telegram-infra.module.css";
 import { MoveToClient } from "../move-to-client";
+import { PhoneLoginDialog } from "./phone-login";
 
 /* Синхронизация и живые статусы (WebSocket) приходят без посчитанного здоровья и без данных прокси —
    не затираем ими то, что уже показано, иначе экран падал на health.reasons. */
@@ -27,6 +28,7 @@ export default function TelegramAccountsPage() {
   const [busy, setBusy] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [avatarsOpen, setAvatarsOpen] = useState(false);
+  const [phoneOpen, setPhoneOpen] = useState(false);
   const [companyLimit, setCompanyLimit] = useState<number | null>(null);
   useEffect(() => { api<{ first_per_day: number }>("/telegram-accounts/limits").then(r => setCompanyLimit(r.first_per_day)).catch(() => {}); }, []);
   async function saveCompanyLimit(value: number) {
@@ -197,6 +199,9 @@ export default function TelegramAccountsPage() {
         <button className="button primary" onClick={() => setImportOpen(true)} disabled={!configured || locked}>
           Импорт tdata
         </button>
+        <button className="button secondary" onClick={() => setPhoneOpen(true)} disabled={!configured || locked}>
+          По номеру телефона
+        </button>
         <button className="button secondary" onClick={() => setAvatarsOpen(true)} disabled={!accounts.length || locked}>
           Аватарки
         </button>
@@ -296,6 +301,7 @@ export default function TelegramAccountsPage() {
     </section>
     {importOpen && <ImportDialog proxies={proxies} free={summary?.proxies.free}
       onChanged={() => void load()} onClose={() => setImportOpen(false)}/>}
+    {phoneOpen && <PhoneLoginDialog proxies={proxies} onChanged={() => void load()} onClose={() => setPhoneOpen(false)}/>}
     {avatarsOpen && <AvatarDialog accounts={accounts} initialIds={ids}
       onChanged={() => void load()} onClose={() => setAvatarsOpen(false)}/>}
 
