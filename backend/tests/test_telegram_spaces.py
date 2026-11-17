@@ -170,6 +170,26 @@ class TelegramSpaceTests(unittest.TestCase):
         self.assertLess(len(data), 8000)
         self.assertIsNone(thumb(b"not an image"))
 
+    def test_first_touch_limit_company_and_account(self):
+        from app.services import tg_limits
+        self.assertEqual(self.client.get("/api/telegram-accounts/limits", headers=AS_CLIENT).json()["first_per_day"],
+                         tg_limits.DEFAULT_FIRST_PER_DAY)
+        r = self.client.put("/api/telegram-accounts/limits", headers=AS_CLIENT, json={"first_per_day": 25})
+        self.assertEqual(r.json()["first_per_day"], 25)
+        self.assertEqual(self.client.get("/api/telegram-accounts/limits").json()["first_per_day"],
+                         tg_limits.DEFAULT_FIRST_PER_DAY)          # у агентства свой лимит
+        self.assertEqual(self.client.patch("/api/telegram-accounts/22/limit", headers=AS_CLIENT,
+                                           json={"daily_first_limit": 40}).status_code, 200)
+        self.assertEqual(self.client.patch("/api/telegram-accounts/22/limit", headers=ORIGIN,
+                                           json={"daily_first_limit": 40}).status_code, 404)
+
+        async def limits(db):
+            a22, a21 = await db.get(TelegramAccount, 22), await db.get(TelegramAccount, 21)
+            return await tg_limits.first_limit(db, a22), await tg_limits.first_limit(db, a21)
+        self.assertEqual(self.run_db(limits), (40, tg_limits.DEFAULT_FIRST_PER_DAY))
+        self.client.patch("/api/telegram-accounts/22/limit", headers=AS_CLIENT, json={"daily_first_limit": None})
+        self.assertEqual(self.run_db(limits)[0], 25)
+
 
 if __name__ == "__main__":
     unittest.main()

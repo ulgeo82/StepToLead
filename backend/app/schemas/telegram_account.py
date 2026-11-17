@@ -41,6 +41,7 @@ class TelegramAccountRead(BaseModel):
     created_at: datetime
     proxy_info: dict | None = Field(default=None, serialization_alias="proxy")   # {id, host, port, scheme, status, health_level}
     health: dict | None = None      # docs/TELEGRAM_INFRA.md, раздел 2
+    daily_first_limit: int | None = None   # None — берётся лимит компании
     avatar_thumb: str | None = None   # маленькая аватарка (data URL), None — фото нет или ещё не синхронизировали
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)

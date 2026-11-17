@@ -26,7 +26,7 @@ def upgrade_existing_schema(connection):
                          "salary_known": "BOOLEAN NOT NULL DEFAULT TRUE", "extra": "JSON"},
         "messages": {"meta": "JSON"},
         "ai_usage": {"bucket": "VARCHAR(12) NOT NULL DEFAULT 'client'"},
-        "telegram_accounts": {"health": "JSON", "workspace_id": "INTEGER", "avatar_thumb": "TEXT"},
+        "telegram_accounts": {"health": "JSON", "workspace_id": "INTEGER", "avatar_thumb": "TEXT", "daily_first_limit": "INTEGER"},
         "campaigns": {"workspace_id": "INTEGER"},
         "campaign_messages": {"author_id": "INTEGER"},
         "proxies": {"exit_ip": "VARCHAR(64)", "latency_ms": "INTEGER", "health": "JSON", "workspace_id": "INTEGER",

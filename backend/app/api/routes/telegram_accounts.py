@@ -490,6 +490,38 @@ class IdsIn(BaseModel):
     ids: list[int] | None = Field(default=None, max_length=5000)
 
 
+class LimitsIn(BaseModel):
+    first_per_day: int = Field(ge=0, le=200)
+
+
+class AccountLimitIn(BaseModel):
+    daily_first_limit: int | None = Field(default=None, ge=0, le=200)
+
+
+@router.get("/limits")
+async def get_limits(db: AsyncSession = Depends(get_db)):
+    """Лимит первых касаний на аккаунт в день — настройка компании (выбранного клиента)."""
+    from app.services import tg_limits
+    return await tg_limits.company(db, tg_space.current())
+
+
+@router.put("/limits")
+async def put_limits(payload: LimitsIn, db: AsyncSession = Depends(get_db)):
+    from app.services import tg_limits
+    out = await tg_limits.save_company(db, tg_space.current(), payload.first_per_day)
+    await db.commit()
+    return out
+
+
+@router.patch("/{account_id}/limit")
+async def put_account_limit(account_id: int, payload: AccountLimitIn, db: AsyncSession = Depends(get_db)):
+    """Точечно поднять/опустить лимит аккаунту; null — снова как у компании."""
+    account = tg_space.require(await db.get(TelegramAccount, account_id), "Аккаунт не найден")
+    account.daily_first_limit = payload.daily_first_limit
+    await db.commit()
+    return {"id": account.id, "daily_first_limit": account.daily_first_limit}
+
+
 class MoveIn(BaseModel):
     ids: list[int] = Field(min_length=1, max_length=5000)
     workspace_id: int = Field(gt=0)

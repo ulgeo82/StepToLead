@@ -318,12 +318,16 @@ async def process_dialog(db, client, runtime, settings, dialog):
 
 
 async def first_message(db, client, runtime, settings, account):
-    if settings.daily_limit == 0:
+    if settings.daily_limit == 0:      # у кампании первые сообщения выключены
+        return False
+    from app.services import tg_limits
+    limit = await tg_limits.first_limit(db, account)   # лимит аккаунта, иначе компании (docs/TELEGRAM_INFRA.md)
+    if limit <= 0:
         return False
     local = now().astimezone(timezone(timedelta(hours=settings.timezone_offset)))
     day_start = local.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
     count = await db.scalar(select(func.count()).select_from(CampaignMessage).where(CampaignMessage.account_id == account.id, CampaignMessage.kind == "first", CampaignMessage.status.in_(["sent", "sending", "unknown"]), CampaignMessage.created_at >= day_start))
-    if count >= settings.daily_limit:
+    if count >= limit:
         return False
     leads = list(await db.scalars(select(Lead).where(Lead.campaign_id == runtime.campaign_id, Lead.status.in_([LeadStatus.NEW, LeadStatus.QUEUED])).order_by(Lead.id).limit(100)))
     for lead in leads:

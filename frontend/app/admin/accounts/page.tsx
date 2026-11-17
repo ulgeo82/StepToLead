@@ -27,6 +27,20 @@ export default function TelegramAccountsPage() {
   const [busy, setBusy] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [avatarsOpen, setAvatarsOpen] = useState(false);
+  const [companyLimit, setCompanyLimit] = useState<number | null>(null);
+  useEffect(() => { api<{ first_per_day: number }>("/telegram-accounts/limits").then(r => setCompanyLimit(r.first_per_day)).catch(() => {}); }, []);
+  async function saveCompanyLimit(value: number) {
+    try { const r = await json<{ first_per_day: number }>("/telegram-accounts/limits", { first_per_day: value }, "PUT");
+      setCompanyLimit(r.first_per_day); setNotice(`Лимит компании: ${r.first_per_day} первых касаний на аккаунт в день`); }
+    catch { setNotice("Не удалось сохранить лимит."); }
+  }
+  async function saveAccountLimit(id: number, raw: string) {
+    const value = raw.trim() === "" ? null : Math.max(0, Math.min(200, Number(raw)));
+    if (value !== null && Number.isNaN(value)) return;
+    try { await json(`/telegram-accounts/${id}/limit`, { daily_first_limit: value }, "PATCH");
+      setAccounts(current => current.map(a => a.id === id ? { ...a, daily_first_limit: value } : a)); }
+    catch { setNotice("Не удалось сохранить лимит аккаунта."); }
+  }
   const [summary, setSummary] = useState<HealthSummary | null>(null);
   const [health, setHealth] = useState<HealthLevel | "">("");
   const [status, setStatus] = useState("");
@@ -197,6 +211,13 @@ export default function TelegramAccountsPage() {
       ["Ждут прокси", counts?.waiting_proxy], ["Спам-блок", counts?.spamblock],
       ["Свободные прокси аутрича", summary?.proxies.free],
     ]}/>
+    <div className={css.toolbar}>
+      <label>Первых касаний на аккаунт в день (для компании)
+        <input type="number" min={0} max={200} style={{ width: 80 }} key={companyLimit ?? "x"} defaultValue={companyLimit ?? ""}
+          onBlur={e => { const v = Number(e.target.value); if (e.target.value !== "" && v !== companyLimit) void saveCompanyLimit(v); }}/>
+      </label>
+      <small>Аккаунту можно задать свой лимит в колонке «Лимит/день»; пусто — как у компании.</small>
+    </div>
     <InfraProgress job={job} onFinish={() => void load()}/>
     <div className={css.toolbar}>
       <label>Здоровье <select value={health} onChange={e => {
@@ -230,7 +251,7 @@ export default function TelegramAccountsPage() {
           <th><input type="checkbox" aria-label="Отметить все видимые аккаунты" disabled={locked || !rows.length}
             checked={!!rows.length && ids.length === rows.length}
             onChange={e => setChecked(e.target.checked ? rows.map(account => account.id) : [])}/></th>
-          <th>Аккаунт</th><th>Статус</th><th>Здоровье</th><th>Спам-блок</th><th>Отправлено сегодня</th>
+          <th>Аккаунт</th><th>Статус</th><th>Здоровье</th><th>Спам-блок</th><th>Отправлено сегодня</th><th>Лимит/день</th>
           <th>Прокси</th><th>Действия</th>
         </tr></thead><tbody>{rows.map(account => {
           const spam = account.health?.spamblock;
@@ -247,6 +268,10 @@ export default function TelegramAccountsPage() {
             <td>{spam?.state === "limited" ? "Ограничен" : spam?.state === "none" ? "Нет ограничений" : "Не проверен"}
               {spam?.until && <small>До {new Date(spam.until).toLocaleString("ru-RU")}</small>}</td>
             <td>{account.health?.sent_today ?? "—"}</td>
+            <td><input type="number" min={0} max={200} style={{ width: 70 }} aria-label={`Лимит первых касаний ${account.phone}`}
+              key={`${account.id}:${account.daily_first_limit ?? ""}`} defaultValue={account.daily_first_limit ?? ""}
+              placeholder={companyLimit != null ? String(companyLimit) : ""} disabled={locked}
+              onBlur={e => { if (e.target.value !== String(account.daily_first_limit ?? "")) void saveAccountLimit(account.id, e.target.value); }}/></td>
             <td>{account.proxy ? <>
               {account.proxy.host}:{account.proxy.port} · {proxyStatuses[account.proxy.status] ?? "Неизвестно"}
               <small><HealthBadge level={account.proxy.health_level}/></small>

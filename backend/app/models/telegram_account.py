@@ -27,6 +27,7 @@ class TelegramAccount(Base):
     flood_wait_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Здоровье (services/account_health.py): {"spamblock": {"state", "until", "checked_at"}, …}
     health: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    daily_first_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)   # свой лимит первых касаний/день
     avatar_thumb: Mapped[str | None] = mapped_column(Text, nullable=True)   # data:image/jpeg;base64 ~64px — превью в портале
     # Пространство клиента (этап B, docs/OUTREACH_INBOX.md). NULL — старые записи до переноса = агентство.
     workspace_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
