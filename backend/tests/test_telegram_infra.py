@@ -162,7 +162,8 @@ class ApiTests(unittest.TestCase):
         r = self.client.post("/api/telegram-accounts/import-batch", headers=ORIGIN, files=files, data={"mode": "auto"})
         self.assertEqual(r.status_code, 202, r.text)
         self.assertEqual(r.json()["without_proxy"], 1)
-        with patch("app.services.tdata_import.convert_tdata_archive", side_effect=fake_convert):
+        with patch("app.services.tdata_import.convert_tdata_archive", side_effect=fake_convert), \
+                patch("app.services.tdata_import.tdata_user_id", return_value=None):
             self.drain()
         result = self.client.get(f"/api/telegram-accounts/imports/{r.json()['batch_id']}").json()
         self.assertEqual(sorted(i["status"] for i in result["items"]), ["imported", "imported", "waiting_proxy"])
@@ -171,6 +172,180 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(len({a["proxy_id"] for a in accounts}), 2)
         self.assertEqual(accounts[0]["proxy"]["host"][:7], "10.0.0.")
         self.assertIn(accounts[0]["health"]["level"], ("ok", "warn"))
+
+    def test_auto_reuses_proxy_after_duplicate_and_conversion_error(self):
+        self.seed_proxies(2)
+
+        async def seed(db):
+            db.add(TelegramAccount(phone="+79000000001", telegram_user_id=1001, session_encrypted="",
+                                   status="disconnected"))
+            await db.commit()
+        self.run_db(seed)
+        active = set()
+
+        async def convert(content, proxy_cfg):
+            address = proxy_cfg["addr"]
+            self.assertNotIn(address, active)
+            active.add(address)
+            try:
+                await asyncio.sleep(0.03 if content in (b"duplicate", b"broken") else 0.01)
+                if content == b"broken":
+                    raise ValueError("Архив повреждён")
+                n = {b"duplicate": 1, b"third": 3, b"fourth": 4}[content]
+                return SimpleNamespace(session="", telegram_user_id=1000 + n, phone=f"+7900000000{n}",
+                                       first_name="A", last_name=None, username=None, bio=None)
+            finally:
+                active.remove(address)
+        files = [("files", (f"{i}.zip", content, "application/zip"))
+                 for i, content in enumerate((b"duplicate", b"broken", b"third", b"fourth"))]
+        response = self.client.post("/api/telegram-accounts/import-batch", headers=ORIGIN,
+                                    files=files, data={"mode": "auto"})
+        self.assertEqual(response.status_code, 202, response.text)
+        with patch("app.services.tdata_import.tdata_user_id", return_value=None), \
+                patch("app.services.tdata_import.convert_tdata_archive", side_effect=convert):
+            self.drain()
+        result = self.client.get(f"/api/telegram-accounts/imports/{response.json()['batch_id']}").json()
+        self.assertEqual([item["status"] for item in result["items"]],
+                         ["skipped", "error", "imported", "imported"])
+        self.assertEqual(result["items"][1]["error"], "Архив повреждён")
+        self.assertEqual(result["free_proxies"], 0)
+        self.assertEqual(len({item["proxy"] for item in result["items"][2:]}), 2)
+
+    def test_auto_duplicate_is_detected_before_connection_and_empty_pool_never_connects(self):
+        async def seed(db):
+            db.add(TelegramAccount(phone="+79000000001", telegram_user_id=1001, session_encrypted="",
+                                   status="disconnected"))
+            await db.commit()
+        self.run_db(seed)
+        files = [("files", (f"{i}.zip", content, "application/zip"))
+                 for i, content in enumerate((b"duplicate", b"new"))]
+        response = self.client.post("/api/telegram-accounts/import-batch", headers=ORIGIN,
+                                    files=files, data={"mode": "auto"})
+        with patch("app.services.tdata_import.tdata_user_id",
+                   side_effect=lambda content: 1001 if content == b"duplicate" else 1002), \
+                patch("app.services.tdata_import.convert_tdata_archive", new_callable=AsyncMock) as convert:
+            self.drain()
+        convert.assert_not_awaited()
+        result = self.client.get(f"/api/telegram-accounts/imports/{response.json()['batch_id']}").json()
+        self.assertEqual([item["status"] for item in result["items"]], ["skipped", "waiting_proxy"])
+        self.assertEqual(result["free_proxies"], 0)
+
+    def test_auto_checks_duplicate_and_bad_archive_before_reserving(self):
+        self.seed_proxies(2)
+
+        async def seed(db):
+            db.add(TelegramAccount(phone="+79000000001", telegram_user_id=1001, session_encrypted="",
+                                   status="disconnected"))
+            await db.commit()
+        self.run_db(seed)
+
+        def read_id(content):
+            if content == b"broken":
+                raise ValueError("Архив повреждён")
+            return int(content)
+
+        async def convert(content, proxy_cfg):
+            self.assertIsNotNone(proxy_cfg)
+            n = int(content)
+            return SimpleNamespace(session="", telegram_user_id=n, phone=f"+7900000{n}",
+                                   first_name="A", last_name=None, username=None, bio=None)
+        response = self.client.post("/api/telegram-accounts/import-batch", headers=ORIGIN,
+                                    data={"mode": "auto"}, files=[
+                                        ("files", (f"{i}.zip", content, "application/zip"))
+                                        for i, content in enumerate((b"1001", b"broken", b"1003", b"1004"))])
+        self.assertEqual(response.status_code, 202, response.text)
+        with patch("app.services.tdata_import.tdata_user_id", side_effect=read_id), \
+                patch("app.services.tdata_import.convert_tdata_archive", side_effect=convert) as conversion:
+            self.drain()
+        self.assertEqual(conversion.await_count, 2)
+        result = self.client.get(f"/api/telegram-accounts/imports/{response.json()['batch_id']}").json()
+        self.assertEqual([item["status"] for item in result["items"]],
+                         ["skipped", "error", "imported", "imported"])
+        self.assertEqual(result["free_proxies"], 0)
+
+    def test_auto_respects_max_accounts_and_reports_remaining_capacity(self):
+        self.seed_proxies(1)
+
+        async def capacity(db):
+            (await db.get(Proxy, 100)).max_accounts = 3
+            await db.commit()
+        self.run_db(capacity)
+
+        async def convert(content, proxy_cfg):
+            self.assertIsNotNone(proxy_cfg)
+            await asyncio.sleep(0.01)
+            n = int(content)
+            return SimpleNamespace(session="", telegram_user_id=2000 + n, phone=f"+7900000000{n}",
+                                   first_name="A", last_name=None, username=None, bio=None)
+        response = self.client.post("/api/telegram-accounts/import-batch", headers=ORIGIN, data={"mode": "auto"},
+                                    files=[("files", (f"{i}.zip", str(i).encode(), "application/zip"))
+                                           for i in (1, 2)])
+        with patch("app.services.tdata_import.tdata_user_id", return_value=None), \
+                patch("app.services.tdata_import.convert_tdata_archive", side_effect=convert):
+            self.drain()
+        result = self.client.get(f"/api/telegram-accounts/imports/{response.json()['batch_id']}").json()
+        self.assertEqual([item["status"] for item in result["items"]], ["imported", "imported"])
+        self.assertEqual(result["free_proxies"], 1)
+
+    def test_parallel_batches_share_reservations(self):
+        self.seed_proxies(2)
+        active = set()
+
+        async def convert(content, proxy_cfg):
+            address = proxy_cfg["addr"]
+            self.assertNotIn(address, active)
+            active.add(address)
+            try:
+                await asyncio.sleep(0.03)
+                n = int(content)
+                return SimpleNamespace(session="", telegram_user_id=3000 + n, phone=f"+7900000000{n}",
+                                       first_name="A", last_name=None, username=None, bio=None)
+            finally:
+                active.remove(address)
+        batches = []
+        for numbers in ((1, 2), (3, 4)):
+            response = self.client.post("/api/telegram-accounts/import-batch", headers=ORIGIN,
+                                        data={"mode": "auto"}, files=[
+                                            ("files", (f"{i}.zip", str(i).encode(), "application/zip"))
+                                            for i in numbers])
+            self.assertEqual(response.status_code, 202, response.text)
+            batches.append(response.json()["batch_id"])
+
+        async def together():
+            jobs = self.spawned[:]
+            self.spawned.clear()
+            await asyncio.gather(*jobs)
+        with patch("app.services.tdata_import.tdata_user_id", return_value=None), \
+                patch("app.services.tdata_import.convert_tdata_archive", side_effect=convert):
+            asyncio.run(together())
+        rows = [item for batch in batches for item in
+                self.client.get(f"/api/telegram-accounts/imports/{batch}").json()["items"]]
+        self.assertEqual(sorted(row["status"] for row in rows),
+                         ["imported", "imported", "waiting_proxy", "waiting_proxy"])
+        self.assertEqual(len({row["proxy"] for row in rows if row["status"] == "imported"}), 2)
+
+    def test_order_keeps_the_selected_proxy_for_each_file(self):
+        self.seed_proxies(2)
+        calls = []
+
+        async def convert(content, proxy_cfg):
+            calls.append((content, proxy_cfg["addr"]))
+            if content == b"broken":
+                raise ValueError("Архив повреждён")
+            return SimpleNamespace(session="", telegram_user_id=4001, phone="+79000000001",
+                                   first_name="A", last_name=None, username=None, bio=None)
+        response = self.client.post("/api/telegram-accounts/import-batch", headers=ORIGIN,
+                                    data={"mode": "order", "proxy_ids": "101,100"}, files=[
+                                        ("files", ("broken.zip", b"broken", "application/zip")),
+                                        ("files", ("good.zip", b"good", "application/zip")),
+                                    ])
+        self.assertEqual(response.status_code, 202, response.text)
+        with patch("app.services.tdata_import.convert_tdata_archive", side_effect=convert):
+            self.drain()
+        self.assertEqual(dict(calls), {b"broken": "10.0.0.1", b"good": "10.0.0.0"})
+        result = self.client.get(f"/api/telegram-accounts/imports/{response.json()['batch_id']}").json()
+        self.assertEqual([row["status"] for row in result["items"]], ["error", "imported"])
+        self.assertEqual(result["free_proxies"], 1)
 
     def test_order_mode_and_replace(self):
         self.seed_proxies(2)

@@ -73,12 +73,15 @@ POST /telegram-accounts/import-batch  multipart: files[] (ZIP с tdata, до 200
   // auto: каждому аккаунту — свободный рабочий прокси пула «Аутрич» (меньше всего занят, без смены IP,
   //   прокси-дубли по внешнему IP — в последнюю очередь); order: i-й файл — i-й прокси из proxy_ids
   //   (поровну, только пул «Аутрич», не мёртвые — иначе 422). Прокси назначается ДО первого входа.
+  // auto: архив и доступный в tdata telegram_user_id проверяются локально до резервирования.
+  //   Резерв места возвращается после повтора или ошибки. Ожидающие файлы дожидаются текущих конвертаций.
   // tdata нельзя превратить в аккаунт без входа в Telegram, поэтому файл, которому не хватило прокси, НЕ
   //   подключается: в итогах status "waiting_proxy" и подсказка «добавьте прокси и загрузите файл снова».
-  //   without_proxy > 0 — экран заранее предупреждает об этом.
+  //   without_proxy — предварительная оценка нехватки, повторы и ошибки могут освободить места.
 GET /telegram-accounts/imports/{batch_id}/progress → ProgressSnapshot
 GET /telegram-accounts/imports/{batch_id} → {state, items: [{filename, status: "imported"|"waiting_proxy"|
-     "skipped"|"error", account_id, phone, proxy: "host:port"|null, error}]}
+     "skipped"|"error", account_id, phone, proxy: "host:port"|null, error}], counts, free_proxies: int|null}
+  // free_proxies — оставшиеся свободные места с учётом max_accounts; null, пока пачка выполняется.
 POST /telegram-accounts/{id}/replace-proxy {proxy_id: int|null, confirm_ip_change: bool}
   → Account    // proxy_id null — портал сам берёт свободный; без confirm у подключённого — 422
 POST /telegram-accounts/assign-proxies {ids?: [int]} → {assigned, still_waiting}   // раздать ждущим

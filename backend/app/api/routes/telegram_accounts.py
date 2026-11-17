@@ -401,8 +401,8 @@ async def import_batch(files: list[UploadFile] = File(...), mode: str = Form(def
             raise HTTPException(422, f"Прокси не работают: {', '.join(map(str, dead[:10]))} — проверьте или замените")
         chosen: list[int | None] = ordered
     else:
-        pool = await telegram_jobs.free_proxies(db, len(files), workspace_id=tg_space.current())
-        chosen = [p.id for p in pool] + [None] * (len(files) - len(pool))
+        # В auto привязки к файлам нет: свободные места резервирует фоновая задача.
+        chosen = []
     folder = tempfile.mkdtemp(prefix="stl-tdata-")
     saved: list[tuple[str, str]] = []
     errors: list[dict] = []
@@ -411,7 +411,9 @@ async def import_batch(files: list[UploadFile] = File(...), mode: str = Form(def
         content = await uploaded.read(MAX_ARCHIVE_SIZE + 1)
         await uploaded.close()
         if not name.lower().endswith(".zip"):
-            errors.append({"filename": name, "error": "Нужен ZIP-файл"})
+            error = ("Формат .session/.json — пока не поддерживается"
+                     if name.lower().endswith((".session", ".json")) else "Нужен ZIP-файл")
+            errors.append({"filename": name, "error": error})
             continue
         if len(content) > MAX_ARCHIVE_SIZE:
             errors.append({"filename": name, "error": "Размер ZIP не должен превышать 100 МБ"})
@@ -422,14 +424,16 @@ async def import_batch(files: list[UploadFile] = File(...), mode: str = Form(def
         saved.append((name, path))
     if not saved:
         raise HTTPException(422, "; ".join(e["error"] for e in errors[:3]) or "Нет файлов для импорта")
-    if mode == "auto":   # прокси раздаём только тем файлам, что дошли до импорта
-        pool_ids = [pid for pid in chosen if pid is not None]
-        kept = pool_ids[:len(saved)] + [None] * max(0, len(saved) - len(pool_ids))
+    if mode == "auto":
+        kept = [None] * len(saved)
+        free = await telegram_jobs.free_proxies(db, len(saved), workspace_id=tg_space.current())
+        without_proxy = max(0, len(saved) - len(free))
     else:                # «по порядку»: прокси того файла, который был на этом месте в списке
         kept = [chosen[int(os.path.basename(path).split(".")[0])] for _, path in saved]
-    batch_id = telegram_jobs.start_import(saved, kept, workspace_id=tg_space.current())
+        without_proxy = sum(1 for pid in kept if pid is None)
+    batch_id = telegram_jobs.start_import(saved, kept, workspace_id=tg_space.current(), mode=mode)
     return {"batch_id": batch_id, "queued": len(saved), "rejected": errors,
-            "without_proxy": sum(1 for pid in kept if pid is None)}
+            "without_proxy": without_proxy}
 
 
 @router.get("/imports/{batch_id}/progress")
@@ -444,7 +448,8 @@ async def import_result(batch_id: int):
     result = telegram_jobs.results.get(telegram_jobs.key("import", batch_id))
     if result is None:
         raise HTTPException(404, "Итог импорта не найден (хранится 1 час)")
-    return {"state": result.get("state"), "items": result.get("items") or [], "counts": result.get("counts") or {}}
+    return {"state": result.get("state"), "items": result.get("items") or [],
+            "counts": result.get("counts") or {}, "free_proxies": result.get("free_proxies")}
 
 
 class ReplaceProxyIn(BaseModel):

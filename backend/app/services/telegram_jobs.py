@@ -7,6 +7,7 @@ import asyncio
 import itertools
 import logging
 import time
+import weakref
 
 from sqlalchemy import select
 
@@ -18,6 +19,17 @@ session_factory = None          # подменяется в тестах; по �
 _tasks: set[asyncio.Task] = set()
 _seq = itertools.count(int(time.time()) % 1_000_000)
 results: dict[str, dict] = {}   # итоги пачек (импорт) на 1 час: key -> {"at", ...}
+
+
+class _ImportPool:
+    """Общие резервы параллельных пачек в одном процессе приложения."""
+
+    def __init__(self):
+        self.condition = asyncio.Condition()
+        self.reserved: dict[int, int] = {}
+
+
+_import_pools: weakref.WeakValueDictionary = weakref.WeakValueDictionary()
 
 
 def sessions():
@@ -131,14 +143,14 @@ async def free_proxies(db, need: int, *, workspace_id: int | None = None,
 # ---------------------------------------------------------------- импорт аккаунтов (tdata)
 
 async def import_accounts(batch_id: int, files: list[tuple[str, str]], proxy_ids: list[int | None],
-                          concurrency: int = 3, workspace_id: int | None = None) -> None:
-    """files: [(имя файла, путь к временному ZIP)], proxy_ids — прокси для каждого файла (None — не хватило)."""
+                          concurrency: int = 3, workspace_id: int | None = None, mode: str = "order") -> None:
+    """В auto места резервируются на время входа, при пропуске или ошибке возвращаются в общий пул."""
     import os
     from datetime import datetime, timezone
     from app.core.crypto import encrypt_secret
     from app.models import Proxy, TelegramAccount
     from opentele2.exception import OpenTeleException
-    from app.services.tdata_import import TelegramConnectionError, convert_tdata_archive
+    from app.services.tdata_import import TelegramConnectionError, convert_tdata_archive, tdata_user_id
     from app.services import tg_space
     from app.services.telegram import proxy_config
     result_key = key("import", batch_id)
@@ -147,50 +159,98 @@ async def import_accounts(batch_id: int, files: list[tuple[str, str]], proxy_ids
     tracker.begin("import", total=len(files))
     items: list[dict] = [{} for _ in files]
     gate = asyncio.Semaphore(concurrency)
+    loop = asyncio.get_running_loop()
+    pool_state = _import_pools.get(loop)
+    if pool_state is None:
+        pool_state = _ImportPool()
+        _import_pools[loop] = pool_state
+    condition, reserved = pool_state.condition, pool_state.reserved
+
+    async def acquire_proxy() -> int | None:
+        async with condition:
+            while True:
+                async with sessions()() as db:
+                    pool = await free_proxies(db, 1, workspace_id=workspace_id, reserved=reserved)
+                if pool:
+                    pid = pool[0].id
+                    reserved[pid] = reserved.get(pid, 0) + 1
+                    return pid
+                if not reserved:
+                    return None
+                # Занятые конвертацией места ещё могут освободиться после повтора или ошибки.
+                await condition.wait()
+
+    def skipped(item, duplicate):
+        same = tg_space.same_space(duplicate.workspace_id, workspace_id)
+        item.update(status="skipped", account_id=duplicate.id if same else None,
+                    phone=duplicate.phone if same else None,
+                    error="Аккаунт уже добавлен" if same else "Аккаунт уже подключён у другого клиента")
 
     async def one(i: int, filename: str, path: str, proxy_id: int | None) -> None:
         async with gate:
             item = {"filename": filename, "status": "error", "account_id": None, "phone": None, "proxy": None,
                     "error": None}
+            leased = False
             try:
+                with open(path, "rb") as fh:
+                    content = fh.read()
+                if mode == "auto":
+                    uid = await asyncio.to_thread(tdata_user_id, content)
+                    if uid:
+                        async with sessions()() as db:
+                            duplicate = await db.scalar(select(TelegramAccount).where(
+                                TelegramAccount.telegram_user_id == uid))
+                            if duplicate:
+                                skipped(item, duplicate)
+                                return
+                    proxy_id = await acquire_proxy()
+                    leased = proxy_id is not None
                 if proxy_id is None:
                     item.update(status="waiting_proxy", error="Не хватило свободных прокси — добавьте прокси и "
                                                                "загрузите этот файл снова")
                     return
                 async with sessions()() as db:
                     proxy = await db.get(Proxy, proxy_id)
+                    if proxy is None or not tg_space.same_space(proxy.workspace_id, workspace_id):
+                        raise ValueError("Выбранный прокси недоступен")
                     item["proxy"] = f"{proxy.host}:{proxy.port}" if proxy else None
-                    with open(path, "rb") as fh:
-                        content = fh.read()
                     try:
                         imported = await asyncio.wait_for(convert_tdata_archive(content, proxy_config(proxy)), 90)
                     except asyncio.TimeoutError:
                         raise ValueError("Telegram не ответил вовремя — проверьте прокси") from None
-                    duplicate = await db.scalar(select(TelegramAccount).where(
-                        (TelegramAccount.telegram_user_id == imported.telegram_user_id)
-                        | (TelegramAccount.phone == imported.phone)))
-                    if duplicate:
-                        item.update(status="skipped", account_id=duplicate.id, phone=duplicate.phone,
-                                    error="Аккаунт уже добавлен" if tg_space.same_space(duplicate.workspace_id,
-                                                                                      workspace_id)
-                                    else "Аккаунт уже подключён у другого клиента")
-                        return
-                    account = TelegramAccount(
-                        phone=imported.phone, telegram_user_id=imported.telegram_user_id,
-                        first_name=imported.first_name, last_name=imported.last_name, username=imported.username,
-                        bio=imported.bio, session_encrypted=encrypt_secret(imported.session), proxy_id=proxy_id,
-                        status="online", last_seen_at=datetime.now(timezone.utc), workspace_id=workspace_id)
-                    db.add(account)
-                    await db.commit()
-                    item.update(status="imported", account_id=account.id, phone=account.phone)
+                # Один commit за раз: два одинаковых файла не добавляют аккаунт параллельно.
+                async with condition:
+                    async with sessions()() as db:
+                        duplicate = await db.scalar(select(TelegramAccount).where(
+                            (TelegramAccount.telegram_user_id == imported.telegram_user_id)
+                            | (TelegramAccount.phone == imported.phone)))
+                        if duplicate:
+                            skipped(item, duplicate)
+                            return
+                        account = TelegramAccount(
+                            phone=imported.phone, telegram_user_id=imported.telegram_user_id,
+                            first_name=imported.first_name, last_name=imported.last_name, username=imported.username,
+                            bio=imported.bio, session_encrypted=encrypt_secret(imported.session), proxy_id=proxy_id,
+                            status="online", last_seen_at=datetime.now(timezone.utc), workspace_id=workspace_id)
+                        db.add(account)
+                        await db.commit()
+                        item.update(status="imported", account_id=account.id, phone=account.phone)
             except TelegramConnectionError as exc:
                 item["error"] = str(exc)[:500]
-            except (ValueError, OpenTeleException) as exc:
+            except ValueError as exc:
                 item["error"] = str(exc)[:500]
+            except OpenTeleException:
+                item["error"] = "Telegram Desktop не смог прочитать эту tdata-сессию"
             except Exception as exc:  # noqa: BLE001
-                log.exception("tdata import failed")
+                log.warning("tdata import failed: %s", type(exc).__name__)
                 item["error"] = f"Не удалось подключить tdata: {type(exc).__name__}"
             finally:
+                if leased:
+                    async with condition:
+                        reserved[proxy_id] -= 1
+                        if not reserved[proxy_id]:
+                            del reserved[proxy_id]
+                        condition.notify_all()
                 items[i] = item
                 try:
                     os.remove(path)
@@ -203,22 +263,27 @@ async def import_accounts(batch_id: int, files: list[tuple[str, str]], proxy_ids
     finally:
         counts = {s: sum(1 for it in items if it.get("status") == s)
                   for s in ("imported", "skipped", "waiting_proxy", "error")}
-        keep(result_key, {"state": "done", "items": items, "counts": counts})
+        async with condition:
+            async with sessions()() as db:
+                remaining = len(await free_proxies(db, 10_000, workspace_id=workspace_id, reserved=reserved))
+        keep(result_key, {"state": "done", "items": items, "counts": counts, "free_proxies": remaining})
         tracker.end("import", note=f"добавлено {counts['imported']}")
         tracker.finish("done", f"Добавлено {counts['imported']}, пропущено {counts['skipped']}, "
-                               f"ждут прокси {counts['waiting_proxy']}, ошибок {counts['error']}")
+                               f"ждут прокси {counts['waiting_proxy']}, ошибок {counts['error']}. "
+                               f"Свободных мест на прокси: {remaining}")
         try:
             os.rmdir(os.path.dirname(files[0][1])) if files else None
         except OSError:
             pass
 
 
-def start_import(files: list[tuple[str, str]], proxy_ids: list[int | None], workspace_id: int | None = None) -> int:
+def start_import(files: list[tuple[str, str]], proxy_ids: list[int | None], workspace_id: int | None = None,
+                 mode: str = "order") -> int:
     batch_id = new_batch()
     progress.start(key("import", batch_id), f"Импорт аккаунтов ({len(files)})",
                    [("import", "Вход через прокси и проверка", max(10, len(files) / 3 * 25))], queued=True)
     keep(key("import", batch_id), {"state": "running", "items": []})
-    spawn(import_accounts(batch_id, files, proxy_ids, workspace_id=workspace_id))
+    spawn(import_accounts(batch_id, files, proxy_ids, workspace_id=workspace_id, mode=mode))
     return batch_id
 
 

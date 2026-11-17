@@ -39,6 +39,7 @@ export type ImportBatch = Batch & {
 };
 export type ImportResult = {
   state: string;
+  free_proxies?: number | null;
   items: {
     filename: string;
     status: "imported" | "waiting_proxy" | "skipped" | "error";

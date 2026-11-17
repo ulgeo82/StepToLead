@@ -3,6 +3,7 @@ import shutil
 import stat
 import tempfile
 import zipfile
+from contextlib import contextmanager
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path, PurePosixPath
@@ -40,7 +41,7 @@ def _safe_extract_zip(content: bytes, destination: Path) -> None:
     try:
         archive = zipfile.ZipFile(BytesIO(content))
     except zipfile.BadZipFile as exc:
-        raise ValueError("Файл не является корректным ZIP-архивом") from exc
+        raise ValueError("Архив повреждён") from exc
 
     with archive:
         members = archive.infolist()
@@ -67,8 +68,11 @@ def _safe_extract_zip(content: bytes, destination: Path) -> None:
                 target.mkdir(parents=True, exist_ok=True)
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)
-            with archive.open(member) as source, target.open("wb") as output:
-                shutil.copyfileobj(source, output, length=1024 * 1024)
+            try:
+                with archive.open(member) as source, target.open("wb") as output:
+                    shutil.copyfileobj(source, output, length=1024 * 1024)
+            except (zipfile.BadZipFile, EOFError) as exc:
+                raise ValueError("Архив повреждён") from exc
 
 
 def _find_tdata_folder(root: Path) -> Path:
@@ -79,11 +83,35 @@ def _find_tdata_folder(root: Path) -> Path:
         if path.is_file()
     ]
     if not candidates:
-        raise ValueError("В архиве не найдена папка tdata с файлом key_data/key_datas")
+        if any(path.suffix.lower() in (".session", ".json") for path in root.rglob("*") if path.is_file()):
+            raise ValueError("Формат .session/.json — пока не поддерживается")
+        raise ValueError("В архиве нет папки tdata с файлом key_data/key_datas")
     unique = list(dict.fromkeys(path.resolve() for path in candidates))
     if len(unique) != 1:
         raise ValueError("В одном ZIP должен находиться tdata только одного аккаунта")
     return unique[0]
+
+
+@contextmanager
+def _read_desktop(content: bytes):
+    """Распаковать и прочитать tdata локально, без подключения к Telegram."""
+    if not content:
+        raise ValueError("Архив пуст")
+    if len(content) > MAX_ARCHIVE_SIZE:
+        raise ValueError("Размер ZIP не должен превышать 100 МБ")
+    with tempfile.TemporaryDirectory(prefix="reachboard-tdata-") as temp_directory:
+        root = Path(temp_directory)
+        _safe_extract_zip(content, root)
+        desktop = TDesktop(str(_find_tdata_folder(root)))
+        if not desktop.isLoaded():
+            raise ValueError("Telegram Desktop не смог прочитать эту tdata-сессию")
+        yield root, desktop
+
+
+def tdata_user_id(content: bytes) -> int | None:
+    """Идентификатор аккаунта из tdata до сетевого входа. Телефон tdata обычно не содержит."""
+    with _read_desktop(content) as (_, desktop):
+        return desktop.mainAccount.UserId if desktop.mainAccount else None
 
 
 async def _connect_with_retries(client) -> None:
@@ -104,28 +132,16 @@ async def _connect_with_retries(client) -> None:
             if attempt < TELEGRAM_CONNECT_ATTEMPTS:
                 await asyncio.sleep(1)
 
-    detail = str(last_error).strip() if last_error else "тайм-аут соединения"
     raise TelegramConnectionError(
         "TData прочитана, но прокси не смог стабильно подключиться к Telegram "
         f"после {TELEGRAM_CONNECT_ATTEMPTS} попыток. Проверьте или замените прокси. "
-        f"Техническая причина: {detail or type(last_error).__name__}"
     ) from last_error
 
 
 async def convert_tdata_archive(content: bytes, proxy: dict | None = None) -> ImportedTData:
-    if not content:
-        raise ValueError("Архив пуст")
-    if len(content) > MAX_ARCHIVE_SIZE:
-        raise ValueError("Размер ZIP не должен превышать 100 МБ")
-
-    with tempfile.TemporaryDirectory(prefix="reachboard-tdata-") as temp_directory:
-        root = Path(temp_directory)
-        _safe_extract_zip(content, root)
-        tdata_folder = _find_tdata_folder(root)
-        desktop = TDesktop(str(tdata_folder))
-        if not desktop.isLoaded():
-            raise ValueError("Telegram Desktop не смог прочитать эту tdata-сессию")
-
+    if not proxy:
+        raise ValueError("Выберите прокси: без него аккаунт не подключаем")
+    with _read_desktop(content) as (root, desktop):
         client = await desktop.ToTelethon(
             session=str(root / "converted.session"),
             flag=UseCurrentSession,

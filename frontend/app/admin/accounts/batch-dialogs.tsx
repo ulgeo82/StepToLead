@@ -128,13 +128,14 @@ export function ImportDialog({ proxies, free, onClose, onChanged }: {
     {batch && !locked && !result && <button type="button" onClick={() => void getResult(batch.batch_id)}>
       Загрузить итоги
     </button>}
+    {result && <p role="status">Свободных мест на прокси: {result.free_proxies ?? "—"}</p>}
     {result && <div className={css.scroll} tabIndex={0} aria-label="Итоги импорта">
       <table><thead><tr><th>Файл</th><th>Результат</th><th>Телефон</th><th>Прокси</th></tr></thead>
         <tbody>{result.items.map((item, i) => <tr key={i}>
           <td>{item.filename}</td><td>{importLabels[item.status]}
             {item.status === "waiting_proxy" &&
               <small>Добавьте свободный прокси и импортируйте этот файл снова.</small>}
-            {item.error && item.status === "error" && <small>Не удалось обработать архив.</small>}</td>
+            {item.error && item.status !== "waiting_proxy" && <small>{safeDiagnostic(item.error)}</small>}</td>
           <td>{item.phone ?? "—"}</td><td>{item.proxy ?? "—"}</td>
         </tr>)}</tbody>
       </table>
