@@ -490,6 +490,18 @@ class IdsIn(BaseModel):
     ids: list[int] | None = Field(default=None, max_length=5000)
 
 
+class MoveIn(BaseModel):
+    ids: list[int] = Field(min_length=1, max_length=5000)
+    workspace_id: int = Field(gt=0)
+
+
+@router.post("/move")
+async def move_accounts(payload: MoveIn, db: AsyncSession = Depends(get_db)):
+    """Перенести аккаунты к другому клиенту (вместе с их прокси)."""
+    from app.services import tg_move
+    return await tg_move.move_accounts(db, payload.ids, payload.workspace_id)
+
+
 @router.post("/assign-proxies")
 async def assign_proxies(payload: IdsIn, db: AsyncSession = Depends(get_db)):
     """Раздать свободные прокси аккаунтам без прокси (сами аккаунты не подключаются — это сделают кампании)."""

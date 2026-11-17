@@ -136,6 +136,18 @@ class ProxyBulkDelete(BaseModel):
     ids: list[int] = Field(min_length=1, max_length=5000)
 
 
+class ProxyMoveIn(BaseModel):
+    ids: list[int] = Field(min_length=1, max_length=5000)
+    workspace_id: int = Field(gt=0)
+
+
+@router.post("/move")
+async def move_proxies(payload: ProxyMoveIn, db: AsyncSession = Depends(get_db)):
+    """Перенести свободные прокси аутрича к другому клиенту."""
+    from app.services import tg_move
+    return await tg_move.move_proxies(db, payload.ids, payload.workspace_id)
+
+
 @router.post("/bulk-delete")
 async def bulk_delete(payload: ProxyBulkDelete, request: Request, db: AsyncSession = Depends(get_db)):
     """Занятые клиентскими CRM-профилями не удаляются; аккаунты аутрича на удалённом прокси остаются без прокси

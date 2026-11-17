@@ -175,6 +175,13 @@ async def sync_account_from_telegram(account: TelegramAccount, client: TelegramC
         account.last_name = me.last_name
         account.username = me.username
         account.bio = full.full_user.about
+        try:   # маленькая аватарка для списка в портале; не получилось — не мешает синхронизации
+            from app.services.avatar_variants import thumb
+            photo = await client.download_profile_photo("me", file=bytes, download_big=False)
+            account.avatar_thumb = thumb(photo) if photo else None
+            account.health = {**(account.health or {}), "has_photo": bool(photo)}
+        except Exception:  # noqa: BLE001
+            pass
         account.status = "online"
         account.last_error = None
         account.last_seen_at = datetime.now(timezone.utc)

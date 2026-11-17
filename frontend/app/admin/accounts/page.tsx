@@ -7,6 +7,7 @@ import { accountStatuses, HealthBadge, healthLabels, InfraProgress, isFreeProxy,
   proxyStatuses, Stats, toggleId, useInfraTask } from "../telegram-infra";
 import { accountName, AvatarDialog, ImportDialog } from "./batch-dialogs";
 import css from "../telegram-infra.module.css";
+import { MoveToClient } from "../move-to-client";
 
 export default function TelegramAccountsPage() {
   const [accounts, setAccounts] = useState<InfraAccount[]>([]);
@@ -210,6 +211,8 @@ export default function TelegramAccountsPage() {
       <button className="button secondary" disabled={locked || !ids.length} onClick={() => setAvatarsOpen(true)}>
         Поставить аватарки
       </button>
+      <MoveToClient path="/telegram-accounts/move" ids={ids} disabled={locked}
+        onDone={message => { setNotice(message); setChecked([]); void load(); }}/>
     </div>
     <section className={`tablePanel ${css.panel}`}>
       <div className={css.scroll} tabIndex={0} aria-label="Telegram-аккаунты">
@@ -225,7 +228,10 @@ export default function TelegramAccountsPage() {
             <td><input type="checkbox" aria-label={`Отметить аккаунт ${account.phone}`}
               checked={checked.includes(account.id)} disabled={locked}
               onChange={() => setChecked(prev => toggleId(prev, account.id))}/></td>
-            <td>{accountName(account)}<small>{account.username ? `@${account.username} · ` : ""}{account.phone}</small></td>
+            <td className={css.who}>{account.avatar_thumb
+              ? <img className={css.avatar} src={account.avatar_thumb} alt=""/>
+              : <span className={css.avatar} aria-hidden="true">{(accountName(account) || "?").slice(0, 1).toUpperCase()}</span>}
+              <span>{accountName(account)}<small>{account.username ? `@${account.username} · ` : ""}{account.phone}</small></span></td>
             <td>{accountStatuses[account.status] ?? "Неизвестно"}</td>
             <td><HealthBadge health={account.health}/></td>
             <td>{spam?.state === "limited" ? "Ограничен" : spam?.state === "none" ? "Нет ограничений" : "Не проверен"}

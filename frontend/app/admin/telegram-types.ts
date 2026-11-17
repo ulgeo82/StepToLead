@@ -13,6 +13,7 @@ export type InfraProxy = Proxy & {
   accounts: { id: number; phone: string; name: string | null }[];
 };
 export type InfraAccount = TelegramAccount & {
+  avatar_thumb?: string | null;
   proxy: Pick<Proxy, "id" | "host" | "port" | "scheme" | "status"> & { health_level: HealthLevel } | null;
   health: Health & {
     spamblock: { state: "none" | "limited" | "unknown"; until: string | null; checked_at: string | null };

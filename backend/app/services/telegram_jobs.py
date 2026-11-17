@@ -373,6 +373,8 @@ async def set_avatars(batch_id: int, ids: list[int], photos: list[bytes], streng
                     await _with_account(account, upload)
                     account.avatar_version = (account.avatar_version or 0) + 1
                     account.health = {**(account.health or {}), "has_photo": True}
+                    from app.services.avatar_variants import thumb
+                    account.avatar_thumb = thumb(picture)
                     done += 1
                 except FloodWaitError as exc:
                     account.status = "flood_wait"

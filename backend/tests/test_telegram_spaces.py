@@ -127,6 +127,49 @@ class TelegramSpaceTests(unittest.TestCase):
         connect.assert_not_awaited()
         self.assertEqual(self.client.get("/api/telegram-accounts", headers=AS_CLIENT).status_code, 404)
 
+    def test_move_accounts_with_their_proxy_to_client(self):
+        r = self.client.post("/api/telegram-accounts/move", headers=ORIGIN, json={"ids": [21], "workspace_id": CLIENT})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual((r.json()["accounts"], r.json()["proxies"]), (1, 1))
+        self.assertEqual(self.ids("/api/telegram-accounts"), [])
+        self.assertEqual(self.ids("/api/telegram-accounts", AS_CLIENT), [21, 22])
+        self.assertIn(11, self.ids("/api/proxies", AS_CLIENT))
+        # чужой аккаунт не перенести; несуществующий клиент — 404
+        self.assertEqual(self.client.post("/api/telegram-accounts/move", headers=ORIGIN,
+                                          json={"ids": [22], "workspace_id": HOME}).status_code, 404)
+        self.assertEqual(self.client.post("/api/telegram-accounts/move", headers=AS_CLIENT,
+                                          json={"ids": [22], "workspace_id": 99}).status_code, 404)
+
+    def test_move_refuses_account_in_other_clients_campaign_and_busy_proxy(self):
+        from app.models.automation import CampaignAccount
+
+        async def bind(db):
+            db.add(CampaignAccount(campaign_id=31, account_id=21))
+            await db.commit()
+        self.run_db(bind)
+        r = self.client.post("/api/telegram-accounts/move", headers=ORIGIN, json={"ids": [21], "workspace_id": CLIENT})
+        self.assertEqual(r.status_code, 409)
+        self.assertIn("Агентство", r.json()["detail"])
+        r = self.client.post("/api/proxies/move", headers=ORIGIN, json={"ids": [11], "workspace_id": CLIENT})
+        self.assertEqual(r.status_code, 409)
+        async def free(db):
+            db.add(Proxy(id=14, host="10.4.4.4", port=1080, pool="agency", status="working", max_accounts=1))
+            await db.commit()
+        self.run_db(free)
+        r = self.client.post("/api/proxies/move", headers=ORIGIN, json={"ids": [14], "workspace_id": CLIENT})
+        self.assertEqual((r.status_code, r.json()["proxies"]), (200, 1))
+        self.assertIn(14, self.ids("/api/proxies", AS_CLIENT))
+
+    def test_avatar_thumb(self):
+        import io
+        from PIL import Image
+        from app.services.avatar_variants import thumb
+        buf = io.BytesIO(); Image.new("RGB", (400, 300), "red").save(buf, "PNG")
+        data = thumb(buf.getvalue())
+        self.assertTrue(data.startswith("data:image/jpeg;base64,"))
+        self.assertLess(len(data), 8000)
+        self.assertIsNone(thumb(b"not an image"))
+
 
 if __name__ == "__main__":
     unittest.main()

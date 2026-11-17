@@ -40,3 +40,19 @@ def variant(content: bytes, seed: int | str, strength: str = "low") -> bytes:
     out = io.BytesIO()
     image.save(out, format="JPEG", quality=rng.randint(84, 93), optimize=True)   # без EXIF: не передаём exif=
     return out.getvalue()
+
+
+def thumb(content: bytes | None, size: int = 64) -> str | None:
+    """Маленькое превью для списка аккаунтов: квадрат size×size, JPEG, data URL (≈2–4 КБ)."""
+    if not content:
+        return None
+    import base64
+    from PIL import Image, ImageOps
+    try:
+        with Image.open(io.BytesIO(content)) as img:
+            img = ImageOps.fit(ImageOps.exif_transpose(img).convert("RGB"), (size, size))
+            out = io.BytesIO()
+            img.save(out, "JPEG", quality=70)
+    except Exception:  # noqa: BLE001 — битая картинка: просто без превью
+        return None
+    return "data:image/jpeg;base64," + base64.b64encode(out.getvalue()).decode()

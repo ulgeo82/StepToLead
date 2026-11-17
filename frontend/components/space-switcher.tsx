@@ -37,7 +37,10 @@ export default function SpaceSwitcher() {
 
   if (!shown) return null;
   if (error) return <p className={`${css.bar} ${css.error}`} role="alert">Клиенты не загрузились: {error}</p>;
-  if (!items || items.length < 2) return null;
+  if (!items) return null;
+  if (items.length < 2) return <p className={css.bar}>
+    Все данные сейчас — агентства. Чтобы у компании были свои аккаунты, прокси, кампании и входящие, заведите её
+    в разделе «Клиенты» — здесь появится переключатель.</p>;
   const home = items.find(item => item.is_home);
   const value = space && items.some(item => item.id === space) ? space : home?.id ?? items[0].id;
   const active = items.find(item => item.id === value);

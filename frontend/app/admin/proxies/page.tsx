@@ -6,6 +6,7 @@ import type { Batch, InfraProxy, Pool, ProxyBulkResult, ProxyDeleteResult, Proxy
 import { HealthBadge, InfraProgress, isFreeProxy, json, pools, proxyImportError, proxyStatuses, Stats, toggleId,
   useInfraTask } from "../telegram-infra";
 import css from "../telegram-infra.module.css";
+import { MoveToClient } from "../move-to-client";
 import { hasPossiblyPublicProxy, publicProxyWarning } from "./public-proxy-warning";
 
 export default function ProxiesPage() {
@@ -142,6 +143,9 @@ export default function ProxiesPage() {
         Проверить все пулы
       </button>
       <button className="button secondary" disabled={locked || !ids.length} onClick={() => void remove()}>Удалить</button>
+      <MoveToClient path="/proxies/move" disabled={locked}
+        ids={rows.filter(p => checked.includes(p.id) && p.pool === "agency").map(p => p.id)}
+        onDone={message => { setNotice(message); setChecked([]); void load(); }}/>
     </div>
     {warnAboutSavedProxies && <p className="notice" role="status">{publicProxyWarning}</p>}
     <section className={`tablePanel ${css.panel}`}><div className={css.scroll} tabIndex={0}
