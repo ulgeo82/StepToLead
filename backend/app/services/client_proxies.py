@@ -47,19 +47,17 @@ async def allocate(db, channel):
 
 
 async def check(proxy):
-    from python_socks import ProxyType
-    from python_socks.async_.asyncio import Proxy as SocksProxy
-    kind = ProxyType.HTTP if proxy.scheme == "http" else ProxyType.SOCKS5
-    transport = SocksProxy(proxy_type=kind, host=proxy.host, port=proxy.port,
-                           username=proxy.username, password=decrypt_secret(proxy.password_encrypted), rdns=True)
-    socket = await transport.connect(dest_host="149.154.167.50", dest_port=443, timeout=10)
-    socket.close()
+    """Связь с Telegram через прокси + внешний IP и задержка (services/proxy_health.py). Ошибка — исключение."""
+    from app.services.proxy_health import probe
+    return await probe(proxy)
 
 
 async def check_due(db):
-    """Health-check due proxies concurrently, so a slow proxy never stalls message sending in the leader loop."""
+    """Health-check due proxies concurrently, so a slow proxy never stalls message sending in the leader loop.
+    Проверяет оба пула (аутрич агентства и CRM-профили клиентов) и пишет здоровье: внешний IP, задержку, историю."""
+    from app.services import proxy_health
     now = datetime.now(timezone.utc)
-    proxies = (await db.scalars(select(Proxy).where(Proxy.pool == "client"))).all()
+    proxies = (await db.scalars(select(Proxy))).all()
     due = [p for p in proxies if not (p.last_checked_at and p.last_checked_at.replace(tzinfo=timezone.utc)
                                      > now - timedelta(minutes=5))]
     if not due:
@@ -76,9 +74,9 @@ async def check_due(db):
     channels = (await db.scalars(select(MessagingChannel).where(MessagingChannel.kind == "telegram_user"))).all()
     for proxy, result in zip(due, results):
         if isinstance(result, BaseException):
-            proxy.status, proxy.last_error = "error", "Нет связи через прокси"
+            proxy_health.record(proxy, None, "Нет связи через прокси", now=now.timestamp())
         else:
-            proxy.status, proxy.last_error = "working", None
+            proxy_health.record(proxy, result if isinstance(result, dict) else {}, now=now.timestamp())
         proxy.last_checked_at = now
         for channel in channels:
             if (channel.config or {}).get("proxy_id") != proxy.id:

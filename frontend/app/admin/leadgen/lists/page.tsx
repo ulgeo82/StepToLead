@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { api, API_URL } from "@/lib/api";
+import { withSpace } from "@/lib/space";
 import EnrollDialog from "../../outreach/email/EnrollDialog";
 import ExportDialog from "../ExportDialog";
 import { base, date, ExportRecord, LeadList, message, PageHeader, plural, post } from "../shared";
@@ -340,7 +341,7 @@ export default function ListsPage() {
                     <td>{item.preset === "outreach" ? "Для рассылки" : "Полная"}</td>
                     <td>{item.created_by || "—"}</td>
                     <td>
-                      <a className={styles.secondary} href={`${API_URL}/api${base}/exports/${item.id}/download`} download>
+                      <a className={styles.secondary} href={withSpace(`${API_URL}/api${base}/exports/${item.id}/download`)} download>
                         Скачать снова
                       </a>
                     </td>

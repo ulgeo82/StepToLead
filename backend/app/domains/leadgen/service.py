@@ -21,15 +21,33 @@ from app.domains.leadgen.core.scoring import DEFAULT_WEIGHTS, compute_score
 from app.domains.leadgen.models import (
     LgAd, LgCompany, LgCompanyKey, LgContact, LgDnc, LgEnrichment, LgListItem, LgSignal, LgTouch,
 )
+from app.core.config import settings as app_settings
 from app.models.crm import CrmDeal
+from app.models.marketing import ClientWorkspace
 from app.models.system import AppSetting
 
+# Настройки лидогена — у каждого пространства (клиента) свои: ключ settings_key(id). SETTINGS_KEY — прежний общий
+# ключ: пока у агентства нет своей записи, оно читает его (stored_settings). Старую запись не удаляем — откат.
 SETTINGS_KEY = "leadgen:settings"
 DEFAULT_SETTINGS = {
     "weights": DEFAULT_WEIGHTS,
     "platform_domains": list(DEFAULT_PLATFORM_DOMAINS),
     "recontact_days": 90,
     "outreach_pipeline_id": None,
+    "icp": None,            # портрет клиента для ИИ-оценки; пусто — оценка недоступна (этап 2: переедет в паспорт)
+    "main_domains": None,   # с этих доменов холодные письма не шлём; None — домен из поля «сайт» клиента
+}
+# Только для переноса: что было зашито в код до пространств, становится настройками клиента №0 (агентства)
+# при первом чтении и дальше живёт как данные. Новым клиентам отсюда ничего не достаётся.
+LEGACY_HOME_SETTINGS = {
+    "icp": (
+        "Подходят: малый и средний бизнес, который сам продаёт свои товары или услуги частным клиентам (B2C) "
+        "и получает заявки через рекламу — кухни и мебель на заказ, окна, потолки, ремонт, бани и дома, "
+        "медицина и красота, автосервисы. Не подходят: федеральные сети и крупные фабрики, маркетплейсы и агрегаторы, "
+        "оптовики и чистый B2B, франшизы с центральным маркетингом, государственные организации, "
+        "рекламные и маркетинговые агентства (это конкуренты)."
+    ),
+    "main_domains": ["steptolead.ru"],
 }
 # Чем выше, тем надёжнее источник поля (раздел «Дедупликация и склейка», правило 2).
 SOURCE_RANK = {"dadata": 40, "fns": 35, "site": 30, "site_search": 25, "name_clean": 30, "twogis": 20, "hh": 20,
@@ -50,20 +68,58 @@ def _aware(dt: datetime | None) -> datetime | None:
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
-async def get_settings(db: AsyncSession) -> dict:
-    row = await db.get(AppSetting, SETTINGS_KEY)
+def settings_key(workspace_id: int) -> str:
+    return f"{SETTINGS_KEY}:{int(workspace_id)}"
+
+
+async def stored_settings(db: AsyncSession, workspace_id: int) -> dict | None:
+    """Что сохранено у пространства. Агентство до первой записи читает прежний общий ключ и зашитое раньше в код."""
+    row = await db.get(AppSetting, settings_key(workspace_id))
+    if row is not None and isinstance(row.value, dict):
+        return row.value
+    if workspace_id and workspace_id == app_settings.agency_workspace_id:
+        legacy = await db.get(AppSetting, SETTINGS_KEY)
+        return {**LEGACY_HOME_SETTINGS, **(legacy.value if legacy and isinstance(legacy.value, dict) else {})}
+    return None
+
+
+async def get_settings(db: AsyncSession, workspace_id: int) -> dict:
+    stored = await stored_settings(db, workspace_id)
     value = dict(DEFAULT_SETTINGS)
-    if row and isinstance(row.value, dict):
-        value.update(row.value)
-        value["weights"] = {**DEFAULT_WEIGHTS, **(row.value.get("weights") or {})}
+    if stored:
+        value.update(stored)
+        value["weights"] = {**DEFAULT_WEIGHTS, **(stored.get("weights") or {})}
     return value
 
 
-async def ensure_settings(db: AsyncSession) -> None:
-    """Сид настроек: создаёт запись с дефолтами, если её нет. Существующую не трогает."""
-    if await db.get(AppSetting, SETTINGS_KEY) is None:
-        db.add(AppSetting(key=SETTINGS_KEY, value=DEFAULT_SETTINGS))
-        await db.flush()
+async def save_settings(db: AsyncSession, workspace_id: int, value: dict) -> None:
+    """Пишет настройки пространства целиком (в свой ключ). Не коммитит."""
+    row = await db.get(AppSetting, settings_key(workspace_id))
+    if row is None:
+        db.add(AppSetting(key=settings_key(workspace_id), value=dict(value)))
+    else:
+        row.value = dict(value)
+    await db.flush()
+
+
+async def ensure_settings(db: AsyncSession, workspace_id: int) -> None:
+    """Создаёт запись настроек пространства, если её нет (у агентства — переносом прежних). Существующую не трогает."""
+    if await db.get(AppSetting, settings_key(workspace_id)) is None:
+        await save_settings(db, workspace_id, await get_settings(db, workspace_id))
+
+
+async def main_domains(db: AsyncSession, workspace_id: int) -> list[str]:
+    """Основные домены пространства: с них холодные письма не шлём. Не заданы — домен из поля «сайт» клиента."""
+    value = (await get_settings(db, workspace_id)).get("main_domains")
+    if value is None:
+        workspace = await db.get(ClientWorkspace, workspace_id)
+        value = [workspace.website] if workspace is not None and workspace.website else []
+    return sorted({d for d in (normalize_domain(str(x)) for x in value) if d})
+
+
+async def inactive_workspaces(db: AsyncSession) -> set[int]:
+    """Отключённые и удалённые клиенты: воркеры за них не пишут, не опрашивают ящики и не повторяют поиски."""
+    return set((await db.scalars(select(ClientWorkspace.id).where(ClientWorkspace.status != "active"))).all())
 
 
 # ---------------------------------------------------------------- находки
@@ -179,7 +235,7 @@ async def upsert_company(db: AsyncSession, workspace_id: int, finding: FindingIn
                          now: datetime | None = None) -> UpsertResult:
     """Находка -> компания. Не коммитит: вызывающий решает, когда сохранить."""
     now = now or utcnow()
-    settings = await get_settings(db)
+    settings = await get_settings(db, workspace_id)
     core = finding.as_core()
     platforms = tuple(settings["platform_domains"])
     keys = normalized_keys(core)
@@ -234,18 +290,55 @@ async def add_signal(db: AsyncSession, company: LgCompany, kind: str, *, key: st
     return signal
 
 
+GLOBAL_DNC_REASONS = ("bounced", "legal")
+SHARED_DNC_REASONS = (*GLOBAL_DNC_REASONS, "unsubscribed")
+SHARED_DNC_KINDS = ("email", "domain")
+
+
+def is_shared_dnc(kind: str, reason: str) -> bool:
+    return kind in SHARED_DNC_KINDS and reason in SHARED_DNC_REASONS
+
+
+def shared_dnc_filter():
+    return LgDnc.kind.in_(SHARED_DNC_KINDS) & LgDnc.reason.in_(SHARED_DNC_REASONS)
+
+
+async def record_dnc(db: AsyncSession, workspace_id: int, kind: str, value: str, reason: str, *,
+                     until: datetime | None = None, note: str | None = None,
+                     client_project_id: int | None = None, actor_id: int | None = None,
+                     replace: bool = False) -> LgDnc:
+    # Ключ БД общий для старых проектов одного workspace: проект не входит в уникальность.
+    row = await db.scalar(select(LgDnc).where(
+        LgDnc.workspace_id == workspace_id, LgDnc.kind == kind, LgDnc.value_norm == value))
+    if row is None:
+        row = LgDnc(workspace_id=workspace_id, kind=kind, value_norm=value, reason=reason, until=until,
+                    note=note, client_project_id=client_project_id, created_by_id=actor_id)
+        db.add(row)
+        return row
+    shared = is_shared_dnc(kind, reason)
+    was_shared = is_shared_dnc(kind, row.reason)
+    active_shared = was_shared and (row.until is None or _aware(row.until) > utcnow())
+    if active_shared and not shared:
+        return row  # локальный отказ не снимает общий запрет
+    promote_opt_out = reason == "unsubscribed" and row.reason == "bounced" and until is None
+    if replace or (shared and (not active_shared or promote_opt_out or (row.until is not None and until is None))):
+        row.reason, row.note, row.until = reason, note, until
+    return row
+
+
 async def _active_dnc(db: AsyncSession, workspace_id: int, now: datetime,
                       client_project_id: int | None = None) -> list[DncEntry]:
     scope = (LgDnc.client_project_id == client_project_id) if client_project_id else LgDnc.client_project_id.is_(None)
-    rows = (await db.execute(select(LgDnc).where(LgDnc.workspace_id == workspace_id,
-                                                 scope | LgDnc.reason.in_(GLOBAL_DNC_REASONS)))).scalars().all()
+    local = (LgDnc.workspace_id == workspace_id) & (scope | LgDnc.reason.in_(GLOBAL_DNC_REASONS))
+    rows = (await db.scalars(select(LgDnc).where(local | shared_dnc_filter(),
+                LgDnc.until.is_(None) | (LgDnc.until > now)))).all()
     entries = [DncEntry(r.kind, r.value_norm, _aware(r.until)) for r in rows]
     return [e for e in entries if e.active(now)]
 
 
 async def recalc_score(db: AsyncSession, company: LgCompany, *, now: datetime | None = None) -> int:
     now = now or utcnow()
-    settings = await get_settings(db)
+    settings = await get_settings(db, company.workspace_id)
     kinds = [k for (k,) in (await db.execute(
         select(LgSignal.kind).where(LgSignal.company_id == company.id,
                                     (LgSignal.expires_at.is_(None)) | (LgSignal.expires_at > now))
@@ -335,19 +428,16 @@ async def merge_companies(db: AsyncSession, keep_id: int, drop_id: int, *, reaso
 
 # ---------------------------------------------------------------- можно ли писать
 
-GLOBAL_DNC_REASONS = ("bounced", "legal")   # недействительный адрес и юридический запрет — для всех отправителей
-
-
 async def check_can_contact(db: AsyncSession, company_id: int, contact_id: int | None, channel: str, *,
                             sequence_id: str | None = None, now: datetime | None = None,
                             client_project_id: int | None = None) -> Decision:
     """client_project_id — пишем от имени клиента: действует его стоп-лист (+ общие запреты), а решения агентства
     по компании (скрыта, отказала агентству, наш клиент, сделка в нашей CRM) письмам клиента не мешают."""
     now = now or utcnow()
-    settings = await get_settings(db)
     company = await db.get(LgCompany, company_id)
     if company is None:
         return Decision(False, "not_found")
+    settings = await get_settings(db, company.workspace_id)
     contact = await db.get(LgContact, contact_id) if contact_id else None
     if contact is not None and contact.company_id != company.id:
         return Decision(False, "contact:foreign")

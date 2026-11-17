@@ -40,8 +40,8 @@ _RULES = {
 _NEGATIVE = re.compile(r"не\s+(интересн|актуальн|нужн|звоните|пишите)|неинтересн|неактуальн|отпиш", re.I)
 
 
-async def config(db: AsyncSession) -> dict:
-    value = (await service.get_settings(db)).get("hot") or {}
+async def config(db: AsyncSession, workspace_id: int) -> dict:
+    value = (await service.get_settings(db, workspace_id)).get("hot") or {}
     out = dict(DEFAULTS)
     for key in DEFAULTS:
         if key in value and value[key] is not None:
@@ -110,8 +110,15 @@ async def due_at(db: AsyncSession, touch: LgTouch, now: datetime, minutes: int) 
     return start + timedelta(minutes=minutes)
 
 
-def _link(touch: LgTouch) -> str:
-    return f"{app_settings.frontend_origin.rstrip('/')}/admin/outreach/inbox?touch={touch.id}"
+def _link(touch: LgTouch, workspace_id: int) -> str:
+    """Ссылка на ответ во входящих. ws — чтобы портал открыл его в пространстве нужного клиента."""
+    return f"{app_settings.frontend_origin.rstrip('/')}/admin/outreach/inbox?touch={touch.id}&ws={workspace_id}"
+
+
+async def _client_line(db: AsyncSession, workspace_id: int) -> str | None:
+    from app.models.marketing import ClientWorkspace
+    name = await db.scalar(select(ClientWorkspace.name).where(ClientWorkspace.id == workspace_id))
+    return f"Клиент: {html.escape(name)}" if name else None
 
 
 async def _telegram(db: AsyncSession, text: str) -> None:
@@ -126,7 +133,7 @@ async def mark(db: AsyncSession, touch: LgTouch, company: LgCompany, *, score: i
                now: datetime | None = None) -> bool:
     """Записывает силу интереса; если ответ горячий и ещё не был — запускает автодействия. True — стал горячим."""
     now = now or service.utcnow()
-    cfg = await config(db)
+    cfg = await config(db, company.workspace_id)
     touch.intent_score = score if score is not None else touch.intent_score
     touch.intent_signals = sorted(set((touch.intent_signals or []) + signals))
     if touch.hot_at or touch.label_source == "user" or touch.label in ("not_interested", "unsubscribe", "auto"):
@@ -162,9 +169,10 @@ async def mark(db: AsyncSession, touch: LgTouch, company: LgCompany, *, score: i
     if cfg["notify"]:
         await _telegram(db, "\n".join(filter(None, [
             f"🔥 <b>Горячий ответ на аутрич</b> · {html.escape(name)}",
+            await _client_line(db, company.workspace_id),
             html.escape(touch.summary or (touch.body or "")[:200]),
             f"Признаки: {html.escape(_signals_text(touch))}" if touch.intent_signals or touch.intent_score else None,
-            f"Связаться до {_local(due, touch)}", _link(touch)])))
+            f"Связаться до {_local(due, touch)}", _link(touch, company.workspace_id)])))
     return True
 
 
@@ -200,21 +208,25 @@ async def cool(db: AsyncSession, touch: LgTouch, company: LgCompany, now: dateti
 async def remind_due(db: AsyncSession, now: datetime | None = None) -> int:
     """Горячие, которые не разобрали к сроку, — одно повторное сообщение в Telegram."""
     now = now or service.utcnow()
-    cfg = await config(db)
-    if not cfg["remind"]:
-        return 0
+    configs: dict[int, dict] = {}   # у каждого клиента свой срок и своё «напоминать»
     rows = (await db.execute(select(LgTouch, LgCompany).join(LgCompany, LgCompany.id == LgTouch.company_id).where(
         LgTouch.hot_at.is_not(None), LgTouch.handled_at.is_(None), LgTouch.hot_reminded_at.is_(None),
         LgTouch.direction == "in").limit(50))).all()
     sent = 0
     for touch, company in rows:
+        if company.workspace_id not in configs:
+            configs[company.workspace_id] = await config(db, company.workspace_id)
+        cfg = configs[company.workspace_id]
+        if not cfg["remind"]:
+            continue
         task = await db.get(CrmTask, touch.hot_task_id) if touch.hot_task_id else None
         due = task.due_at if task else await due_at(db, touch, service._aware(touch.hot_at), cfg["sla_minutes"])
         if service._aware(due) > now or (task and task.status != "OPEN"):
             continue
         touch.hot_reminded_at = now
         await _telegram(db, f"⏰ <b>Горячий ответ ждёт</b> · {html.escape(company.display_name or company.domain or '')}\n"
-                            f"Срок «связаться» прошёл. {_link(touch)}")
+                            + (f"{line}\n" if (line := await _client_line(db, company.workspace_id)) else "")
+                            + f"Срок «связаться» прошёл. {_link(touch, company.workspace_id)}")
         sent += 1
     await db.flush()
     return sent

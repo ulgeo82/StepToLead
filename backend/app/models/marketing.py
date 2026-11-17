@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, JSON, Numeric, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, JSON, Numeric, String, Text, UniqueConstraint, false, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -21,6 +21,7 @@ class ClientWorkspace(Base):
     logo_data: Mapped[str | None] = mapped_column(Text)
     # Agency tariff: start | growth | system; empty = individual terms, no limits (clients from before tariffs).
     plan: Mapped[str | None] = mapped_column(String(16))
+    show_outreach: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -137,6 +138,7 @@ class PortalUser(Base):
     is_agency: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     manage_sources: Mapped[bool] = mapped_column(Boolean, default=False)
     manage_integrations: Mapped[bool] = mapped_column(Boolean, default=False)
+    can_reply_outreach: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
     phone: Mapped[str | None] = mapped_column(String(64))
     permissions: Mapped[list | None] = mapped_column(JSON)
     last_activity_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

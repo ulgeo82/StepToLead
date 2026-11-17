@@ -1,3 +1,4 @@
+import { SPACE_HEADER, spaceForRequest } from "./space";
 export type Campaign = {
   id: number;
   name: string;
@@ -92,13 +93,21 @@ export type LeadInboundSource = {
 export const API_URL = "";
 export const WS_URL = API_URL.replace(/^http/, "ws");
 
-type ApiOptions = RequestInit & { timeoutMs?: number; absoluteUrl?: string };
+// noSpace — не подставлять выбранного клиента (lib/space.ts): список клиентов нужен и когда выбранный отключён.
+type ApiOptions = RequestInit & { timeoutMs?: number; absoluteUrl?: string; noSpace?: boolean };
 
 export async function api<T>(path: string, options?: ApiOptions): Promise<T> {
   const controller = new AbortController();
   const timeoutMs = options?.timeoutMs ?? 30_000;
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  const { timeoutMs: _timeoutMs, absoluteUrl, ...requestOptions } = options || {};
+  const { timeoutMs: _timeoutMs, absoluteUrl, noSpace, ...requestOptions } = options || {};
+  // Разделы «Лидогенерация» и «Аутрич» работают в пространстве выбранного клиента.
+  const space = noSpace || absoluteUrl ? null : spaceForRequest(path);
+  if (space) {
+    const headers = new Headers(requestOptions.headers);
+    if (!headers.has(SPACE_HEADER)) headers.set(SPACE_HEADER, String(space));
+    requestOptions.headers = headers;
+  }
   // Свой сигнал вызывающего (отмена при вводе) не отключает таймаут: слушаем оба.
   const outer = requestOptions.signal;
   if (outer) { if (outer.aborted) controller.abort(); else outer.addEventListener("abort", () => controller.abort(), { once: true }); }

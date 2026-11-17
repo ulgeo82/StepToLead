@@ -1,0 +1,40 @@
+export type Channel = "email" | "telegram";
+export type InboxStatus = "unhandled" | "mine" | "hot" | "all";
+export type InboxLabel = "interested" | "question" | "later" | "not_interested" | "unsubscribe" | "auto" | "other";
+export type ConversationKey = `email:${number}` | `tg:${number}`;
+export type Operator = { id: number; name: string };
+export type InboxCounts = Record<Exclude<InboxStatus, "all">, number>;
+export type Conversation = {
+  key: ConversationKey;
+  channel: Channel;
+  client: { id: number; name: string };
+  campaign: { id: number; name: string } | null;
+  contact: { name: string | null; address: string; company: string | null };
+  sender: { kind: "mailbox" | "account"; id: number; label: string };
+  last: { text: string; at: string; direction: "in" | "out" };
+  label: InboxLabel | null;
+  summary: string | null;
+  interest: number | null;
+  hot: boolean;
+  assignee: Operator | null;
+  locked_by: (Operator & { until: string }) | null;
+  unread: boolean;
+  handled: boolean;
+};
+export type InboxListing = { total: number; counts: InboxCounts; items: Conversation[] };
+export type InboxMessage = {
+  id: number | string;
+  direction: "in" | "out";
+  text: string;
+  at: string;
+  status: "sent" | "delivered" | "failed" | "received";
+  author: { kind: "lead" | "agency" | "client" | "auto" | "system"; name: string | null };
+};
+export type InboxConversation = Conversation & {
+  messages: InboxMessage[];
+  crm: { deal_id: number; stage: string } | null;
+  can_reply: boolean;
+  reply_blocker: string | null;
+};
+export type ReplyTemplate = { id: number; title: string; text: string; channel: Channel | "any" };
+export type ReplyLock = { until: string };

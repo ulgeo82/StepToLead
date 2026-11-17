@@ -17,7 +17,6 @@ from app.domains.leadgen import service
 from app.domains.leadgen.models import LgAd, LgCompany, LgContact, LgDnc
 from app.models.crm import CrmContact, CrmDeal, CrmPipeline, CrmStage
 from app.models.marketing import Project
-from app.models.system import AppSetting
 
 PROJECT_NAME = "Аутрич"
 PIPELINE_NAME = "Аутрич"
@@ -37,7 +36,7 @@ TAG = "лидогенерация"
 
 async def ensure_pipeline(db: AsyncSession, workspace_id: int) -> tuple[Project, CrmPipeline]:
     """Проект и воронка «Аутрич» в аккаунте агентства. Создаются один раз, id запоминаются в настройках."""
-    settings = await service.get_settings(db)
+    settings = await service.get_settings(db, workspace_id)
     project = await db.get(Project, settings.get("outreach_project_id") or 0)
     if project is None or project.workspace_id != workspace_id:
         project = await db.scalar(select(Project).where(Project.workspace_id == workspace_id,
@@ -61,13 +60,8 @@ async def ensure_pipeline(db: AsyncSession, workspace_id: int) -> tuple[Project,
                             position=position, required_fields=[]))
         await db.flush()
     if (settings.get("outreach_project_id"), settings.get("outreach_pipeline_id")) != (project.id, pipeline.id):
-        row = await db.get(AppSetting, service.SETTINGS_KEY)
-        value = {**settings, "outreach_project_id": project.id, "outreach_pipeline_id": pipeline.id}
-        if row is None:
-            db.add(AppSetting(key=service.SETTINGS_KEY, value=value))
-        else:
-            row.value = value
-        await db.flush()
+        await service.save_settings(db, workspace_id, {**settings, "outreach_project_id": project.id,
+                                                       "outreach_pipeline_id": pipeline.id})
     return project, pipeline
 
 

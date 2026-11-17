@@ -39,8 +39,10 @@ class TelegramAccountRead(BaseModel):
     flood_wait_until: datetime | None
     last_seen_at: datetime | None
     created_at: datetime
+    proxy_info: dict | None = Field(default=None, serialization_alias="proxy")   # {id, host, port, scheme, status, health_level}
+    health: dict | None = None      # docs/TELEGRAM_INFRA.md, раздел 2
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 
 class UsernameCheck(BaseModel):

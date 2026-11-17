@@ -13,7 +13,19 @@ from app.models import TelegramAccount
 from app.models.telegram_parser import TelegramParsedContact, TelegramParseLog, TelegramParseTask
 from app.schemas.telegram_parser import TelegramParseCreate
 
-router = APIRouter(prefix="/telegram-parser", tags=["telegram-parser"])
+from app.domains.leadgen import space
+from app.services import tg_space
+
+# Задачи сбора — через аккаунт, которым собирают: видны и доступны только в пространстве этого аккаунта (этап B).
+router = APIRouter(prefix="/telegram-parser", tags=["telegram-parser"], dependencies=[Depends(space.bind)])
+
+
+async def task_or_404(db, task_id):
+    task = await db.get(TelegramParseTask, task_id)
+    account = await db.get(TelegramAccount, task.account_id) if task else None
+    if not task or not account or not tg_space.owns(account.workspace_id):
+        raise HTTPException(404, "Задача не найдена")
+    return task
 
 SOURCE_TYPES = {"message": "chat_messages", "member": "chat_members", "comment": "post_comments"}
 
@@ -34,6 +46,8 @@ def task_view(task: TelegramParseTask) -> dict:
 @router.post("/tasks")
 async def create_task(payload: TelegramParseCreate, db: AsyncSession = Depends(get_db)):
     account = await db.get(TelegramAccount, payload.account_id)
+    if account and not tg_space.owns(account.workspace_id):
+        account = None
     if not account or not account.session_encrypted:
         raise HTTPException(422, "Выбранный Telegram-аккаунт не подключён")
     active = await db.scalar(select(TelegramParseTask.id).where(
@@ -53,19 +67,16 @@ async def create_task(payload: TelegramParseCreate, db: AsyncSession = Depends(g
 
 @router.get("/tasks")
 async def list_tasks(db: AsyncSession = Depends(get_db)):
-    rows = (await db.execute(
-        select(TelegramParseTask, TelegramAccount.phone, TelegramAccount.username)
-        .join(TelegramAccount, TelegramAccount.id == TelegramParseTask.account_id)
-        .order_by(TelegramParseTask.id.desc()).limit(100)
-    )).all()
+    query = (select(TelegramParseTask, TelegramAccount.phone, TelegramAccount.username)
+             .join(TelegramAccount, TelegramAccount.id == TelegramParseTask.account_id))
+    query = tg_space.scope(query, TelegramAccount.workspace_id)
+    rows = (await db.execute(query.order_by(TelegramParseTask.id.desc()).limit(100))).all()
     return [{**task_view(task), "account_phone": phone, "account_username": username} for task, phone, username in rows]
 
 
 @router.get("/tasks/{task_id}")
 async def task_details(task_id: int, page: int = Query(1, ge=1), db: AsyncSession = Depends(get_db)):
-    task = await db.get(TelegramParseTask, task_id)
-    if not task:
-        raise HTTPException(404, "Задача не найдена")
+    task = await task_or_404(db, task_id)
     contacts = (await db.scalars(
         select(TelegramParsedContact).where(TelegramParsedContact.task_id == task_id)
         .order_by(TelegramParsedContact.id).offset((page - 1) * 100).limit(100)
@@ -97,9 +108,7 @@ async def task_details(task_id: int, page: int = Query(1, ge=1), db: AsyncSessio
 
 @router.post("/tasks/{task_id}/cancel")
 async def cancel_task(task_id: int, db: AsyncSession = Depends(get_db)):
-    task = await db.get(TelegramParseTask, task_id)
-    if not task:
-        raise HTTPException(404, "Задача не найдена")
+    task = await task_or_404(db, task_id)
     if task.status not in {"queued", "running"}:
         raise HTTPException(409, "Эта задача уже завершена")
     task.status = "cancel_requested"
@@ -109,9 +118,7 @@ async def cancel_task(task_id: int, db: AsyncSession = Depends(get_db)):
 
 
 async def export_rows(task_id: int, db: AsyncSession):
-    task = await db.get(TelegramParseTask, task_id)
-    if not task:
-        raise HTTPException(404, "Задача не найдена")
+    task = await task_or_404(db, task_id)
     return (await db.scalars(select(TelegramParsedContact).where(TelegramParsedContact.task_id == task_id).order_by(TelegramParsedContact.id))).all()
 
 

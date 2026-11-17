@@ -35,6 +35,14 @@ async def lifespan(_: FastAPI):
             await runtime_settings.apply(db)  # ключи ИИ, заданные в портале, главнее .env
     except Exception:
         logging.getLogger("uvicorn.error").exception("Не удалось загрузить настройки подключений из портала")
+    if settings.agency_workspace_id:
+        try:   # настройки лидогена стали настройками клиента: прежние общие один раз становятся записью агентства
+            from app.domains.leadgen import service as leadgen_service
+            async with SessionLocal() as db:
+                await leadgen_service.ensure_settings(db, settings.agency_workspace_id)
+                await db.commit()
+        except Exception:
+            logging.getLogger("uvicorn.error").exception("Не удалось перенести настройки лидогенерации")
     runner = asyncio.create_task(run_campaigns())
     parser_worker = asyncio.create_task(run_parser_worker())
     avito_worker = asyncio.create_task(run_avito_worker())

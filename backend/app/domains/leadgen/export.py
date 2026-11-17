@@ -105,7 +105,8 @@ def _values(c, contacts, ads, portal, lists) -> dict:
         "Спецразмещение": "да" if any(a.placement == "premium" for a in ad_list) else None,
         "Впервые замечена": c.first_seen_at.date() if c.first_seen_at else None,
         "Списки": _join(item["name"] for item in lists.get(c.id, [])),
-        "Карточка в портале": f"{portal}/admin/leadgen/companies?company={c.id}" if portal else None,
+        "Карточка в портале": (f"{portal}/admin/leadgen/companies?company={c.id}"
+                               + (f"&ws={ws}" if (ws := getattr(c, "workspace_id", None)) else "")) if portal else None,
     }
 
 

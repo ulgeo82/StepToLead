@@ -1,0 +1,35 @@
+.screen, .grid, .list, .detail { min-width: 0; }
+.list { max-height: calc(100dvh - 210px); }
+.list ul { min-height: 0; }
+.tabs { margin: 0; padding: 10px; flex-wrap: wrap; }
+.filters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.filters input, .filters select, .detail select { max-width: 100%; min-width: 0; }
+.filters input[type="search"] { grid-column: 1 / -1; }
+.detail { overflow-wrap: anywhere; }
+.detail textarea { margin-block: 8px; }
+.back { display: none; }
+.empty, .pagination { padding: 12px; }
+.pagination { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.unread { color: #9cbaff; }
+.lock {
+  padding: 10px 12px;
+  border: 1px solid #9a622c;
+  border-radius: 8px;
+  background: #33241c;
+  color: #ffe2a8;
+}
+@media (max-width: 900px) {
+  .grid { grid-template-columns: minmax(0, 1fr); }
+  .list { max-height: none; }
+  .grid[data-selected="true"] .list, .grid[data-selected="false"] .detail { display: none; }
+  .back { display: inline-flex; margin-bottom: 14px; }
+}
+.menuCount {
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: #344f90;
+  color: white;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}

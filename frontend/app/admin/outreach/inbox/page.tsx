@@ -1,315 +1,226 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api } from "@/lib/api";
-import { base, date, message, PageHeader, post } from "../../leadgen/shared";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useCallback, useEffect, useState } from "react";
+import { currentSpace, spaceUrl } from "@/lib/space";
+import { date, message, PageHeader } from "../../leadgen/shared";
 import styles from "../../leadgen/leadgen.module.css";
-import { Formatted, hasMarkup } from "../email/format";
+import { ConversationPanel } from "./conversation";
+import { inboxRequest } from "./inbox-api";
+import type { Channel, Conversation, ConversationKey, InboxLabel, InboxListing, InboxStatus } from "./inbox-types";
+import {
+  activeLock, channelNames, conversationKey, countChangedEvent, inboxLabels, inboxPage, nextConversation,
+} from "./inbox-utils";
+import { useVisiblePoll } from "./visible-poll";
+import css from "./inbox.module.css";
 
-type Item = {
-  id: number; company_id: number; company: string; domain: string | null; stage: string; score: number;
-  fit_label: string | null; crm_deal_id: number | null; address: string | null; mailbox: string | null;
-  sequence: string | null; subject: string | null; snippet: string; label: string | null; label_name: string | null;
-  label_source: string | null; summary: string | null; handled: boolean; happened_at: string | null;
-  hot: boolean; hot_at: string | null; intent_score: number | null; intent_signals: string[];
-  campaign: { id: number; name: string; handoff_cc?: string | null; client?: string | null } | null;
-  client_deal_id?: number | null;
-  messages?: number;
-};
-type Full = Item & {
-  body: string; can_reply: boolean;
-  thread: { id: number; direction: "in" | "out"; subject: string | null; body: string | null; address: string | null;
-    manual: boolean; happened_at: string | null; label: string | null; cc?: string | null }[];
-};
-type Listing = { total: number; unhandled: number; hot: number; counts: Record<string, number>;
-  labels: { key: string; name: string }[]; items: Item[]; ai_available: boolean;
-  campaigns: { id: number; name: string; status: string; unhandled: number }[] };
-
-const SIGNALS: Record<string, string> = { phone: "телефон", call: "созвон", price: "цена", trial: "тест", meeting: "время встречи", details: "подробности" };
-const TONE: Record<string, string> = { interested: styles.fitYes, question: styles.fitMaybe, later: styles.fitMaybe, not_interested: styles.fitNo, unsubscribe: styles.fitNo };
-const ACTIONS: { label: string; title: string; key: string }[] = [
-  { label: "interested", title: "Интересно", key: "1" },
-  { label: "question", title: "Вопрос", key: "2" },
-  { label: "later", title: "Позже", key: "3" },
-  { label: "not_interested", title: "Не интересно", key: "4" },
+const PAGE_SIZE = 50;
+const tabs: [InboxStatus, string][] = [
+  ["unhandled", "Не разобрано"], ["mine", "Мои"], ["hot", "🔥 Горячие"], ["all", "Все"],
 ];
-const when = (iso: string | null) => {
-  if (!iso) return "";
-  const d = new Date(iso), now = new Date();
-  return d.toDateString() === now.toDateString() ? d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })
-    : d.toLocaleDateString("ru-RU", { day: "numeric", month: "short" });
-};
+
+function positiveId(value: string | null) {
+  return value && /^[1-9]\d*$/.test(value) && Number.isSafeInteger(Number(value)) ? Number(value) : null;
+}
 
 function Inbox() {
-  const router = useRouter();
   const search = useSearchParams();
-  const [tab, setTab] = useState<string>(search.get("tab") || "hot");
-  const [status, setStatus] = useState<"unhandled" | "all">("unhandled");
+  const allClients = search.get("all_clients") === "1";
+  const selected = conversationKey(search.get("conversation"), search.get("touch"));
+  const [scope, setScope] = useState<number | null>();
+  const [status, setStatus] = useState<InboxStatus>(() => {
+    const tab = search.get("tab");
+    return tabs.some(([key]) => key === tab) ? tab as InboxStatus : "unhandled";
+  });
+  const [channel, setChannel] = useState<Channel | "">("");
+  const [label, setLabel] = useState<InboxLabel | "">("");
+  const [campaign, setCampaign] = useState(search.get("campaign") ?? "");
+  const [account, setAccount] = useState("");
   const [q, setQ] = useState("");
-  const [campaign, setCampaign] = useState<string>(search.get("campaign") || "");
-  const [handoff, setHandoff] = useState(false);
-  const [cc, setCc] = useState("");
-  const [data, setData] = useState<Listing | null>(null);
-  const [selected, setSelected] = useState<number | null>(Number(search.get("touch")) || null);
-  const [full, setFull] = useState<Full | null>(null);
-  const [reply, setReply] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [page, setPage] = useState(1);
+  const [data, setData] = useState<{ key: string; listing: InboxListing } | null>(null);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
   const [revision, setRevision] = useState(0);
-  const replyRef = useRef<HTMLTextAreaElement>(null);
-  const refresh = useCallback(() => setRevision((n) => n + 1), []);
+  const [known, setKnown] = useState<{ key: string; items: Conversation[] }>({ key: "", items: [] });
 
-  const query = useMemo(() => {
-    const p = new URLSearchParams({ status: status === "all" ? "all" : "unhandled", limit: "100" });
-    if (tab === "hot") p.set("hot", "true");
-    else if (tab !== "all") p.set("label", tab);
-    if (q.trim()) p.set("q", q.trim());
-    if (campaign) p.set("campaign_id", campaign);
-    return p.toString();
-  }, [tab, status, q, campaign]);
+  const requestedWorkspace = search.get("ws");
+  useEffect(() => { setScope(currentSpace()); }, [requestedWorkspace]);
+  const params = new URLSearchParams({ status, page: String(page), per_page: String(PAGE_SIZE) });
+  if (allClients) params.set("all_clients", "1");
+  if (channel) params.set("channel", channel);
+  if (label) params.set("label", label);
+  if (q.trim()) params.set("q", q.trim());
+  if (positiveId(campaign)) params.set("campaign", campaign);
+  if (positiveId(account)) params.set("account", account);
+  const query = params.toString();
+  const listWorkspace = allClients ? null : scope ?? null;
+  const scopeKey = `${allClients ? "all" : scope}:${channel}`;
+  const requestKey = `${scopeKey}:${query}`;
+  const listing = data?.key === requestKey ? data.listing : null;
+  const items = listing?.items ?? [];
 
-  useEffect(() => {
-    const controller = new AbortController();
-    const t = setTimeout(() => {
-      api<Listing>(`${base}/inbox?${query}`, { signal: controller.signal })
-        .then((d) => { if (!controller.signal.aborted) { setData(d); setError(""); } })
-        .catch((e) => !controller.signal.aborted && setError(message(e)));
-    }, q ? 250 : 0);
-    return () => { clearTimeout(t); controller.abort(); };
-  }, [query, revision, q]);
-
-  // Новые ответы подтягиваются сами раз в минуту.
-  useEffect(() => { const t = setInterval(refresh, 60_000); return () => clearInterval(t); }, [refresh]);
-
-  useEffect(() => {
-    if (!selected) { setFull(null); return; }
-    const controller = new AbortController();
-    api<Full>(`${base}/inbox/${selected}`, { signal: controller.signal })
-      .then((d) => !controller.signal.aborted && setFull(d))
-      .catch((e) => !controller.signal.aborted && setError(message(e)));
-    const p = new URLSearchParams(search.toString());
-    p.set("touch", String(selected));
-    router.replace(`/admin/outreach/inbox?${p}`, { scroll: false });
-    setReply(""); setHandoff(false); setCc("");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected]);
-
-  async function patch(body: object, done: string) {
-    if (!full || busy) return;
-    setBusy(true); setError(""); setNotice("");
+  const load = useCallback(async (signal: AbortSignal) => {
+    if (scope === undefined) return;
     try {
-      const r = await api<Item & { effect: string | null }>(`${base}/inbox/${full.id}`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      setNotice(done + (r.effect === "task:call" ? " · задача «Связаться» в CRM" : r.effect?.startsWith("task:later") ? " · напомним позже" : r.effect === "closed" ? " · стоп-лист и «Отказ» в CRM" : ""));
-      setFull({ ...full, ...r });
-      refresh();
-      next();
-    } catch (e) { setError(message(e)); } finally { setBusy(false); }
-  }
-  function next() {
-    const items = data?.items || [];
-    const i = items.findIndex((x) => x.id === full?.id);
-    const n = items[i + 1] || items[i - 1];
-    if (n && n.id !== full?.id) setSelected(n.id);
-  }
-  async function send() {
-    if (!full || !reply.trim() || busy) return;
-    setBusy(true); setError(""); setNotice("");
-    try {
-      const copy = handoff ? cc.trim() : "";
-      if (handoff && !/^[^@\s,;]+@[^@\s,;]+\.[^@\s,;]+$/.test(copy)) { setError("Укажите адрес для копии"); setBusy(false); return; }
-      const r = await post<{ item: Full }>(`/inbox/${full.id}/reply`, { body: reply.trim(), cc: copy || null });
-      setFull(r.item); setReply(""); setHandoff(false); setCc("");
-      setNotice(copy ? `Ответ отправлен с ${full.mailbox}, копия — на ${copy}. Дальше общение идёт с этого адреса.` : `Ответ отправлен с ${full.mailbox}`);
-      refresh();
-    } catch (e) { setError(message(e)); } finally { setBusy(false); }
-  }
-  async function toClient() {
-    if (!full || busy) return;
-    setBusy(true); setError("");
-    try { const r = await post<Full>(`/inbox/${full.id}/to-client`, {}); setFull({ ...full, ...r }); setNotice(`Передали клиенту «${full.campaign?.client}»: сделка в воронке «Аутрич» и задача «Связаться»`); refresh(); }
-    catch (e) { setError(message(e)); } finally { setBusy(false); }
-  }
-  async function toCrm() {
-    if (!full || busy) return;
-    setBusy(true); setError("");
-    try { const r = await post<Full>(`/inbox/${full.id}/to-crm`, {}); setFull({ ...full, ...r }); setNotice("Сделка создана в CRM, воронка «Аутрич»"); refresh(); }
-    catch (e) { setError(message(e)); } finally { setBusy(false); }
-  }
-  async function aiLabel() {
-    if (!full || busy) return;
-    setBusy(true); setError("");
-    try { setFull({ ...full, ...(await post<Item>(`/inbox/${full.id}/classify`, {})) }); refresh(); }
-    catch (e) { setError(message(e)); } finally { setBusy(false); }
-  }
-
-  // Горячие клавиши: 1–4 — метка, E — разобрано, R — ответить, J/K — следующий/предыдущий.
-  useEffect(() => {
-    const key = (e: KeyboardEvent) => {
-      const el = e.target as HTMLElement;
-      if (["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName) || e.metaKey || e.ctrlKey) return;
-      const action = ACTIONS.find((a) => a.key === e.key);
-      if (action) { e.preventDefault(); void patch({ label: action.label }, `Метка «${action.title}»`); }
-      else if (e.key === "e") { e.preventDefault(); void patch({ handled: true }, "Разобрано"); }
-      else if (e.key === "r") { e.preventDefault(); replyRef.current?.focus(); }
-      else if (e.key === "j" || e.key === "k") {
-        const items = data?.items || [];
-        const i = items.findIndex((x) => x.id === selected);
-        const n = items[e.key === "j" ? i + 1 : i - 1];
-        if (n) setSelected(n.id);
+      const value = await inboxRequest<InboxListing>(`${inboxPage}?${query}`, listWorkspace, { signal });
+      if (signal.aborted) return;
+      setError("");
+      if (page > 1 && (page - 1) * PAGE_SIZE >= value.total) {
+        setPage(Math.max(1, Math.ceil(value.total / PAGE_SIZE)));
+        return;
       }
+      setData({ key: requestKey, listing: value });
+      setKnown(previous => {
+        const candidates = new Map((previous.key === scopeKey ? previous.items : []).map(item => [item.key, item]));
+        value.items.forEach(item => candidates.set(item.key, item));
+        return { key: scopeKey, items: [...candidates.values()].slice(-500) };
+      });
+    } catch (e) { if (!signal.aborted) setError(message(e)); }
+  // revision revalidates after a mutation without replacing the current list with a loading screen.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query, listWorkspace, scope, revision, requestKey, scopeKey, page]);
+  useVisiblePoll(load, 5000, q.trim() ? 250 : 0);
+
+  function changeUrl(edit: (params: URLSearchParams) => void) {
+    const next = new URLSearchParams(window.location.search);
+    edit(next);
+    window.history.replaceState(null, "", `${inboxPage}${next.size ? `?${next}` : ""}`);
+  }
+
+  function select(key: ConversationKey | null, workspace?: number) {
+    changeUrl(next => {
+      next.delete("touch"); next.delete("conversation"); next.delete("dialog_ws");
+      if (key) next.set("conversation", key);
+      if (key && allClients && workspace != null) next.set("dialog_ws", String(workspace));
+    });
+  }
+  function selectItem(item: Conversation) { select(item.key, item.client.id); }
+  function move(offset: 1 | -1, fallback = false) {
+    const key = nextConversation(items, selected, offset)
+      ?? (fallback ? nextConversation(items, selected, -1) : null);
+    const item = items.find(row => row.key === key);
+    if (item) selectItem(item);
+  }
+  useEffect(() => {
+    const handle = (event: KeyboardEvent) => {
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey ||
+          target?.isContentEditable || target?.closest("input,textarea,select,[role=dialog]")) return;
+      const key = event.key.toLowerCase();
+      if (key === "j" || key === "о") { event.preventDefault(); move(1); }
+      if (key === "k" || key === "л") { event.preventDefault(); move(-1); }
     };
-    document.addEventListener("keydown", key);
-    return () => document.removeEventListener("keydown", key);
+    document.addEventListener("keydown", handle);
+    return () => document.removeEventListener("keydown", handle);
   });
 
-  const tabs: [string, string, number | undefined][] = [
-    ["hot", "🔥 Горячие", data?.hot],
-    ["all", "Все", undefined],
-    ...((data?.labels || []).map((l) => [l.key, l.name, data?.counts[l.key]] as [string, string, number | undefined])),
-  ];
+  function changeAll(value: boolean) {
+    setPage(1); setCampaign(""); setAccount(""); setError("");
+    changeUrl(next => {
+      ["touch", "conversation", "dialog_ws", "campaign"].forEach(key => next.delete(key));
+      if (value) next.set("all_clients", "1");
+      else next.delete("all_clients");
+    });
+  }
 
-  return (
-    <div className={`page ${styles.page}`}>
-      <PageHeader title="Входящие" subtitle="Ответы на аутрич со всех ящиков. Горячие — сверху, о них сразу приходит сообщение в Telegram.">
-        <div className={styles.actions}>
-          <span className={styles.muted}>Не разобрано: <b>{data?.unhandled ?? "—"}</b></span>
-          <Link className={styles.secondary} href="/admin/leadgen/settings#hot">Настройки триггера</Link>
+  const candidates = known.key === scopeKey ? known.items : [];
+  const campaigns = new Map(candidates.flatMap(item => item.campaign ? [[item.campaign.id, item.campaign.name] as const] : []));
+  const senders = new Map(candidates.map(item => [item.sender.id, item.sender.label]));
+  const itemWorkspace = allClients
+    ? positiveId(search.get("dialog_ws")) ?? items.find(item => item.key === selected)?.client.id ?? null
+    : scope ?? null;
+
+  return <div className={`page ${styles.page} ${css.screen}`}>
+    <PageHeader title="Входящие" subtitle="Ответы на аутрич из email и Telegram.">
+      <div className={styles.actions}>
+        <label className={styles.check}><input type="checkbox" checked={allClients}
+          onChange={event => changeAll(event.target.checked)}/> Все клиенты</label>
+        <Link className={styles.secondary} href={spaceUrl("/admin/leadgen/settings#hot", scope ?? null)}>
+          Настройки триггера
+        </Link>
+      </div>
+    </PageHeader>
+    <div className={`${styles.inboxGrid} ${css.grid}`} data-selected={selected != null}>
+      <section className={`${styles.card} ${styles.inboxList} ${css.list}`} aria-label="Список переписок">
+        <div className={`${styles.tabs} ${css.tabs}`} aria-label="Статус переписки">
+          {tabs.map(([key, title]) => <button key={key} type="button" className={styles.tab}
+            aria-pressed={status === key} onClick={() => { setStatus(key); setPage(1); }}>
+            {title}{key !== "all" && listing?.counts[key] != null ? <span>{listing.counts[key]}</span> : null}
+          </button>)}
         </div>
-      </PageHeader>
-      {error && <p className={styles.error} role="alert">{error}</p>}
-      {notice && <p className={styles.notice} role="status">{notice}</p>}
-
-      <div className={styles.tabs} aria-label="Метки">
-        {tabs.map(([key, name, count]) => (
-          <button key={key} type="button" className={styles.tab} aria-pressed={tab === key} onClick={() => setTab(key)}>
-            {name}{count ? <span>{count}</span> : null}
-          </button>
-        ))}
-      </div>
-
-      <div className={styles.inboxGrid}>
-        <section className={`${styles.card} ${styles.inboxList}`} aria-label="Ответы">
-          <div className={styles.inboxTools}>
-            <input type="search" placeholder="Компания, тема, текст" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Поиск" />
-            <select value={campaign} onChange={(e) => { setCampaign(e.target.value); setSelected(null); }} aria-label="Кампания">
-              <option value="">Все кампании</option>
-              {(data?.campaigns || []).map((c) => <option key={c.id} value={c.id}>{c.name}{c.unhandled ? ` (${c.unhandled})` : ""}</option>)}
-            </select>
-            <select value={status} onChange={(e) => setStatus(e.target.value as "unhandled" | "all")} aria-label="Статус">
-              <option value="unhandled">Не разобрано</option>
-              <option value="all">Все</option>
-            </select>
-          </div>
-          {!data ? <p className={styles.muted} role="status">Загружаем…</p> : !data.items.length ? (
-            <div className={styles.empty}>
-              <h2>{tab === "hot" ? "Горячих ответов нет" : "Здесь пусто"}</h2>
-              <p className={styles.muted}>{status === "unhandled" ? "Всё разобрано. Новые ответы появятся сами." : "Ответов с такими условиями нет."}</p>
-            </div>
-          ) : (
-            <ul>
-              {data.items.map((item) => (
-                <li key={item.id}>
-                  <button type="button" className={`${styles.inboxItem} ${item.id === selected ? styles.inboxActive : ""} ${item.hot && !item.handled ? styles.inboxHot : ""} ${item.handled ? styles.inboxDone : ""}`}
-                    onClick={() => setSelected(item.id)}>
-                    <span className={styles.inboxTop}>
-                      <b>{item.hot ? "🔥 " : ""}{item.company}{item.messages && item.messages > 1 ? <small className={styles.muted}> · {item.messages} письма</small> : null}</b>
-                      <small>{when(item.happened_at)}</small>
-                    </span>
-                    <span className={styles.inboxSnippet}>{item.summary || item.snippet}</span>
-                    <span className={styles.inboxMeta}>
-                      {item.label_name && <span className={`${styles.badge} ${TONE[item.label || ""] || ""}`}>{item.label_name}{item.label_source === "user" ? "" : " · авто"}</span>}
-                      {item.intent_score != null && <span className={styles.muted}>интерес {item.intent_score}</span>}
-                      {item.campaign ? <span className={styles.muted}>{item.campaign.name}</span> : item.sequence && <span className={styles.muted}>{item.sequence}</span>}
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-
-        <section className={`${styles.card} ${styles.inboxView}`} aria-label="Переписка">
-          {!full ? <div className={styles.empty}><h2>Выберите ответ слева</h2><p className={styles.muted}>Клавиши: 1–4 — метка, E — разобрано, R — ответить, J/K — следующий и предыдущий.</p></div> : <>
-            <header className={styles.inboxHead}>
-              <div>
-                <h2>{full.hot ? "🔥 " : ""}{full.company}</h2>
-                <p className={styles.muted}>
-                  {full.address} → {full.mailbox}{full.campaign ? ` · кампания «${full.campaign.name}»${full.campaign.client ? ` для ${full.campaign.client}` : ""}` : full.sequence ? ` · цепочка «${full.sequence}»` : ""}
-                  {full.domain && <> · <a href={`https://${full.domain}`} target="_blank" rel="noopener noreferrer">{full.domain}</a></>}
-                </p>
-              </div>
-              <div className={styles.actions}>
-                <Link className={styles.secondary} href={`/admin/leadgen/companies?company=${full.company_id}`}>Карточка</Link>
-                {full.campaign?.client ? (full.client_deal_id
-                  ? <span className={`${styles.badge} ${styles.fitYes}`} title="Сделка и задача — в CRM клиента">✓ Передано клиенту</span>
-                  : <button type="button" className={styles.primary} disabled={busy} onClick={toClient} title={`Сделка и задача «Связаться» в CRM клиента «${full.campaign.client}»`}>Передать клиенту →</button>)
-                  : full.crm_deal_id ? <Link className={styles.secondary} href={`/crm?deal=${full.crm_deal_id}`}>Сделка в CRM</Link>
-                  : <button type="button" className={styles.primary} disabled={busy} onClick={toCrm} title="Создать сделку в воронке «Аутрич»">＋ В CRM</button>}
-              </div>
-            </header>
-            {(full.summary || full.hot) && (
-              <div className={`${styles.inboxSummary} ${full.hot ? styles.inboxSummaryHot : ""}`}>
-                {full.hot && <b>🔥 Горячий ответ{full.hot_at ? ` · ${date(full.hot_at)}` : ""}</b>}
-                {full.summary && <p>{full.summary}</p>}
-                {!!full.intent_signals.length && <p className={styles.muted}>Признаки: {full.intent_signals.map((s) => SIGNALS[s] || s).join(", ")}{full.intent_score != null ? ` · интерес ${full.intent_score}/100` : ""}</p>}
-              </div>
-            )}
-            <div className={styles.inboxActions}>
-              {ACTIONS.map((a) => (
-                <button key={a.label} type="button" disabled={busy} className={full.label === a.label && full.label_source === "user" ? styles.primary : styles.secondary}
-                  onClick={() => patch({ label: a.label }, `Метка «${a.title}»`)} title={`Клавиша ${a.key}`}>
-                  {a.title}
-                </button>
-              ))}
-              <button type="button" className={styles.secondary} disabled={busy} onClick={() => patch({ handled: !full.handled }, full.handled ? "Вернули в неразобранные" : "Разобрано")} title="Клавиша E">
-                {full.handled ? "Вернуть" : "Разобрано ✓"}
-              </button>
-              {data?.ai_available && full.label_source !== "user" && (
-                <button type="button" className={styles.secondary} disabled={busy} onClick={aiLabel}>Разметить ИИ</button>
-              )}
-            </div>
-            <div className={styles.thread}>
-              {full.thread.map((m) => (
-                <article key={m.id} className={m.direction === "in" ? styles.msgIn : styles.msgOut}>
-                  <header><b>{m.direction === "in" ? full.company : m.manual ? "Вы" : "Цепочка"}</b><small>{date(m.happened_at)}</small></header>
-                  {m.subject && <strong>{m.subject}</strong>}
-                  {m.cc && <small className={styles.muted}>копия: {m.cc}</small>}
-                  {m.direction === "out" && m.body && hasMarkup(m.body) ? <Formatted text={m.body} /> : <p>{m.body}</p>}
-                </article>
-              ))}
-            </div>
-            {full.can_reply ? (
-              <form className={styles.replyBox} onSubmit={(e) => { e.preventDefault(); void send(); }}>
-                <textarea ref={replyRef} rows={5} value={reply} onChange={(e) => setReply(e.target.value)}
-                  placeholder={`Ответ уйдёт с ${full.mailbox} в эту же ветку`}
-                  onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void send(); } }} />
-                <label className={styles.check}>
-                  <input type="checkbox" checked={handoff} onChange={(e) => { setHandoff(e.target.checked); if (e.target.checked && !cc) setCc(full.campaign?.handoff_cc || ""); }} />
-                  {full.campaign?.client ? "Передать переписку менеджеру клиента (поставить в копию)" : "Передать переписку на другую почту (поставить в копию)"}
-                </label>
-                {handoff && (
-                  <label className={styles.field}>Адрес для копии
-                    <input type="email" placeholder="например, ваш рабочий адрес" value={cc} onChange={(e) => setCc(e.target.value)} />
-                    <small>Лид увидит этот адрес в копии и дальше сможет писать туда. Под вашим ответом портал приложит всю предыдущую переписку — адресат в копии увидит историю целиком. Текст о передаче напишите сами.</small>
-                  </label>
-                )}
-                <div className={styles.actions}>
-                  <button type="submit" className={styles.primary} disabled={busy || !reply.trim()}>{busy ? "Отправляем…" : handoff ? "Отправить с копией" : "Отправить"}</button>
-                  <span className={styles.muted}>⌘+Enter</span>
-                </div>
-              </form>
-            ) : <p className={styles.muted}>Ответить отсюда нельзя: компания просила не писать или адрес в стоп-листе.</p>}
-          </>}
-        </section>
-      </div>
+        <div className={`${styles.inboxTools} ${css.filters}`}>
+          <input type="search" aria-label="Поиск по перепискам" placeholder="Контакт, компания, текст" value={q}
+            onChange={event => { setQ(event.target.value); setPage(1); }}/>
+          <select aria-label="Канал" value={channel} onChange={event => {
+            setChannel(event.target.value as Channel | ""); setPage(1); setCampaign(""); setAccount("");
+          }}>
+            <option value="">Все каналы</option>
+            {Object.entries(channelNames).map(([key, name]) => <option key={key} value={key}>{name}</option>)}
+          </select>
+          <select aria-label="Фильтр по метке" value={label} onChange={event => {
+            setLabel(event.target.value as InboxLabel | ""); setPage(1);
+          }}>
+            <option value="">Все метки</option>
+            {Object.entries(inboxLabels).map(([key, name]) => <option key={key} value={key}>{name}</option>)}
+          </select>
+          <input aria-label="ID кампании" placeholder="Кампания (ID)" inputMode="numeric" list="inbox-campaigns"
+            value={campaign} onChange={event => { setCampaign(event.target.value.replace(/\D/g, "")); setPage(1); }}/>
+          <datalist id="inbox-campaigns">{[...campaigns].map(([id, name]) => <option key={id} value={id} label={name}/>)}</datalist>
+          <input aria-label="ID аккаунта или ящика" placeholder="Аккаунт или ящик (ID)" inputMode="numeric"
+            list="inbox-senders" value={account} onChange={event => {
+              setAccount(event.target.value.replace(/\D/g, "")); setPage(1);
+            }}/>
+          <datalist id="inbox-senders">{[...senders].map(([id, name]) => <option key={id} value={id} label={name}/>)}</datalist>
+        </div>
+        {error && <p className={styles.error} role="alert">{error}</p>}
+        {!listing && !error && <p className={css.empty} role="status">Загружаем переписки…</p>}
+        {listing && !items.length && <p className={css.empty}>{status === "hot" ? "Горячих ответов нет." : "Переписок не найдено."}</p>}
+        <ul>{items.map(item => {
+          const lock = activeLock(item.locked_by);
+          return <li key={item.key}>
+            <button type="button" aria-current={selected === item.key ? "true" : undefined}
+              className={`${styles.inboxItem} ${selected === item.key ? styles.inboxActive : ""} ${item.hot && !item.handled ? styles.inboxHot : ""}`}
+              onClick={() => selectItem(item)}>
+              <span className={styles.inboxTop}>
+                <b>{item.hot ? "🔥 " : ""}{item.contact.name || item.contact.company || item.contact.address}</b>
+                <small>{date(item.last.at)}</small>
+              </span>
+              <span className={styles.inboxMeta}>{channelNames[item.channel]} · {item.client.name}
+                {item.unread && <strong className={css.unread}>Непрочитано</strong>}
+              </span>
+              <span className={styles.inboxSnippet}>{item.last.text}</span>
+              <span className={styles.inboxMeta}>
+                {item.label && <span className={styles.badge}>{inboxLabels[item.label]}</span>}
+                {item.assignee && <span>Назначено: {item.assignee.name}</span>}
+                {lock && <span>✍ пишет {lock.name}</span>}
+              </span>
+            </button>
+          </li>;
+        })}</ul>
+        {(page > 1 || (listing?.total ?? 0) > PAGE_SIZE) && <div className={css.pagination}>
+          <button type="button" className={styles.secondary} disabled={page === 1}
+            onClick={() => setPage(n => n - 1)}>←</button>
+          <span>Страница {page}</span>
+          <button type="button" className={styles.secondary} disabled={!listing || page * PAGE_SIZE >= listing.total}
+            onClick={() => setPage(n => n + 1)}>→</button>
+        </div>}
+      </section>
+      <section className={`${styles.card} ${styles.inboxView} ${css.detail}`} aria-label="Переписка">
+        {selected ? <>
+          <button type="button" className={`${styles.secondary} ${css.back}`} onClick={() => select(null)}>← Назад</button>
+          {scope !== undefined && <ConversationPanel key={`${itemWorkspace}:${selected}`}
+            workspace={itemWorkspace} path={`${inboxPage}/${encodeURIComponent(selected)}`}
+            onChanged={() => { setRevision(n => n + 1); window.dispatchEvent(new Event(countChangedEvent)); }}
+            onNext={() => move(1, true)}/>}
+        </> : <div className={styles.empty}><h2>Выберите переписку</h2>
+          <p>1–4 — метка, E — разобрано, R — ответить, J/K — следующая/предыдущая.</p>
+        </div>}
+      </section>
     </div>
-  );
+  </div>;
 }
 
 export default function Page() {
-  return <Suspense fallback={<div className={`page ${styles.page}`} role="status">Загружаем входящие…</div>}><Inbox /></Suspense>;
+  return <Suspense fallback={<p role="status">Загружаем входящие…</p>}><Inbox/></Suspense>;
 }

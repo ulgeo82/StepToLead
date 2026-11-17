@@ -1,6 +1,7 @@
 """API «Лидогенерации» для админки агентства: /api/admin/leadgen/*.
 
-Работает в аккаунте агентства (settings.agency_workspace_id). Запись защищена require_admin (включая Origin).
+Работает в пространстве выбранного клиента (space.py: заголовок X-Workspace-Id или ?ws=), без выбора —
+в аккаунте агентства (settings.agency_workspace_id). Запись защищена require_admin (включая Origin).
 """
 from __future__ import annotations
 
@@ -21,7 +22,7 @@ from app.db import SessionLocal, get_db
 from app.domains.leadgen import (
     analytics, dadata, direct_search, export, fit_ai, importer, inbox, lists, outreach, sequences, service, site_enrich,
 )
-from app.domains.leadgen import source_runner
+from app.domains.leadgen import source_runner, space
 from app.domains.leadgen.core import table_import
 from app.domains.leadgen.core import sequence as seq_core
 from app.domains.leadgen.models import LgCampaign, LgEnrollment, LgMailbox, LgSequence
@@ -38,7 +39,7 @@ from app.models.access import AdminUser
 from app.models.system import AppSetting
 from app.services import progress
 
-router = APIRouter(prefix="/admin/leadgen", tags=["admin-leadgen"])
+router = APIRouter(prefix="/admin/leadgen", tags=["admin-leadgen"], dependencies=[Depends(space.bind)])
 
 # Подменяются в тестах.
 session_factory = SessionLocal
@@ -80,9 +81,14 @@ DNC_REASONS = ("unsubscribed", "refused", "client", "competitor", "bounced", "le
 
 
 def workspace_id() -> int:
-    if not app_settings.agency_workspace_id:
-        raise HTTPException(503, "Не задан AGENCY_WORKSPACE_ID — лидогенерация работает в аккаунте агентства")
-    return app_settings.agency_workspace_id
+    """Пространство запроса: выбранный клиент (space.bind), без выбора — агентство."""
+    return space.current()
+
+
+@router.get("/spaces")
+async def list_spaces(db: AsyncSession = Depends(get_db), admin: AdminUser = Depends(require_admin)):
+    """Клиенты для переключателя раздела и текущее пространство запроса."""
+    return {"current": workspace_id(), "items": await space.listing(db)}
 
 
 def make_provider():
@@ -553,9 +559,12 @@ def dnc_norm(kind: str, value: str) -> str:
 
 @router.get("/dnc")
 async def list_dnc(db: AsyncSession = Depends(get_db), admin: AdminUser = Depends(require_admin)):
-    rows = (await db.execute(select(LgDnc).where(LgDnc.workspace_id == workspace_id())
+    ws = workspace_id()
+    rows = (await db.execute(select(LgDnc).where((LgDnc.workspace_id == ws) | service.shared_dnc_filter())
                              .order_by(LgDnc.id.desc()).limit(1000))).scalars().all()
-    return {"items": [{"id": r.id, "kind": r.kind, "value": r.value_norm, "reason": r.reason, "note": r.note,
+    return {"items": [{"id": r.id, "kind": r.kind, "value": r.value_norm, "reason": r.reason,
+                       "shared": service.is_shared_dnc(r.kind, r.reason), "can_delete": r.workspace_id == ws,
+                       "note": r.note if r.workspace_id == ws else None,
                        "until": iso(r.until), "created_at": iso(r.created_at)} for r in rows]}
 
 
@@ -568,11 +577,8 @@ async def add_dnc(payload: DncIn, db: AsyncSession = Depends(get_db), admin: Adm
         if not value.isdigit():
             raise HTTPException(422, "Для kind=company передайте id компании")
         company = await company_or_404(db, ws, int(value))
-    existing = await db.scalar(select(LgDnc).where(LgDnc.workspace_id == ws, LgDnc.kind == payload.kind,
-                                                   LgDnc.value_norm == value))
-    row = existing or LgDnc(workspace_id=ws, kind=payload.kind, value_norm=value, created_by_id=admin.id)
-    row.reason, row.note, row.until = payload.reason, payload.note, payload.until
-    db.add(row)
+    row = await service.record_dnc(db, ws, payload.kind, value, payload.reason, until=payload.until,
+                                   note=payload.note, actor_id=admin.id, replace=True)
     if company is not None and payload.until is None:
         company.stage = "dnc"
     await db.flush()
@@ -658,20 +664,32 @@ class SettingsIn(BaseModel):
     recontact_days: int | None = Field(default=None, ge=1, le=3650)
     outreach_pipeline_id: int | None = None
     icp: str | None = Field(default=None, min_length=20, max_length=3000)  # портрет клиента для ИИ-оценки
+    # Основные домены клиента: с них холодные письма не шлём. Пустой список — запрета нет.
+    main_domains: list[str] | None = Field(default=None, max_length=50)
     hot: dict | None = None  # триггер «Явный интерес»: threshold, sla_minutes, notify, remind
+
+
+@router.get("/spend")
+async def spend_summary(days: int = Query(30, ge=1, le=365), db: AsyncSession = Depends(get_db),
+                        admin: AdminUser = Depends(require_admin)):
+    """Во что клиенту обошлись данные за период: платные запросы источников и сумма (журнал lg_spend)."""
+    from app.domains.leadgen import spend
+    return await spend.summary(db, workspace_id(), days=days)
 
 
 @router.get("/settings")
 async def get_settings(db: AsyncSession = Depends(get_db), admin: AdminUser = Depends(require_admin)):
     from app.domains.leadgen import hot
-    value = await service.get_settings(db)
-    return {**value, "icp": value.get("icp") or fit_ai.DEFAULT_ICP, "fit_ai_available": fit_available(),
-            "hot": await hot.config(db)}
+    ws = workspace_id()
+    value = await service.get_settings(db, ws)
+    return {**value, "icp": value.get("icp") or "", "fit_ai_available": fit_available(),
+            "main_domains": await service.main_domains(db, ws), "hot": await hot.config(db, ws)}
 
 
 @router.put("/settings")
 async def put_settings(payload: SettingsIn, db: AsyncSession = Depends(get_db), admin: AdminUser = Depends(require_admin)):
-    current = await service.get_settings(db)
+    ws = workspace_id()
+    current = await service.get_settings(db, ws)
     patch = payload.model_dump(exclude_none=True)
     if "weights" in patch:
         if any(not -10 <= v <= 10 for v in patch["weights"].values()):
@@ -687,14 +705,12 @@ async def put_settings(payload: SettingsIn, db: AsyncSession = Depends(get_db), 
             raise HTTPException(422, "Триггер интереса: порог 1–100, срок 5–1440 минут")
     if "platform_domains" in patch:
         patch["platform_domains"] = sorted({d for d in (normalize_domain(x) for x in patch["platform_domains"]) if d})
+    if "main_domains" in patch:
+        patch["main_domains"] = sorted({d for d in (normalize_domain(x) for x in patch["main_domains"]) if d})
     value = {**current, **patch}
-    row = await db.get(AppSetting, service.SETTINGS_KEY)
-    if row is None:
-        db.add(AppSetting(key=service.SETTINGS_KEY, value=value))
-    else:
-        row.value = value
+    await service.save_settings(db, ws, value)
     await db.commit()
-    return value
+    return {**value, "main_domains": await service.main_domains(db, ws)}
 
 
 # ---------------------------------------------------------------- обогащение с сайта
@@ -838,6 +854,7 @@ class MailboxPatch(BaseModel):
     is_active: bool | None = None
     role: str | None = Field(default=None, pattern="^(outreach|helper)$")
     warmup_enabled: bool | None = None
+    warmup_shared_pool: bool | None = None
     warmup_target: int | None = Field(default=None, ge=20, le=120)   # всего писем в день на пике
     client_project_id: int | None = None
     clear_client: bool = False
@@ -874,6 +891,7 @@ async def mailbox_row(db: AsyncSession, mb: LgMailbox) -> dict:
             "daily_limit": mb.daily_limit, "warmup_started_on": mb.warmup_started_on.isoformat() if mb.warmup_started_on else None,
             "is_active": mb.is_active, "sent_today": sent, "left_today": left, "last_error": mb.last_error,
             "last_checked_at": iso(mb.last_checked_at), "role": mb.role, "warmup_enabled": mb.warmup_enabled,
+            "warmup_shared_pool": mb.warmup_shared_pool,
             "health": mb.health, "cold_paused": bool(mb.cold_paused_at),
             "client": await campaigns_mod.client_info(db, mb.client_project_id)}
 
@@ -906,8 +924,12 @@ async def create_mailbox(payload: MailboxIn, db: AsyncSession = Depends(get_db),
     email_ = ascii_email(payload.email)
     if await db.scalar(select(LgMailbox.id).where(LgMailbox.workspace_id == ws, LgMailbox.email == email_)):
         raise HTTPException(409, "Такой ящик уже добавлен")
-    if email_.endswith("@steptolead.ru"):
-        raise HTTPException(422, "Не используйте основной домен steptolead.ru для холодных писем — заведите отдельный")
+    # Ящик принадлежит одному клиенту: иначе два пространства опрашивали бы его и слали с него одновременно.
+    if await db.scalar(select(LgMailbox.id).where(LgMailbox.workspace_id != ws, LgMailbox.email == email_)):
+        raise HTTPException(409, "Этот ящик уже подключён у другого клиента")
+    domain = normalize_domain(email_.rsplit("@", 1)[-1])
+    if domain and domain in await service.main_domains(db, ws):
+        raise HTTPException(422, f"Не используйте основной домен {domain} для холодных писем — заведите отдельный")
     helper = payload.role == "helper"
     mb = LgMailbox(workspace_id=ws, email=email_, sender_name=payload.sender_name, smtp_host=payload.smtp_host.strip(),
                    smtp_port=payload.smtp_port, imap_host=payload.imap_host.strip(), imap_port=payload.imap_port,
@@ -1615,11 +1637,10 @@ async def delete_companies(payload: DeleteIn, db: AsyncSession = Depends(get_db)
         await db.execute(sa_delete(LgCompany).where(LgCompany.id.in_(ids)))
     blocked = 0
     if payload.block_domains and domains:
-        await service.ensure_settings(db)
-        row = await db.get(AppSetting, service.SETTINGS_KEY)
-        current = list((row.value or {}).get("platform_domains") or [])
+        value = await service.get_settings(db, ws)
+        current = list(value.get("platform_domains") or [])
         new = [d for d in dict.fromkeys(domains) if d not in current]
-        row.value = {**row.value, "platform_domains": current + new}
+        await service.save_settings(db, ws, {**value, "platform_domains": current + new})
         blocked = len(new)
     await db.commit()
     return {"deleted": len(ids), "skipped": skipped, "blocked_domains": blocked}

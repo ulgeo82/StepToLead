@@ -22,7 +22,7 @@ const roles: { value: PortalRole; label: string; permissions: string[] }[] = [
 export default function ClientDetailsPage() {
   const params = useParams<{ id: string }>();
   const workspaceId = Number(params.id);
-  const [workspace, setWorkspace] = useState<ClientWorkspace | null>(null);
+  const [workspace, setWorkspace] = useState<(ClientWorkspace & { show_outreach: boolean }) | null>(null);
   const [users, setUsers] = useState<PortalUser[]>([]);
   const [sources, setSources] = useState<LeadInboundSource[]>([]);
   const [modal, setModal] = useState<"user" | "credentials" | "source" | "webhook" | null>(null);
@@ -37,7 +37,7 @@ export default function ClientDetailsPage() {
   const load = useCallback(async () => {
     try {
       const [workspaces, members, inboundSources] = await Promise.all([
-        api<ClientWorkspace[]>("/marketing/workspaces"),
+        api<(ClientWorkspace & { show_outreach: boolean })[]>("/marketing/workspaces"),
         api<PortalUser[]>(`/portal/admin/users?workspace_id=${workspaceId}`),
         api<LeadInboundSource[]>(`/portal/admin/lead-sources?workspace_id=${workspaceId}`),
       ]);
@@ -102,6 +102,20 @@ export default function ClientDetailsPage() {
     finally { setBusy(null); }
   }
 
+  async function setOutreachVisibility(enabled: boolean) {
+    setBusy("outreach"); setNotice(""); setError("");
+    try {
+      const result = await api<{ show_outreach: boolean }>(`/marketing/workspaces/${workspaceId}/outreach`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ show_outreach: enabled }),
+      });
+      setWorkspace(current => current ? { ...current, ...result } : null);
+      setNotice(result.show_outreach ? "Раздел «Аутрич» открыт для сотрудников клиента." : "Раздел «Аутрич» скрыт.");
+    } catch {
+      setError("Не удалось изменить видимость раздела «Аутрич».");
+    } finally { setBusy(null); }
+  }
+
   if (!workspace && !error) return <div className="page"><p className="mutedText">Загружаем компанию…</p></div>;
   if (!workspace) return <div className="page"><Link href="/admin/clients" className="backLink">← Клиенты</Link><p className="notice error">{error || "Компания не найдена"}</p></div>;
 
@@ -122,6 +136,16 @@ export default function ClientDetailsPage() {
     </section>
     <section className="panel leadIntakePanel"><div className="panelHead"><div><p className="eyebrow">Интеграции CRM</p><h2>Автоматический приём лидов</h2></div><button className="button primary" onClick={() => setModal("source")}>＋ Создать webhook</button></div><p className="portalMuted">Подключите форму сайта, квиз или рекламный сервис. Новые обращения попадут в CRM, дубли будут остановлены, а менеджеры назначены по очереди.</p><div className="sourceList">{sources.map(source => <article key={source.id}><span className={`sourceState ${source.active ? "active" : ""}`}></span><div><strong>{source.name}</strong><small>Ключ: {source.token_prefix}•••• · {source.auto_assign ? "автораспределение включено" : "без назначения"}</small></div><b>{source.active ? "Принимает лиды" : "Отключён"}</b>{source.active && <button disabled={busy === `source-${source.id}`} onClick={() => revokeSource(source)}>Отключить</button>}</article>)}{!sources.length && <div className="sourceEmpty">Webhook ещё не создан. Создайте его, чтобы подключить первый источник лидов.</div>}</div></section>
     <AdminPlanPanel workspaceId={workspaceId}/>
+    <section className="tablePanel">
+      <div className="tableTitle"><h2>Аутрич в кабинете клиента</h2></div>
+      <div className="filters">
+        <label className="checkLine"><input type="checkbox" checked={workspace.show_outreach === true}
+          disabled={busy !== null} onChange={event => void setOutreachVisibility(event.target.checked)}/>
+          Показывать аутрич клиенту
+        </label>
+      </div>
+      <div className="tableTitle">Сотрудники увидят сводку и переписки. Отвечать и менять метки они не смогут.</div>
+    </section>
     <AdminTokensClient workspaceId={workspaceId}/>
     <LaunchEditor workspaceId={workspaceId}/>
     <ClientBriefEntry workspaceId={workspaceId}/>

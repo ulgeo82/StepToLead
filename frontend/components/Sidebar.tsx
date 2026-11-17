@@ -3,6 +3,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import Logo from "./Logo";
+import InboxCounter from "./InboxCounter";
 import { activeParents, adminNavigation, filterNavigation, isActiveRoute, navigationNumbers, type NavigationNode } from "./admin-navigation";
 import styles from "./Sidebar.module.css";
 
@@ -70,7 +71,7 @@ export default function Sidebar() {
   }, [mobile, open]);
   function renderNode(node: NavigationNode): React.ReactNode {
     if (node.kind === "item") {
-      const content = <><span className={styles.number}>{numbers[node.id]}</span><span className={styles.text}>{node.label}</span>{node.disabled && <span className={styles.soon}>скоро</span>}</>;
+      const content = <><span className={styles.number}>{numbers[node.id]}</span><span className={styles.text}>{node.label}</span>{node.id === "inbound" && <InboxCounter/>}{node.disabled && <span className={styles.soon}>скоро</span>}</>;
       if (node.disabled) return <li key={node.id}><span className={`${styles.item} ${styles.disabled}`} aria-disabled="true">{content}</span></li>;
       const active = isActiveRoute(pathname, node.href);
       return <li key={node.id}><Link href={node.href} aria-current={active ? "page" : undefined} className={`${styles.item} ${active ? styles.active : ""}`} onClick={() => setOpen(false)}>{content}</Link></li>;

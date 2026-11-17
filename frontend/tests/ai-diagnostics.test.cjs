@@ -24,7 +24,8 @@ test('all four AI test buttons send JSON with the selected workspace', async () 
     }
     return { ok: true, status: 200, json: async () => url.includes('/usage') ? { groups: [] } : { ok: true, answer: 'Проверка пройдена' } };
   };
-  const api = load('lib/api.ts', () => {}, { fetch });
+  // api.ts подключает lib/space.ts (клиент раздела «Лидогенерация»); без окна браузера он клиента не подставляет.
+  const api = load('lib/api.ts', name => (name === './space' ? load('lib/space.ts', () => {}) : undefined), { fetch });
   let hook = 0;
   const functions = ['chat', 'summary', 'calls', 'campaigns'].map(feature => ({ feature, configured: true, key_set: true, model: 'test', provider: 'test' }));
   const overview = { functions, stt: { feature: 'stt', configured: false }, limits: {}, workspaces: [{ id: 7, name: 'Тест' }] };

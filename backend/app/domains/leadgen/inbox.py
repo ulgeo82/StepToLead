@@ -306,12 +306,8 @@ async def _task(db: AsyncSession, company: LgCompany, type_code: str, title: str
 
 async def _add_dnc(db: AsyncSession, workspace_id: int, kind: str, value: str, reason: str,
                    until: datetime | None, note: str, client_project_id: int | None = None) -> None:
-    scope = LgDnc.client_project_id == client_project_id if client_project_id else LgDnc.client_project_id.is_(None)
-    row = await db.scalar(select(LgDnc).where(LgDnc.workspace_id == workspace_id, LgDnc.kind == kind,
-                                              LgDnc.value_norm == value, scope))
-    if row is None:
-        db.add(LgDnc(workspace_id=workspace_id, kind=kind, value_norm=value, reason=reason, until=until, note=note,
-                     client_project_id=client_project_id))
+    await service.record_dnc(db, workspace_id, kind, value, reason, until=until, note=note,
+                             client_project_id=client_project_id)
 
 
 async def _stop_enrollments(db: AsyncSession, company: LgCompany, reason: str, now: datetime) -> None:
@@ -422,10 +418,15 @@ async def reply_blocker(db: AsyncSession, touch: LgTouch, company: LgCompany) ->
         return "Ящик, на который пришёл ответ, удалён"
     if not touch.address:
         return "Не знаем адрес отправителя"
-    blocked = await db.scalar(select(LgDnc.id).where(LgDnc.workspace_id == company.workspace_id, LgDnc.kind == "email",
-                                                     LgDnc.value_norm == touch.address.lower(),
-                                                     or_(LgDnc.until.is_(None), LgDnc.until > service.utcnow())))
-    return "Адрес в стоп-листе" if blocked else None
+    from app.domains.leadgen.core.normalize import normalize_domain
+    address = touch.address.strip().lower()
+    domains = {domain for domain in (company.domain, normalize_domain(address.rpartition("@")[2])) if domain}
+    matches = ((LgDnc.kind == "email") & (LgDnc.value_norm == address)) | (
+        (LgDnc.kind == "domain") & LgDnc.value_norm.in_(domains))
+    blocked = await db.scalar(select(LgDnc.id).where(
+        (LgDnc.workspace_id == company.workspace_id) | service.shared_dnc_filter(), matches,
+        or_(LgDnc.until.is_(None), LgDnc.until > service.utcnow())).limit(1))
+    return "Адрес или домен в стоп-листе" if blocked else None
 
 
 class ReplyError(Exception):

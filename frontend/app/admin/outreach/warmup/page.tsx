@@ -10,7 +10,7 @@ type Check = { key: string; title: string; ok: boolean | null; detail: string | 
 type Day = { day: string; sent: number; inbox: number; spam: number; missing: number };
 type Card = {
   id: number; email: string; sender_name: string | null; role: "outreach" | "helper"; is_active: boolean;
-  warmup_enabled: boolean; warmup_target: number;
+  warmup_enabled: boolean; warmup_target: number; warmup_shared_pool: boolean;
   stage: { phase: "warming" | "ready" | "helper" | "off"; title: string; day?: number; of?: number; note?: string };
   today: { warm_plan: number; warm_sent: number; cold_plan: number; cold_sent: number };
   peak: { total: number; cold: number };
@@ -18,7 +18,7 @@ type Card = {
     bounce_rate: number | null; cold_sent: number; checks: Check[]; checked_at: string | null; unchecked?: string | null };
   cold_paused: { at: string; reason: string } | null; error: string | null; days: Day[];
 };
-type Overview = { pool: { total: number; outreach: number; helpers: number; providers: string[] }; running: boolean;
+type Overview = { pool: { total: number; outreach: number; helpers: number; partners: number; providers: string[] }; running: boolean;
   in_window: boolean; window: string; tips: string[]; items: Card[] };
 
 const pct = (v: number | null | undefined) => (v == null ? "—" : `${Math.round(v * 100)}%`);
@@ -105,6 +105,11 @@ function MailCard({ card, busy, act }: { card: Card; busy: boolean; act: (path: 
         <button type="button" className={styles.secondary} disabled={busy} onClick={() => act(`/mailboxes/${card.id}`, { warmup_enabled: !card.warmup_enabled }, "PATCH")}>
           {card.warmup_enabled ? "Выключить прогрев" : "Включить прогрев"}
         </button>
+        <label className={styles.inlineForm} title="Если выключено, только ящики своего пространства смогут писать на этот ящик в рамках прогрева">
+          <input type="checkbox" checked={card.warmup_shared_pool} disabled={busy}
+            onChange={(e) => act(`/mailboxes/${card.id}`, { warmup_shared_pool: e.target.checked }, "PATCH")}/>
+          Участвует в общем пуле
+        </label>
         {card.role === "outreach" && (
           <label className={styles.inlineForm} title="Всего писем в день с 29-го дня: холодные (дневной лимит ящика) + прогрев">
             <small className={styles.muted}>пик</small>
@@ -186,9 +191,10 @@ export default function WarmupPage() {
           <div>
             <h2>{data.running ? (data.in_window ? "● Прогрев идёт" : "◐ Прогрев на паузе до утра") : "○ Прогрев не запущен"}</h2>
             <p className={styles.muted}>
-              В пуле {data.pool.total}: рабочих {data.pool.outreach}, помощников {data.pool.helpers}
+              В своём пространстве {data.pool.total}: рабочих {data.pool.outreach}, помощников {data.pool.helpers}
               {data.pool.providers.length ? ` · ${data.pool.providers.join(", ")}` : ""}. Письма уходят {data.window}, в выходные — вполовину.
             </p>
+            {data.pool.partners > 0 && <p className={styles.muted}>Партнёр по прогреву · ящиков: {data.pool.partners}</p>}
             {data.tips.map((tip) => <p key={tip} className={styles.hint}>💡 {tip}</p>)}
           </div>
           <Link className={styles.secondary} href="/admin/outreach/email?tab=mailboxes">＋ Добавить ящик или помощника</Link>

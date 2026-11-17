@@ -150,6 +150,13 @@ async def problems(db: AsyncSession) -> list[dict]:
     for proxy in (await db.scalars(select(Proxy).where(Proxy.pool == "client", Proxy.status == "error"))).all():
         add(f"clientproxy:{proxy.id}", "Нет связи через прокси Telegram-профилей",
             f"{proxy.host}:{proxy.port} · {proxy.last_error or ''}", proxy.dedicated_workspace_id)
+    from app.models import TelegramAccount
+    used = {pid for pid in (await db.scalars(select(TelegramAccount.proxy_id).where(
+        TelegramAccount.proxy_id.is_not(None)))).all()}
+    for proxy in (await db.scalars(select(Proxy).where(Proxy.pool == "agency", Proxy.status == "error"))).all():
+        if proxy.id in used and int((proxy.health or {}).get("fails_in_row") or 0) >= 3:
+            add(f"outreachproxy:{proxy.id}", "Не работает прокси Telegram-аккаунтов аутрича",
+                f"{proxy.host}:{proxy.port} · аккаунты на нём на паузе — замените прокси в «Аутрич → Telegram → Прокси»")
     for t in (await db.scalars(select(TelephonyConnection).where(TelephonyConnection.active.is_(True)))).all():
         if t.project_id in active and t.workspace_id in names and t.status == "error":
             add(f"tel:{t.id}", f"Телефония не работает: «{t.name}»", t.last_error, t.workspace_id)

@@ -61,6 +61,7 @@ export const adminNavigation: NavigationNode[] = [
               { kind: "item", id: "campaigns", label: "Кампании", href: "/admin/campaigns" },
               { kind: "item", id: "queue", label: "Очередь", href: "/admin/leads" },
               { kind: "item", id: "accounts", label: "Аккаунты", href: "/admin/accounts" },
+              { kind: "item", id: "outreach-proxies", label: "Прокси", href: "/admin/proxies" },
               { kind: "item", id: "parser", label: "Сбор контактов", href: "/admin/parser" },
             ],
           },

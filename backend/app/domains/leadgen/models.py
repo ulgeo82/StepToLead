@@ -6,7 +6,7 @@
 from datetime import date, datetime
 
 from sqlalchemy import (
-    BigInteger, Boolean, Date, DateTime, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint, func,
+    BigInteger, Boolean, Date, DateTime, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint, func, true,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -213,7 +213,7 @@ class LgDnc(Base):
     kind: Mapped[str] = mapped_column(String(16))  # company / domain / email / phone / telegram
     value_norm: Mapped[str] = mapped_column(String(300))
     reason: Mapped[str] = mapped_column(String(16))  # unsubscribed / refused / client / competitor / bounced / legal
-    # Стоп-лист клиента: отписались от писем этого клиента. NULL — агентства. bounced / legal действуют для всех.
+    # Старый проектный стоп-лист. Общность email/домена определяется причиной в service.shared_dnc_filter.
     client_project_id: Mapped[int | None] = mapped_column(Integer, index=True)
     note: Mapped[str | None] = mapped_column(Text)
     until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -246,6 +246,7 @@ class LgMailbox(Base):
     # Прогрев (warmup.py). role: outreach — рабочий ящик; helper — только участвует в прогреве, холодных не шлёт.
     role: Mapped[str] = mapped_column(String(10), default="outreach")
     warmup_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    warmup_shared_pool: Mapped[bool] = mapped_column(Boolean, default=True, server_default=true())
     warmup_target: Mapped[int] = mapped_column(Integer, default=70)   # всего писем в день на пике (прогрев + холодные)
     health: Mapped[int | None] = mapped_column(Integer)
     health_json: Mapped[dict | None] = mapped_column(JSON)
@@ -398,3 +399,19 @@ class LgSource(Base):
     last_error_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     stats: Mapped[dict | None] = mapped_column(JSON)   # {"sec_per_unit": 2.3, "samples": 12} — оценка времени
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class LgSpend(Base):
+    """Журнал расходов на данные по клиенту: что и сколько потратил запуск источника (docs/PLAN.md, этап 1).
+    units — платные запросы; rub — по цене из настроек источника (None — цена не задана). Расход ИИ здесь не
+    дублируется: он в ai_usage с тем же workspace_id. Из журнала на этапе 3 собирается расход канала по дням."""
+    __tablename__ = "lg_spend"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    workspace_id: Mapped[int] = mapped_column(ForeignKey("client_workspaces.id", ondelete="CASCADE"), index=True)
+    day: Mapped[date] = mapped_column(Date, index=True)
+    kind: Mapped[str] = mapped_column(String(32), index=True)   # код источника: serp / find_site / email_by_inn / yandex_direct …
+    units: Mapped[int] = mapped_column(Integer, default=0)
+    rub: Mapped[float | None] = mapped_column()
+    run_id: Mapped[int | None] = mapped_column(ForeignKey("lg_source_runs.id", ondelete="SET NULL"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

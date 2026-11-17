@@ -32,6 +32,7 @@ test("все действующие маршруты доступны", () => {
       "/admin/accounts",
       "/admin/parser",
       "/admin/proxies",
+      "/admin/proxies",
       "/admin/growth-leads",
       "/admin/monitor",
       "/admin/ai",
@@ -97,9 +98,14 @@ test("поиск сохраняет родителей совпадения и �
 test("поиск по папке показывает её дочерние разделы", () => {
   assert.deepEqual(
     flatten(filterNavigation(adminNavigation, "Telegram")).map((item) => item.id),
-    ["campaigns", "queue", "accounts", "parser", "proxies"],
+    ["campaigns", "queue", "accounts", "outreach-proxies", "parser", "proxies"],
   );
   assert.equal(filterNavigation(adminNavigation, "несуществующий раздел").length, 0);
+});
+test("прокси доступны из обоих разделов", () => {
+  assert.deepEqual(plain(activeParents(adminNavigation, "/admin/proxies")), [
+    "growth", "outreach", "telegram", "system",
+  ]);
 });
 test("номера двузначные, сбрасываются в группах и не зависят от поиска", () => {
   const nums = navigationNumbers(adminNavigation);

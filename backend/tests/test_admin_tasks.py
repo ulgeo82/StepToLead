@@ -49,9 +49,11 @@ class AdminTasksTests(ScannerBase):
         for rid in ids:
             progress.start(f"leadgen:source-run:{rid}", "Функции по базе", [("a", "A", 5)])
         items = {i["run_id"]: i for i in self.c.get("/api/admin/tasks").json()["items"]}
-        self.assertEqual(items[ids[0]]["link"], f"/admin/leadgen/lists/{list_id}")
-        self.assertEqual(items[ids[0]]["title"], "Функции по базе · Кухни · октябрь")
-        self.assertEqual(items[ids[1]]["link"], f"/admin/leadgen/search?run={ids[1]}")
+        # ссылка открывает задачу в пространстве её клиента
+        self.assertEqual(items[ids[0]]["link"], f"/admin/leadgen/lists/{list_id}?ws=7")
+        self.assertEqual(items[ids[0]]["title"], "StepToLead Agency · Функции по базе · Кухни · октябрь")
+        self.assertEqual(items[ids[0]]["workspace"], {"id": 7, "name": "StepToLead Agency", "is_home": True})
+        self.assertEqual(items[ids[1]]["link"], f"/admin/leadgen/search?run={ids[1]}&ws=7")
         self.assertEqual(items[ids[2]]["page"], "contacts")
         self.assertEqual((items[ids[3]]["page"], items[ids[3]]["source"]), ("source", "serp"))
 

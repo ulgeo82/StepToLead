@@ -1,0 +1,5 @@
+.mobile { display: none; }
+@media (max-width: 700px) {
+  .mobile { display: inline-flex; align-items: center; min-height: 40px; margin-left: auto; padding-inline: 10px; color: inherit; }
+  .mobile[aria-current="page"] { font-weight: 700; }
+}

@@ -18,13 +18,14 @@ from telethon.tl.types import InputPeerUser, User
 
 from app.core.crypto import decrypt_secret
 from app.db import SessionLocal, engine
-from app.models import Lead, LeadStatus, TelegramAccount
+from app.models import Campaign, Lead, LeadStatus, TelegramAccount
 from app.models.automation import CampaignAccount, CampaignDialog, CampaignMessage, CampaignRuntime, GlobalBlock
 from app.schemas.automation import AutomationSettings
 from app.services.campaign_log import add_campaign_event
 from app.services.telegram import make_client
 
 log = logging.getLogger(__name__)
+SPAMCHECK_HOURS = 24
 
 
 class AIProviderError(RuntimeError):
@@ -214,6 +215,10 @@ async def forward_context(db, client, runtime, settings, dialog, destination, re
     return await send(db, client, runtime, dialog, "handoff", body[:4096], "handoff:" + reason, destination)
 
 
+# manual — переписку взял человек во «Входящих»: входящие читаем, сами (ИИ, дожим) не пишем.
+LIVE_STATES = ["active", "manual", "manager_requested", "partner_requested", "negative_requested"]
+
+
 async def process_dialog(db, client, runtime, settings, dialog):
     if dialog.state in {"manager_requested", "partner_requested", "negative_requested"}:
         negative = dialog.state == "negative_requested"
@@ -224,8 +229,9 @@ async def process_dialog(db, client, runtime, settings, dialog):
         dialog.state = "stopped" if negative else "handoff"
         await db.commit()
         return True
-    if dialog.state != "active" or blacklisted(settings, dialog.username) or await db.get(GlobalBlock, dialog.peer_id):
+    if dialog.state not in ("active", "manual") or blacklisted(settings, dialog.username) or await db.get(GlobalBlock, dialog.peer_id):
         return False
+    manual = dialog.state == "manual"
     peer = InputPeerUser(dialog.peer_id, dialog.access_hash)
     # Persist incoming updates before replying; page forward from the cursor.
     baseline = await db.scalar(select(func.min(CampaignMessage.telegram_message_id)).where(CampaignMessage.dialog_id == dialog.id, CampaignMessage.kind == "first", CampaignMessage.status == "sent"))
@@ -246,7 +252,8 @@ async def process_dialog(db, client, runtime, settings, dialog):
         lead.status = LeadStatus.REPLIED
         await record(db, dialog, "incoming", body, f"in:{message.id}", "received", message.id)
         await add_campaign_event(db, dialog.campaign_id, "info", "incoming_received", "Получено входящее сообщение.", account_id=dialog.account_id, username=dialog.username, details={"telegram_message_id": message.id})
-        await add_campaign_event(db, dialog.campaign_id, "info", "reply_scheduled", "ИИ-ответ поставлен в очередь после настроенной паузы.", account_id=dialog.account_id, username=dialog.username, details={"reply_at": dialog.next_reply_at.isoformat()})
+        if not manual:
+            await add_campaign_event(db, dialog.campaign_id, "info", "reply_scheduled", "ИИ-ответ поставлен в очередь после настроенной паузы.", account_id=dialog.account_id, username=dialog.username, details={"reply_at": dialog.next_reply_at.isoformat()})
         if stopped_by_recipient(body):
             dialog.state = "stopped"
             lead.status = LeadStatus.NOT_INTERESTED
@@ -257,6 +264,9 @@ async def process_dialog(db, client, runtime, settings, dialog):
             return False
     if len(incoming) == 100:
         return False  # Drain the rest before producing an answer.
+    if manual:
+        await db.commit()
+        return False
     if dialog.last_incoming_id > dialog.last_reply_id and settings.auto_reply and due(dialog.next_reply_at):
         history = list(await db.scalars(select(CampaignMessage).where(CampaignMessage.dialog_id == dialog.id, CampaignMessage.status.in_(["sent", "received"]), CampaignMessage.kind != "handoff").order_by(CampaignMessage.id.desc()).limit(settings.context_messages)))
         await add_campaign_event(db, dialog.campaign_id, "info", "ai_request_started", "Отправляю историю диалога в ИИ для подготовки ответа.", account_id=dialog.account_id, username=dialog.username, details={"context_messages": len(history), "model": settings.ai_model})
@@ -370,6 +380,11 @@ async def tick(campaign_id):
         runtime = await db.get(CampaignRuntime, campaign_id)
         if not runtime or runtime.status != "running" or not due(runtime.next_action_at):
             return
+        campaign = await db.get(Campaign, campaign_id)
+        if campaign is not None and campaign.workspace_id:   # отключённый клиент: рассылка стоит, ничего не теряется
+            from app.domains.leadgen.service import inactive_workspaces
+            if campaign.workspace_id in await inactive_workspaces(db):
+                return
         settings = AutomationSettings(**runtime.settings)
         if sleeping(settings):
             return
@@ -380,25 +395,51 @@ async def tick(campaign_id):
         binding = next((b for b in eligible if b.account_id > (runtime.last_account_id or 0)), eligible[0])
         wrapped = binding.account_id <= (runtime.last_account_id or 0)
         account = await db.scalar(select(TelegramAccount).options(selectinload(TelegramAccount.proxy)).where(TelegramAccount.id == binding.account_id))
-        has_active_dialogs = bool(await db.scalar(select(CampaignDialog.id).where(CampaignDialog.campaign_id == campaign_id, CampaignDialog.state.in_(["active", "manager_requested", "partner_requested", "negative_requested"])).limit(1)))
+        has_active_dialogs = bool(await db.scalar(select(CampaignDialog.id).where(CampaignDialog.campaign_id == campaign_id, CampaignDialog.state.in_(LIVE_STATES)).limit(1)))
         runtime.last_account_id = binding.account_id
         normal_delay = random.randint(settings.round_min if wrapped else settings.account_min, settings.round_max if wrapped else settings.account_max)
         runtime.next_action_at = now() + timedelta(seconds=min(normal_delay, 45) if has_active_dialogs else normal_delay)
         await db.commit()
         if not account or not account.session_encrypted or not due(account.flood_wait_until):
             return
+        # Без рабочего прокси аккаунт не подключаем никогда (иначе Telegram увидит IP сервера).
+        if account.proxy is None or account.proxy.status == "error":
+            reason = "Нет прокси у аккаунта" if account.proxy is None else "Прокси аккаунта не работает"
+            if runtime.last_error != f"{reason}: {account.phone}":
+                runtime.last_error = f"{reason}: {account.phone}"
+                await db.commit()
+                await add_campaign_event(db, campaign_id, "warning", "account_no_proxy",
+                                         f"{reason} — аккаунт пропущен, пока ему не назначат рабочий прокси.",
+                                         account_id=account.id)
+            return
+        spam = (account.health or {}).get("spamblock") or {}
+        checked = spam.get("checked_at")
+        spam_stale = not checked or datetime.fromisoformat(checked) < now() - timedelta(hours=SPAMCHECK_HOURS)
+        if account.status == "spamblock" and not spam_stale:
+            return
         client = None
         account_id = binding.account_id
         phase = "подключение аккаунта"
         try:
             client = await connect_account(db, account, campaign_id)
+            if spam_stale:   # раз в сутки спрашиваем @SpamBot; со спам-блоком аккаунт отдыхает до следующей проверки
+                phase = "проверка спам-блока"
+                from app.services import account_health
+                result = await account_health.ask_spambot(client)
+                account_health.apply_spamblock(account, result, now())
+                await db.commit()
+                if result["state"] == "limited":
+                    await add_campaign_event(db, campaign_id, "warning", "account_spamblock",
+                                             "У аккаунта спам-блок — он пропускается до снятия ограничения.",
+                                             account_id=account.id)
+                    return
             account.status = "online"
             account.last_seen_at = now()
             account.last_error = None
             await db.commit()
             await add_campaign_event(db, campaign_id, "info", "account_connected", "Аккаунт подключён к Telegram, начинается проверка очереди.", account_id=account.id)
             phase = "проверка активных диалогов"
-            dialogs = list(await db.scalars(select(CampaignDialog).where(CampaignDialog.campaign_id == campaign_id, CampaignDialog.account_id == account.id, CampaignDialog.state.in_(["active", "manager_requested", "partner_requested", "negative_requested"])).order_by(CampaignDialog.id)))
+            dialogs = list(await db.scalars(select(CampaignDialog).where(CampaignDialog.campaign_id == campaign_id, CampaignDialog.account_id == account.id, CampaignDialog.state.in_(LIVE_STATES)).order_by(CampaignDialog.id)))
             acted = False
             for dialog in dialogs:
                 if await process_dialog(db, client, runtime, settings, dialog):

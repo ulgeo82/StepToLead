@@ -9,11 +9,14 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { createContext, ReactNode, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
+import { currentSpace, isSpacePage } from "@/lib/space";
 import { formatSeconds, ProgressSnapshot } from "./task-progress";
 import css from "./tasks.module.css";
 
 export type TaskItem = ProgressSnapshot & {
   key: string; link: string | null; page: string; run_id: number | null; source: string | null;
+  // Клиент, в пространстве которого идёт задача: его имя уже в title, а link несёт ?ws= — «Открыть» переключит раздел.
+  workspace?: { id: number; name: string; is_home: boolean } | null;
 };
 type TasksState = { items: TaskItem[]; refresh: () => void };
 
@@ -30,10 +33,17 @@ export function notifyTasks() {
 
 export function useTasks() { return useContext(TasksContext); }
 
+/** Задача клиента показывается на странице только в его пространстве: чужой запуск экран не подхватывает. */
+function inCurrentSpace(task: TaskItem): boolean {
+  if (!task.workspace || typeof window === "undefined" || !isSpacePage(window.location.pathname)) return true;
+  const space = currentSpace();
+  return space ? task.workspace.id === space : task.workspace.is_home;
+}
+
 /** Идущая операция, подходящая под условие, — чтобы страница снова показала её прогресс после возвращения. */
 export function useResumeTask(match: (task: TaskItem) => boolean): TaskItem | null {
   const { items } = useTasks();
-  return items.find(task => isActive(task) && match(task)) ?? null;
+  return items.find(task => isActive(task) && inCurrentSpace(task) && match(task)) ?? null;
 }
 
 function readDismissed(): string[] {

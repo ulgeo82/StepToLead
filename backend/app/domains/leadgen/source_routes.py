@@ -8,13 +8,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.access import require_admin
 from app.db import get_db
 from app.domains.leadgen import routes as lg_routes
-from app.domains.leadgen import ai_queries, source_runner, source_settings
+from app.domains.leadgen import ai_queries, source_runner, source_settings, space
 from app.domains.leadgen.models import LgSourceRun
 from app.domains.leadgen.sources import REGISTRY, short_error
 from app.models.access import AdminUser
 from app.services import progress
 
-router = APIRouter(prefix="/admin/leadgen", tags=["admin-leadgen-sources"])
+router = APIRouter(prefix="/admin/leadgen", tags=["admin-leadgen-sources"], dependencies=[Depends(space.bind)])
 CHECK_TIMEOUT = 60
 
 

@@ -13,12 +13,19 @@ from app.schemas.automation import AutomationSettings, AutomationUpdate, BlockCr
 from app.services.campaign_runner import AIProviderError, request_ai
 from app.services.campaign_log import add_campaign_event
 
-router = APIRouter(tags=["automation"])
+from app.domains.leadgen import space
+from app.services import tg_space
+
+# Кампании, диалоги и журнал — только в пространстве выбранного клиента (этап B). Стоп-лист Telegram общий.
+router = APIRouter(tags=["automation"], dependencies=[Depends(space.bind)])
+
+
+async def campaign_or_404(db, campaign_id):
+    return tg_space.require(await db.get(Campaign, campaign_id), "Кампания не найдена")
 
 
 async def runtime_for(campaign_id, db, lock=False):
-    if not await db.get(Campaign, campaign_id):
-        raise HTTPException(404, "Кампания не найдена")
+    await campaign_or_404(db, campaign_id)
     query = select(CampaignRuntime).where(CampaignRuntime.campaign_id == campaign_id)
     runtime = await db.scalar(query.with_for_update() if lock else query)
     if not runtime:
@@ -54,9 +61,12 @@ async def save_automation(campaign_id: int, payload: AutomationUpdate, db: Async
     orphan = await db.scalar(select(CampaignDialog.id).where(CampaignDialog.campaign_id == campaign_id, CampaignDialog.account_id.not_in(ids), CampaignDialog.state.in_(["active", "manager_requested", "partner_requested", "negative_requested"])))
     if orphan:
         raise HTTPException(409, "У удаляемого из кампании аккаунта есть активные диалоги. Сначала остановите их.")
+    campaign = await db.get(Campaign, campaign_id)
     for account_id in ids:
         account = await db.get(TelegramAccount, account_id)
-        if not account or not account.session_encrypted:
+        if not account or not tg_space.same_space(account.workspace_id, campaign.workspace_id):
+            raise HTTPException(422, f"Аккаунт #{account_id} не найден у этого клиента")
+        if not account.session_encrypted:
             raise HTTPException(422, f"Аккаунт #{account_id} не подключён")
     runtime.settings = payload.settings.model_dump()
     if payload.api_key is not None:
@@ -170,6 +180,7 @@ async def pause_campaign(campaign_id: int, db: AsyncSession = Depends(get_db)):
 
 @router.get("/campaigns/{campaign_id}/dialogs")
 async def dialogs(campaign_id: int, db: AsyncSession = Depends(get_db)):
+    await campaign_or_404(db, campaign_id)
     rows = (await db.scalars(select(CampaignDialog).where(CampaignDialog.campaign_id == campaign_id).order_by(CampaignDialog.id.desc()).limit(200))).all()
     return [{"id": d.id, "username": d.username, "account_id": d.account_id, "state": d.state,
              "peer_id": d.peer_id, "followup_sent": d.followup_sent} for d in rows]
@@ -177,6 +188,7 @@ async def dialogs(campaign_id: int, db: AsyncSession = Depends(get_db)):
 
 @router.get("/campaigns/{campaign_id}/messages")
 async def messages(campaign_id: int, db: AsyncSession = Depends(get_db)):
+    await campaign_or_404(db, campaign_id)
     rows = (await db.execute(select(CampaignMessage, CampaignDialog.username).join(CampaignDialog).where(CampaignMessage.campaign_id == campaign_id).order_by(CampaignMessage.id.desc()).limit(200))).all()
     return [{"id": m.id, "dialog_id": m.dialog_id, "username": username, "account_id": m.account_id,
              "kind": m.kind, "body": m.body, "status": m.status, "error": m.error,
@@ -186,8 +198,7 @@ async def messages(campaign_id: int, db: AsyncSession = Depends(get_db)):
 @router.get("/campaigns/{campaign_id}/logs")
 async def campaign_logs(campaign_id: int, db: AsyncSession = Depends(get_db)):
     """Returns newest sanitized operational events for live UI monitoring."""
-    if not await db.get(Campaign, campaign_id):
-        raise HTTPException(404, "Кампания не найдена")
+    await campaign_or_404(db, campaign_id)
     rows = (await db.scalars(select(CampaignEvent).where(CampaignEvent.campaign_id == campaign_id).order_by(CampaignEvent.id.desc()).limit(300))).all()
     return [{"id": row.id, "level": row.level, "event": row.event, "message": row.message,
              "account_id": row.account_id, "username": row.username, "details": row.details,

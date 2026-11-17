@@ -26,11 +26,16 @@ def upgrade_existing_schema(connection):
                          "salary_known": "BOOLEAN NOT NULL DEFAULT TRUE", "extra": "JSON"},
         "messages": {"meta": "JSON"},
         "ai_usage": {"bucket": "VARCHAR(12) NOT NULL DEFAULT 'client'"},
-        "proxies": {"pool": "VARCHAR(16) NOT NULL DEFAULT 'agency'",
+        "telegram_accounts": {"health": "JSON", "workspace_id": "INTEGER"},
+        "campaigns": {"workspace_id": "INTEGER"},
+        "campaign_messages": {"author_id": "INTEGER"},
+        "proxies": {"exit_ip": "VARCHAR(64)", "latency_ms": "INTEGER", "health": "JSON", "workspace_id": "INTEGER",
+                    "pool": "VARCHAR(16) NOT NULL DEFAULT 'agency'",
                     "max_accounts": "INTEGER NOT NULL DEFAULT 3",
                     "dedicated_workspace_id": "INTEGER REFERENCES client_workspaces(id)"},
         "client_briefs": {"transcript": "TEXT", "ai_fields": "JSON"},
         "client_workspaces": {"plan": "VARCHAR(16)", "legal_name": "VARCHAR(240)", "contact_email": "VARCHAR(254)",
+                              "show_outreach": "BOOLEAN NOT NULL DEFAULT false",
                               "contact_phone": "VARCHAR(64)", "website": "VARCHAR(500)",
                               "timezone": "VARCHAR(80) NOT NULL DEFAULT 'Europe/Moscow'",
                               "currency": "VARCHAR(12) NOT NULL DEFAULT 'RUB'", "logo_data": "TEXT"},
@@ -44,6 +49,7 @@ def upgrade_existing_schema(connection):
                            "config": "JSON"},
         "ad_hypotheses": {"project_id": "INTEGER REFERENCES projects(id)"},
         "portal_users": {"reset_code_hash": "VARCHAR(64)", "reset_expires_at": "TIMESTAMP WITH TIME ZONE", "reset_attempts": "INTEGER NOT NULL DEFAULT 0", "manage_sources": "BOOLEAN NOT NULL DEFAULT false",
+                         "can_reply_outreach": "BOOLEAN NOT NULL DEFAULT false",
                          "manage_integrations": "BOOLEAN NOT NULL DEFAULT false",
                          "is_agency": "BOOLEAN NOT NULL DEFAULT false",
                          "phone": "VARCHAR(64)", "permissions": "JSON", "last_activity_at": "TIMESTAMP WITH TIME ZONE",
@@ -93,6 +99,7 @@ def upgrade_existing_schema(connection):
         "website_sites": {"widget": "JSON"},
         "lg_mailboxes": {"role": "VARCHAR(10) NOT NULL DEFAULT 'outreach'",
                          "warmup_enabled": "BOOLEAN NOT NULL DEFAULT true", "warmup_target": "INTEGER NOT NULL DEFAULT 70",
+                         "warmup_shared_pool": "BOOLEAN NOT NULL DEFAULT true",
                          "health": "INTEGER", "health_json": "JSON", "health_checked_at": "TIMESTAMP WITH TIME ZONE",
                          "cold_paused_at": "TIMESTAMP WITH TIME ZONE", "cold_paused_reason": "VARCHAR(300)",
                          "warmup_error": "VARCHAR(500)", "imap_failing_since": "TIMESTAMP WITH TIME ZONE",
@@ -117,6 +124,14 @@ def upgrade_existing_schema(connection):
         for name, declaration in additions.items():
             if name not in existing:
                 connection.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {name} {declaration}")
+    # Этап B: Telegram-аутрич живёт в пространстве клиента; всё, что было до этого, — агентства (клиент №0).
+    from app.core.config import settings as app_settings
+    if app_settings.agency_workspace_id:
+        home = int(app_settings.agency_workspace_id)
+        for table, extra in (("telegram_accounts", ""), ("campaigns", ""), ("proxies", " AND pool = 'agency'")):
+            if table in inspector.get_table_names():
+                connection.execute(text(f"UPDATE {table} SET workspace_id = :home WHERE workspace_id IS NULL{extra}"),
+                                   {"home": home})
     if "crm_deals" in inspector.get_table_names():
         connection.execute(text("UPDATE crm_deals SET stage_entered_at = COALESCE(updated_at, created_at) "
                                 "WHERE stage_entered_at IS NULL"))

@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domains.jobradar import leads
 from app.domains.jobradar import timing as jr_timing
 from app.domains.leadgen.core.normalize import normalize_domain
-from app.domains.leadgen import service, source_settings
+from app.domains.leadgen import service, source_settings, spend
 from app.domains.leadgen.core.scoring import REASON_LABELS
 from app.domains.leadgen.models import (
     LgCompany, LgCompanyKey, LgContact, LgEnrichment, LgList, LgListItem, LgSignal, LgSource, LgSourceRun,
@@ -340,9 +340,13 @@ async def _execute(run_id: int, session_factory) -> None:
                 tracker.end("save")
                 seconds, units = timing[adapter.code]
                 per_company = seconds / units if units else None
+                await spend.record(db, run.workspace_id, adapter.code, adapter.cost({"companies": units}, settings),
+                                   run_id=run.id)
             else:
                 units = await _find(db, run, adapter, settings, tracker, result)
                 primary_duration = time.monotonic() - started
+                await spend.record(db, run.workspace_id, adapter.code, adapter.cost(run.params.get("query") or {}, settings),
+                                   run_id=run.id)
                 await db.commit()  # preserve the search/list even if a subsequent optional step fails
                 if run.params.get("then"):
                     result["chain"] = {}
@@ -417,6 +421,8 @@ async def _run_steps(db, run, codes, ids, tracker, result, *, list_mode: bool = 
     timing = await _pipeline(db, run, steps, ids, tracker)
     for adapter, _settings, summary in steps:
         seconds, units = timing[adapter.code]
+        await spend.record(db, run.workspace_id, adapter.code, adapter.cost({"companies": units}, _settings),
+                           run_id=run.id)
         if units:   # средняя работа на компанию — по ней оценка следующего запуска
             jr_timing.learn(adapter, rows[adapter.code], seconds / units, 1, persist=True)
         source_settings.mark(rows[adapter.code], service.utcnow(), next(iter(summary["errors"].values()), None))
@@ -444,7 +450,7 @@ async def _pipeline(db, run, steps, ids, tracker, *, chained: bool = True) -> di
     общий кеш обходов: один сайт качается один раз на все функции.
     steps: [(adapter, settings, summary)]. -> {code: (секунд работы в сумме, компаний обработано)}."""
     ctx = source_settings.context()
-    ctx.cache["leadgen_settings"] = await service.get_settings(db)
+    ctx.cache["leadgen_settings"] = await service.get_settings(db, run.workspace_id)
     if source_settings.sleep is not None:
         ctx.cache["crawl_delay"] = 0
     lock = asyncio.Lock()
@@ -640,7 +646,7 @@ async def _find(db, run, adapter, settings, tracker, result) -> int:
     ctx = source_settings.context()
     ctx.on_request = lambda: tracker.tick(adapter.code)
     ctx.cache["errors"] = {}
-    ctx.cache["leadgen_settings"] = await service.get_settings(db)
+    ctx.cache["leadgen_settings"] = await service.get_settings(db, run.workspace_id)
     candidates = await adapter.fetch(query, settings, ctx)
     errors = ctx.cache.get("errors") or {}
     result["errors"].update(errors)

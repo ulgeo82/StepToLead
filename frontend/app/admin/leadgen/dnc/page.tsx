@@ -26,6 +26,8 @@ type Entry = {
   kind: string;
   value: string;
   reason: string;
+  shared: boolean;
+  can_delete: boolean;
   note: string | null;
   until: string | null;
   created_at: string;
@@ -38,6 +40,7 @@ export default function Page() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [kindFilter, setKindFilter] = useState("");
+  const [scopeFilter, setScopeFilter] = useState("");
   const [query, setQuery] = useState("");
   const [revision, setRevision] = useState(0);
   const [now, setNow] = useState(Date.now);
@@ -101,7 +104,8 @@ export default function Page() {
   }
 
   async function remove(entry: Entry) {
-    if (busy || !confirm(`Удалить из стоп-листа: ${entry.value}?`)) return;
+    const warning = entry.shared ? " (запрет действует во всех пространствах)" : "";
+    if (busy || !entry.can_delete || !confirm(`Удалить из стоп-листа: ${entry.value}${warning}?`)) return;
     const controller = new AbortController();
     mutation.current = controller;
     setBusy(true);
@@ -123,12 +127,14 @@ export default function Page() {
   const visible = items.filter(
     (entry) =>
       (!kindFilter || entry.kind === kindFilter) &&
+      (!scopeFilter || entry.shared === (scopeFilter === "shared")) &&
       entry.value.toLocaleLowerCase("ru").includes(query.trim().toLocaleLowerCase("ru")),
   );
 
   return (
     <div className={styles.page}>
       <PageHeader title="Стоп-лист" subtitle="Исключения из аутрича." />
+      <p className={styles.muted}>Отписка, недоставка и юридический запрет для email или домена действуют во всех пространствах. Обычный отказ — только у текущего клиента.</p>
       {loading && <p role="status">Загружаем стоп-лист…</p>}
       {busy && <p role="status">Сохраняем изменения…</p>}
       {error && (
@@ -206,6 +212,14 @@ export default function Page() {
             </select>
           </label>
           <label className={styles.field}>
+            Область действия
+            <select value={scopeFilter} onChange={(event) => setScopeFilter(event.target.value)}>
+              <option value="">Все записи</option>
+              <option value="shared">Общие</option>
+              <option value="local">Только этого пространства</option>
+            </select>
+          </label>
+          <label className={styles.field}>
             Поиск по значению
             <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} />
           </label>
@@ -250,7 +264,9 @@ export default function Page() {
                           entry.value
                         )}
                       </td>
-                      <td>{reasons[entry.reason] || entry.reason}</td>
+                      <td>{reasons[entry.reason] || entry.reason}
+                        {entry.shared && <> <span className={styles.badge}>общий</span></>}
+                      </td>
                       <td>{entry.note || "—"}</td>
                       <td>
                         {date(entry.until)}
@@ -258,7 +274,7 @@ export default function Page() {
                       </td>
                       <td>{date(entry.created_at)}</td>
                       <td>
-                        <button
+                        {entry.can_delete ? <button
                           type="button"
                           className={styles.secondary}
                           disabled={loading || busy}
@@ -266,7 +282,7 @@ export default function Page() {
                           onClick={() => void remove(entry)}
                         >
                           Удалить
-                        </button>
+                        </button> : <small>Только просмотр</small>}
                       </td>
                     </tr>
                   );

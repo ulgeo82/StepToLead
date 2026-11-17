@@ -274,7 +274,7 @@ class LeadgenServiceTests(unittest.TestCase):
 
     def test_check_can_contact_with_db_state(self):
         async def fn(db):
-            await service.ensure_settings(db)
+            await service.ensure_settings(db, 1)
             c = (await service.upsert_company(db, 1, self.finding(contacts=[
                 {"kind": "email", "value": "info@kuhni-sever.ru"},
                 {"kind": "email", "value": "ivan@kuhni-sever.ru", "is_personal": True}]), now=NOW)).company

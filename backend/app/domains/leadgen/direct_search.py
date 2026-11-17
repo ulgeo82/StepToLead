@@ -103,7 +103,7 @@ async def execute_run(db: AsyncSession, run: LgSourceRun, provider: SerpProvider
     run.status, run.started_at = "running", now
     await db.flush()
 
-    settings = await service.get_settings(db)
+    settings = await service.get_settings(db, run.workspace_id)
     devices = clean_devices(params.get("devices"))
     want_organic = bool(params.get("organic"))
     ads: list[SerpAd] = []
@@ -219,6 +219,9 @@ async def execute_run(db: AsyncSession, run: LgSourceRun, provider: SerpProvider
                  if outage and run.status == "failed" else
                  "Ни один ключ не дал результата — причины по ключам ниже" if run.status == "failed" else None)
     run.finished_at = now
+    from app.domains.leadgen import spend   # расход на данные — в журнал клиента
+    await spend.record(db, run.workspace_id, SOURCE, {"requests": requests, "rub": run.stats["cost_rub"]},
+                       run_id=run.id, now=now)
     await db.flush()
     return run
 

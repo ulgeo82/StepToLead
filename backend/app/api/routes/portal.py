@@ -258,7 +258,8 @@ async def login(payload: Login, request: Request, response: Response, db: AsyncS
 @auth_router.get("/me")
 async def me(db: AsyncSession = Depends(get_db), user: PortalUser = Depends(require_portal_user)):
     workspace = await db.get(ClientWorkspace, user.workspace_id)
-    return user_payload(user, workspace.name if workspace else None)
+    return {**user_payload(user, workspace.name if workspace else None),
+            "show_outreach": bool(workspace and workspace.status == "active" and workspace.show_outreach)}
 
 
 @auth_router.post("/logout")

@@ -27,7 +27,7 @@ from app.domains.leadgen import outreach, service
 from app.domains.leadgen.core import sequence as core
 from app.domains.leadgen.models import (  # noqa: I001
     LgCampaign,
-    LgAd, LgCompany, LgContact, LgDnc, LgEnrollment, LgMailbox, LgSequence, LgTouch,
+    LgAd, LgCompany, LgContact, LgEnrollment, LgMailbox, LgSequence, LgTouch,
 )
 from app.models.crm import CrmActivity, CrmDeal, CrmStage, CrmTask
 
@@ -494,8 +494,11 @@ async def process_due(db: AsyncSession, transport: MailTransport, *, now: dateti
     """Выполняет созревшие шаги. Коммитить — вызывающему (после каждого вызова)."""
     now = now or service.utcnow()
     stats = {"emails": 0, "tasks": 0, "postponed": 0, "stopped": 0, "finished": 0, "errors": 0}
-    due = (await db.execute(select(LgEnrollment).where(LgEnrollment.status == "active", LgEnrollment.next_at <= now)
-                            .order_by(LgEnrollment.next_at).limit(limit))).scalars().all()
+    query = select(LgEnrollment).where(LgEnrollment.status == "active", LgEnrollment.next_at <= now)
+    paused = await service.inactive_workspaces(db)
+    if paused:   # клиент отключён или удалён: шаги ждут, не теряются — вернут клиента, цепочки пойдут дальше
+        query = query.where(LgEnrollment.workspace_id.not_in(paused))
+    due = (await db.execute(query.order_by(LgEnrollment.next_at).limit(limit))).scalars().all()
     for enr in due:
         sequence = await db.get(LgSequence, enr.sequence_id)
         company = await db.get(LgCompany, enr.company_id)
@@ -608,13 +611,8 @@ async def _task_step(db, enr, company, step, now) -> str:
 
 async def _dnc(db: AsyncSession, workspace_id: int, kind: str, value: str, reason: str,
                client_project_id: int | None = None) -> None:
-    """Стоп-лист. Отписка от рассылки клиента — в стоп-лист этого клиента; bounce — общий."""
-    scope = LgDnc.client_project_id == client_project_id if client_project_id else LgDnc.client_project_id.is_(None)
-    exists = await db.scalar(select(LgDnc.id).where(LgDnc.workspace_id == workspace_id, LgDnc.kind == kind,
-                                                    LgDnc.value_norm == value, scope))
-    if not exists:
-        db.add(LgDnc(workspace_id=workspace_id, kind=kind, value_norm=value, reason=reason,
-                     client_project_id=client_project_id, note="Автоматически: цепочка касаний"))
+    await service.record_dnc(db, workspace_id, kind, value, reason, client_project_id=client_project_id,
+                             note="Автоматически: цепочка касаний")
 
 
 async def _client_of(db: AsyncSession, enr: LgEnrollment | None) -> int | None:
@@ -652,21 +650,23 @@ async def handle_inbound(db: AsyncSession, mailbox: LgMailbox, mail: IncomingMai
     kind = core.classify_inbound(mail.sender, mail.subject, mail.body, mail.headers)
     if kind == "bounce":
         address = core.bounced_address(mail.body)
+        # Не превращаем произвольный MAILER-DAEMON во входящих в глобальный запрет.
+        original = await db.scalar(select(LgTouch).where(
+            LgTouch.mailbox_id == mailbox.id, LgTouch.direction == "out", LgTouch.channel == "email",
+            LgTouch.address == address, LgTouch.status == "sent")
+            .order_by(LgTouch.id.desc()).limit(1)) if address else None
+        if original is None:
+            return "unmatched"
         contacts = (await db.execute(select(LgContact).join(LgCompany, LgCompany.id == LgContact.company_id).where(
             LgCompany.workspace_id == mailbox.workspace_id, LgContact.kind == "email",
-            LgContact.value_norm == address))).scalars().all() if address else []
+            LgContact.value_norm == address))).scalars().all()
         for c in contacts:
             c.bounced, c.verify_status = True, "invalid"
             for enr in (await db.execute(select(LgEnrollment).where(LgEnrollment.contact_id == c.id,
                                                                     LgEnrollment.status.in_(("active", "paused"))))).scalars():
                 _finish(enr, "bounced", "bounce", now)
-        if address:
-            await _dnc(db, mailbox.workspace_id, "email", address, "bounced")
-            original = await db.scalar(select(LgTouch).where(
-                LgTouch.direction == "out", LgTouch.channel == "email", LgTouch.address == address,
-                LgTouch.status == "sent").order_by(LgTouch.id.desc()).limit(1))
-            if original is not None:
-                original.status = "bounced"
+        await _dnc(db, mailbox.workspace_id, "email", address, "bounced")
+        original.status = "bounced"
         await db.flush()
         return "bounce" if contacts else "unmatched"
 
@@ -700,15 +700,15 @@ async def handle_inbound(db: AsyncSession, mailbox: LgMailbox, mail: IncomingMai
         _finish(other, "stopped", "company_replied", now)
     client = await _client_of(db, enr)
     from app.domains.leadgen import client_outreach
+    if kind == "unsubscribe" and (mail.sender or (contact and contact.value_norm)):
+        address = (mail.sender or contact.value_norm).strip().lower()
+        if address:
+            await _dnc(db, company.workspace_id, "email", address, "unsubscribed", client)
     if kind == "unsubscribe" and client:
-        if contact is not None:
-            await _dnc(db, company.workspace_id, "email", contact.value_norm, "unsubscribed", client)
         await _dnc(db, company.workspace_id, "company", str(company.id), "unsubscribed", client)
         await client_outreach.close_deal(db, enr, f"Отписался от рассылки: «{fresh[:500]}»", now)
         await db.flush()
     elif kind == "unsubscribe":
-        if contact is not None:
-            await _dnc(db, company.workspace_id, "email", contact.value_norm, "unsubscribed")
         await _dnc(db, company.workspace_id, "company", str(company.id), "unsubscribed")
         company.stage = "dnc"
         await _move_deal(db, company, STAGE_LOST, note=f"Отказ по почте: «{fresh[:500]}»")
@@ -754,9 +754,11 @@ async def poll_mailbox(db: AsyncSession, transport: MailTransport, mailbox: LgMa
     if rows:
         await warmup.apply_found(db, mailbox, rows, found, now)
     ours = await warmup.pool_addresses(db, mailbox.workspace_id)
+    warm_ids = await warmup.tracked_message_ids(db, mailbox, [m.message_id for m in mails if m.message_id])
     for mail in sorted(mails, key=lambda m: m.uid):
         # Письма между нашими ящиками — прогрев: не ответы лидов, во «Входящие» и аналитику не идут.
-        kind = "warmup" if (mail.sender or "").lower() in ours else await handle_inbound(db, mailbox, mail, now=now)
+        is_warm = mail.message_id in warm_ids or (mail.sender or "").lower() in ours
+        kind = "warmup" if is_warm else await handle_inbound(db, mailbox, mail, now=now)
         counts[kind] = counts.get(kind, 0) + 1
         mailbox.imap_last_uid = max(mailbox.imap_last_uid or 0, mail.uid)
     mailbox.last_checked_at = now
@@ -768,6 +770,14 @@ async def poll_mailbox(db: AsyncSession, transport: MailTransport, mailbox: LgMa
 
 TICK_SECONDS = 60
 POLL_EVERY_TICKS = 5
+
+
+async def active_mailboxes(db: AsyncSession) -> list[LgMailbox]:
+    """Ящики для опроса: включённые, у действующих клиентов."""
+    paused = await service.inactive_workspaces(db)
+    boxes = (await db.execute(select(LgMailbox).where(LgMailbox.is_active.is_(True))
+                              .order_by(LgMailbox.id))).scalars().all()
+    return [mb for mb in boxes if mb.workspace_id not in paused]
 
 
 async def run_worker() -> None:
@@ -788,8 +798,7 @@ async def run_worker() -> None:
             warm_check = tick % warmup.CHECK_EVERY_TICKS == 0   # каждые 15 минут, внутри обычного опроса ящика
             if tick % POLL_EVERY_TICKS == 0:
                 async with routes.session_factory() as db:
-                    boxes = (await db.execute(select(LgMailbox).where(LgMailbox.is_active.is_(True)))).scalars().all()
-                    for mb in boxes:
+                    for mb in await active_mailboxes(db):
                         try:
                             await poll_mailbox(db, transport, mb, warm=warm_check)
                             await db.commit()

@@ -90,6 +90,7 @@ class FitTests(Base_):
         seen = []
 
         async def fn(db):
+            await service.save_settings(db, 7, {"icp": fit_ai.DEFAULT_ICP})   # портрет — настройка клиента
             c = await self.company(db)
             for kind in ("ad_direct", "ad_premium"):
                 await service.add_signal(db, c, kind, now=NOW)
@@ -114,8 +115,8 @@ class FitTests(Base_):
         seen = []
 
         async def fn(db):
-            await service.ensure_settings(db)
-            row = await db.get(models.AppSetting, service.SETTINGS_KEY)
+            await service.ensure_settings(db, 7)
+            row = await db.get(models.AppSetting, service.settings_key(7))
             row.value = {**row.value, "icp": "Только стоматологии Самары, частные клиники."}
             await db.flush()
             a = await self.company(db)

@@ -79,3 +79,7 @@ from app.domains.jobradar import scanner_routes as jobradar_scanners  # noqa: E4
 api_router.include_router(jobradar_scanners.router)
 from app.api.routes import tasks as admin_tasks  # noqa: E402
 api_router.include_router(admin_tasks.router)
+from app.api.routes import outreach_inbox as outreach_inbox_routes  # noqa: E402
+api_router.include_router(outreach_inbox_routes.router)
+from app.api.routes import portal_outreach  # noqa: E402
+api_router.include_router(portal_outreach.router)

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, API_URL } from "@/lib/api";
+import { withSpace } from "@/lib/space";
 import { base, LeadList, message, plural } from "./shared";
 import styles from "./leadgen.module.css";
 
@@ -103,7 +104,7 @@ export default function ExportDialog({
     };
   }, [queryKey, ready]);
 
-  const href = `${API_URL}/api${base}/companies/export?${query}${format === "csv" ? "&format=csv" : ""}`;
+  const href = withSpace(`${API_URL}/api${base}/companies/export?${query}${format === "csv" ? "&format=csv" : ""}`);
   const toggle = (id: number, on: boolean) => setChosen((ids) => (on ? [...ids, id] : ids.filter((x) => x !== id)));
 
   return (

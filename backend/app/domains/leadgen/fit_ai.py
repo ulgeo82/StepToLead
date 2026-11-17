@@ -18,13 +18,8 @@ from app.services import ai
 
 STEP = "fit_ai"
 FEATURE = "summary"
-DEFAULT_ICP = (
-    "Подходят: малый и средний бизнес, который сам продаёт свои товары или услуги частным клиентам (B2C) "
-    "и получает заявки через рекламу — кухни и мебель на заказ, окна, потолки, ремонт, бани и дома, "
-    "медицина и красота, автосервисы. Не подходят: федеральные сети и крупные фабрики, маркетплейсы и агрегаторы, "
-    "оптовики и чистый B2B, франшизы с центральным маркетингом, государственные организации, "
-    "рекламные и маркетинговые агентства (это конкуренты)."
-)
+DEFAULT_ICP = service.LEGACY_HOME_SETTINGS["icp"]   # прежний портрет агентства: теперь только сид его настроек
+NO_ICP = "Не задан портрет клиента — заполните его в настройках лидогенерации"
 SYSTEM = (
     "Ты помогаешь маркетинговому агентству отобрать компании для холодного предложения. "
     "Оцени компанию по портрету клиента. Отвечай ТОЛЬКО JSON без пояснений вокруг:\n"
@@ -84,13 +79,17 @@ async def assess(db: AsyncSession, company: LgCompany, *, now: datetime | None =
                  complete=None) -> dict:
     """Оценивает одну компанию. complete — подмена ai.complete в тестах."""
     now = now or service.utcnow()
-    settings = await service.get_settings(db)
-    icp = (settings.get("icp") or DEFAULT_ICP).strip()
+    settings = await service.get_settings(db, company.workspace_id)
+    icp = (settings.get("icp") or "").strip()
     row = await db.scalar(select(LgEnrichment).where(LgEnrichment.company_id == company.id, LgEnrichment.step == STEP))
     if row is None:
         row = LgEnrichment(company_id=company.id, step=STEP)
         db.add(row)
     row.ran_at = now
+    if not icp:   # у клиента свой портрет; чужим (агентским) не оцениваем
+        row.status, row.error, row.result = "failed", NO_ICP, {}
+        await db.flush()
+        return {"status": "failed", "error": NO_ICP}
     prompt = await build_prompt(db, company, icp)
     call = complete or ai.complete
     try:

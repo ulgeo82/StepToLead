@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,54 +9,157 @@ from app.models import Proxy, TelegramAccount
 from app.schemas.proxy import ProxyBulkCreate, ProxyBulkResult, ProxyRead
 from app.services.proxy_parser import parse_proxy_line
 
-router = APIRouter(prefix="/proxies", tags=["proxies"])
+from app.domains.leadgen import space
+from app.services import tg_space
+
+# Пул «Аутрич» (pool=agency) — у каждого клиента свой (этап B). Пул CRM-профилей клиентов (pool=client) —
+# инфраструктура агентства: виден и меняется только в пространстве агентства.
+router = APIRouter(prefix="/proxies", tags=["proxies"], dependencies=[Depends(space.bind)])
+
+
+def at_home() -> bool:
+    ws = tg_space.current()
+    return ws is None or ws == tg_space.home()
+
+
+def visible(query):
+    """Прокси, которые видны в выбранном пространстве."""
+    from sqlalchemy import and_, or_
+    mine = and_(Proxy.pool == "agency", tg_space.belongs(Proxy.workspace_id, tg_space.current()))
+    return query.where(or_(mine, Proxy.pool == "client") if at_home() else mine)
+
+
+def proxy_or_404(proxy):
+    if proxy is None or (proxy.pool == "agency" and not tg_space.owns(proxy.workspace_id)) \
+            or (proxy.pool == "client" and not at_home()):
+        raise HTTPException(404, "Прокси не найден")
+    return proxy
 
 
 @router.get("", response_model=list[ProxyRead])
-async def list_proxies(db: AsyncSession = Depends(get_db)):
-    query = select(Proxy, func.count(TelegramAccount.id)).outerjoin(TelegramAccount).group_by(Proxy.id).order_by(Proxy.created_at.desc())
-    rows = (await db.execute(query)).all()
+async def list_proxies(pool: str | None = Query(default=None, pattern=r"^(agency|client)$"),
+                       db: AsyncSession = Depends(get_db)):
+    from app.services import proxy_health
+    query = visible(select(Proxy)).order_by(Proxy.created_at.desc())
+    if pool:
+        query = query.where(Proxy.pool == pool)
+    proxies = list((await db.scalars(query)).all())
+    accounts = (await db.scalars(tg_space.scope(select(TelegramAccount).where(TelegramAccount.proxy_id.is_not(None)),
+                                                TelegramAccount.workspace_id))).all()
+    by_proxy: dict[int, list[dict]] = {}
+    for account in accounts:
+        by_proxy.setdefault(account.proxy_id, []).append({
+            "id": account.id, "phone": account.phone,
+            "name": " ".join(x for x in (account.first_name, account.last_name) if x) or None})
     from app.services.client_proxies import usage
     clients = await usage(db)
     from app.models.marketing import ClientWorkspace
     names = {w.id: w.name for w in (await db.scalars(select(ClientWorkspace))).all()}
-    return [ProxyRead.model_validate(proxy).model_copy(update={
-        "assigned_accounts": count, "client_accounts": clients.get(proxy.id, 0),
-        "dedicated_workspace_name": names.get(proxy.dedicated_workspace_id)}) for proxy, count in rows]
+    dups = proxy_health.duplicates(proxies)
+    out = []
+    for proxy in proxies:
+        health = proxy_health.view(proxy, dups.get(proxy.id))
+        out.append(ProxyRead.model_validate(proxy).model_copy(update={
+            "assigned_accounts": len(by_proxy.get(proxy.id, [])), "client_accounts": clients.get(proxy.id, 0),
+            "dedicated_workspace_name": names.get(proxy.dedicated_workspace_id),
+            "rotating": health.pop("rotating"), "duplicate_of": dups.get(proxy.id), "health": health,
+            "accounts_info": by_proxy.get(proxy.id, [])}))
+    return out
 
 
 @router.post("/bulk", response_model=ProxyBulkResult, status_code=status.HTTP_201_CREATED)
 async def bulk_create(payload: ProxyBulkCreate, db: AsyncSession = Depends(get_db)):
-    existing = {(row.scheme, row.host, row.port, row.username) for row in (await db.scalars(select(Proxy))).all()}
-    imported = 0
-    skipped = 0
+    """Строки сохраняются сразу («не проверен»), проверка связи с Telegram и внешнего IP — в фоне (batch_id)."""
+    from app.services import telegram_jobs
+    from app.services.proxy_parser import skip_line
+    if payload.pool == "client" and not at_home():
+        raise HTTPException(422, "Прокси CRM-профилей добавляются в пространстве агентства")
+    # Один и тот же прокси не может быть у двух клиентов: дубли ищем по всему порталу.
+    existing = {(row.host.lower(), row.port, row.username) for row in (await db.scalars(select(Proxy))).all()}
+    default_scheme = "socks5" if payload.scheme == "auto" else payload.scheme
+    max_accounts = payload.max_accounts or (1 if payload.pool == "agency" else 3)
+    imported = duplicates = 0
     errors: list[str] = []
+    added: list[tuple[Proxy, bool]] = []
     for line_number, line in enumerate(payload.entries.splitlines(), start=1):
-        if not line.strip():
+        if skip_line(line):
             continue
         try:
-            item = parse_proxy_line(line)
+            item = parse_proxy_line(line, default_scheme)
         except ValueError as exc:
             errors.append(f"Строка {line_number}: {exc}")
-            skipped += 1
             continue
-        key = (item.scheme, item.host, item.port, item.username)
+        key = (item.host.lower(), item.port, item.username)
         if key in existing:
-            skipped += 1
+            duplicates += 1
             continue
-        db.add(Proxy(scheme=item.scheme, host=item.host, port=item.port, username=item.username,
-                     pool=payload.pool, password_encrypted=encrypt_secret(item.password)))
+        proxy = Proxy(scheme=item.scheme, host=item.host, port=item.port, username=item.username,
+                      pool=payload.pool, max_accounts=max_accounts, password_encrypted=encrypt_secret(item.password),
+                      workspace_id=tg_space.current() if payload.pool == "agency" else None)
+        db.add(proxy)
+        added.append((proxy, payload.scheme == "auto" and not item.explicit_scheme))
         existing.add(key)
         imported += 1
     await db.commit()
-    return ProxyBulkResult(imported=imported, skipped=skipped, errors=errors[:30])
+    batch_id = None
+    if added:
+        batch_id = telegram_jobs.start_proxy_check([p.id for p, _ in added], {p.id for p, auto in added if auto})
+    return ProxyBulkResult(imported=imported, skipped=duplicates + len(errors), duplicates=duplicates,
+                           errors=errors[:30], batch_id=batch_id)
+
+
+class ProxyCheckIn(BaseModel):
+    ids: list[int] | None = Field(default=None, max_length=5000)
+
+
+@router.post("/check", status_code=status.HTTP_202_ACCEPTED)
+async def check_proxies(payload: ProxyCheckIn, request: Request, db: AsyncSession = Depends(get_db)):
+    from app.core.access import check_origin
+    from app.services import telegram_jobs
+    check_origin(request)
+    query = visible(select(Proxy.id))
+    if payload.ids:
+        query = query.where(Proxy.id.in_(payload.ids))
+    ids = list((await db.scalars(query)).all())
+    if not ids:
+        raise HTTPException(422, "Нет прокси для проверки")
+    return {"batch_id": telegram_jobs.start_proxy_check(ids)}
+
+
+@router.get("/checks/{batch_id}/progress")
+async def check_progress(batch_id: int):
+    from app.services import progress, telegram_jobs
+    return progress.get(telegram_jobs.key("proxy-check", batch_id)) or {"state": "idle"}
+
+
+class ProxyBulkDelete(BaseModel):
+    ids: list[int] = Field(min_length=1, max_length=5000)
+
+
+@router.post("/bulk-delete")
+async def bulk_delete(payload: ProxyBulkDelete, request: Request, db: AsyncSession = Depends(get_db)):
+    """Занятые клиентскими CRM-профилями не удаляются; аккаунты аутрича на удалённом прокси остаются без прокси
+    (и не подключаются, пока им не дадут новый)."""
+    from app.core.access import check_origin
+    from app.services.client_proxies import usage
+    check_origin(request)
+    load = await usage(db)
+    deleted, skipped = 0, []
+    for proxy in (await db.scalars(visible(select(Proxy)).where(Proxy.id.in_(payload.ids)))).all():
+        if load.get(proxy.id, 0):
+            skipped.append({"id": proxy.id, "reason": "Закреплён за клиентскими профилями"})
+            continue
+        for account in (await db.scalars(select(TelegramAccount).where(TelegramAccount.proxy_id == proxy.id))).all():
+            account.proxy_id = None
+        await db.delete(proxy)
+        deleted += 1
+    await db.commit()
+    return {"deleted": deleted, "skipped": skipped}
 
 
 @router.delete("/{proxy_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_proxy(proxy_id: int, db: AsyncSession = Depends(get_db)):
-    proxy = await db.get(Proxy, proxy_id)
-    if not proxy:
-        raise HTTPException(status_code=404, detail="Прокси не найден")
+    proxy = proxy_or_404(await db.get(Proxy, proxy_id))
     from app.services.client_proxies import usage
     load = (await usage(db)).get(proxy_id, 0)
     if load:
@@ -72,6 +175,7 @@ class ProxyPatch(BaseModel):
     pool: str = Field(pattern=r"^(agency|client)$")
     max_accounts: int = Field(default=3, ge=1, le=100)
     dedicated_workspace_id: int | None = None
+    label: str | None = Field(default=None, max_length=120)
 
 
 @router.patch("/{proxy_id}")
@@ -80,9 +184,9 @@ async def edit_proxy(proxy_id: int, payload: ProxyPatch, request: Request, db=De
     from app.models.marketing import ClientWorkspace
     from app.services.client_proxies import usage
     check_origin(request)
-    proxy = await db.get(Proxy, proxy_id)
-    if not proxy:
-        raise HTTPException(404, "Прокси не найден")
+    proxy = proxy_or_404(await db.get(Proxy, proxy_id))
+    if payload.pool != proxy.pool and not at_home():
+        raise HTTPException(422, "Пул прокси меняется в пространстве агентства")
     load = (await usage(db)).get(proxy_id, 0)
     if payload.max_accounts < load:
         raise HTTPException(409, "Лимит меньше числа закреплённых профилей")
@@ -93,6 +197,8 @@ async def edit_proxy(proxy_id: int, payload: ProxyPatch, request: Request, db=De
         raise HTTPException(422, "Компания не найдена")
     proxy.pool, proxy.max_accounts = payload.pool, payload.max_accounts
     proxy.dedicated_workspace_id = payload.dedicated_workspace_id
+    if "label" in payload.model_fields_set:
+        proxy.label = (payload.label or "").strip() or None
     await db.commit()
     return {"ok": True}
 

@@ -24,7 +24,10 @@ async def due_runs(db: AsyncSession, now: datetime) -> list[LgSourceRun]:
     rows = (await db.execute(select(LgSourceRun).where(LgSourceRun.source == direct_search.SOURCE)
                              .order_by(LgSourceRun.id.desc()))).scalars().all()
     latest: dict[tuple[int, str], LgSourceRun] = {}
+    paused = await service.inactive_workspaces(db)   # за отключённого клиента поиск не повторяем и не платим
     for run in rows:
+        if run.workspace_id in paused:
+            continue
         key = (run.workspace_id, (run.params or {}).get("fingerprint") or f"id:{run.id}")
         latest.setdefault(key, run)
     due = []

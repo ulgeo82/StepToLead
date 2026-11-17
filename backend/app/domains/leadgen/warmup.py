@@ -1,6 +1,6 @@
 """Прогрев почты: ящики пула переписываются между собой, как живые люди.
 
-Пул — все активные ящики агентства с включённым прогревом: рабочие (role="outreach") и помощники (role="helper",
+Пул — активные ящики действующих пространств с включённым прогревом: рабочие (role="outreach") и помощники (role="helper",
 дешёвые ящики на Яндексе / Mail.ru / Gmail, которые холодных писем не шлют). Каждую минуту воркер:
   • отправляет прогревочные письма по плану дня (с 2–3 в первый день до 25 к 21-му, потом ~10 в день постоянно);
   • раз в 5 минут заходит в ящик получателя по IMAP, находит письмо по Message-ID — во «Входящих» или в «Спаме»;
@@ -202,15 +202,29 @@ def in_window(now: datetime) -> bool:
     return core.in_window(now, WINDOW) <= now
 
 
-async def pool(db: AsyncSession, workspace_id: int) -> list[LgMailbox]:
+async def pool(db: AsyncSession, workspace_id: int, *, include_partners: bool = False) -> list[LgMailbox]:
+    paused = await service.inactive_workspaces(db)
+    if workspace_id in paused:
+        return []
+    scope = LgMailbox.workspace_id == workspace_id
+    if include_partners:
+        scope = scope | LgMailbox.warmup_shared_pool.is_(True)
     return list((await db.scalars(select(LgMailbox).where(
-        LgMailbox.workspace_id == workspace_id, LgMailbox.is_active.is_(True), LgMailbox.warmup_enabled.is_(True))
-        .order_by(LgMailbox.id))).all())
+        scope, LgMailbox.workspace_id.not_in(paused), LgMailbox.is_active.is_(True),
+        LgMailbox.warmup_enabled.is_(True)).order_by(LgMailbox.id))).all())
 
 
 async def pool_addresses(db: AsyncSession, workspace_id: int) -> set[str]:
-    """Все ящики агентства (и выключенные): их письма друг другу — прогрев, не ответы лидов."""
+    """Ящики своего пространства (включая выключенные), как в прежней классификации входящих."""
     return {e.lower() for e in (await db.scalars(select(LgMailbox.email).where(LgMailbox.workspace_id == workspace_id))).all()}
+
+
+async def tracked_message_ids(db: AsyncSession, box: LgMailbox, message_ids: list[str]) -> set[str]:
+    """Межклиентский прогрев распознаём только по записанным письмам, не по списку чужих адресов."""
+    if not message_ids:
+        return set()
+    return set((await db.scalars(select(LgWarmupMail.message_id).where(
+        LgWarmupMail.to_mailbox_id == box.id, LgWarmupMail.message_id.in_(message_ids)))).all())
 
 
 async def _sent_today(db: AsyncSession, mailbox_id: int, now: datetime) -> tuple[int, datetime | None]:
@@ -221,11 +235,23 @@ async def _sent_today(db: AsyncSession, mailbox_id: int, now: datetime) -> tuple
 
 
 def _domain(mb: LgMailbox) -> str:
-    return mb.email.split("@")[-1].lower()
+    return mb.email.rpartition("@")[2].strip().lower().rstrip(".")
+
+
+def _can_pair(sender: LgMailbox, recipient: LgMailbox) -> bool:
+    return (
+        sender.id != recipient.id and _domain(sender) != _domain(recipient)
+        and (sender.workspace_id == recipient.workspace_id
+             or (sender.warmup_shared_pool and recipient.warmup_shared_pool))
+    )
+
+
+def _can_start(sender: LgMailbox, recipient: LgMailbox) -> bool:
+    return _can_pair(sender, recipient) and (sender.role != "helper" or recipient.role != "helper")
 
 
 async def _pick_recipient(db: AsyncSession, sender: LgMailbox, boxes: list[LgMailbox], now: datetime) -> LgMailbox | None:
-    options = [b for b in boxes if b.id != sender.id and (sender.role != "helper" or b.role != "helper")]
+    options = [b for b in boxes if _can_start(sender, b)]
     age = age_days(sender, now.astimezone(ZoneInfo(TZ)).date())
     if sender.role != "helper" and age is not None and age < QUIET_DAYS:
         # «Тихий старт»: только на авторитетные почтовики (Gmail, Яндекс, Mail.ru), если такие есть в пуле
@@ -237,9 +263,7 @@ async def _pick_recipient(db: AsyncSession, sender: LgMailbox, boxes: list[LgMai
     received = dict((await db.execute(select(LgWarmupMail.to_mailbox_id, func.count()).where(
         LgWarmupMail.sent_at >= since, LgWarmupMail.to_mailbox_id.in_([b.id for b in options]))
         .group_by(LgWarmupMail.to_mailbox_id))).all())
-    # Чаще — на другой домен и тем, кому сегодня писали меньше.
-    return min(options, key=lambda b: (_domain(b) == _domain(sender), received.get(b.id, 0),
-                                       _stable(sender.id, b.id, now.date())))
+    return min(options, key=lambda b: (received.get(b.id, 0), _stable(sender.id, b.id, now.date())))
 
 
 def _due(sent: int, plan: int, last: datetime | None, now: datetime, key) -> bool:
@@ -262,8 +286,8 @@ async def _deliver(db: AsyncSession, transport, row: LgWarmupMail, sender: LgMai
                         row.in_reply_to)
     try:
         await transport.send(sender, decrypt_secret(sender.password_encrypted), mail)
-    except Exception as exc:  # noqa: BLE001 — ящик недоступен; ошибку видно на экране прогрева
-        row.status, row.error, row.sent_at = "failed", f"{type(exc).__name__}: {exc}"[:300], now
+    except Exception:  # noqa: BLE001 — текст SMTP может содержать чужой адрес или реквизиты
+        row.status, row.error, row.sent_at = "failed", "Не удалось отправить письмо партнёру по прогреву", now
         sender.warmup_error = row.error
         return False
     row.status, row.sent_at, row.error = "sent", now, None
@@ -276,8 +300,9 @@ async def send_due(db: AsyncSession, transport, workspace_id: int, *, now: datet
     now = now or service.utcnow()
     if not in_window(now):
         return 0
-    boxes = await pool(db, workspace_id)
-    if len(boxes) < 2:
+    boxes = await pool(db, workspace_id, include_partners=True)
+    senders = [b for b in boxes if b.workspace_id == workspace_id]
+    if not senders:
         return 0
     by_id = {b.id: b for b in boxes}
     sent = 0
@@ -286,7 +311,7 @@ async def send_due(db: AsyncSession, transport, workspace_id: int, *, now: datet
         LgWarmupMail.send_after <= now).order_by(LgWarmupMail.send_after).limit(20))).all()
     for row in replies:
         sender, recipient = by_id.get(row.from_mailbox_id), by_id.get(row.to_mailbox_id)
-        if not sender or not recipient:
+        if not sender or sender.workspace_id != workspace_id or not recipient or not _can_pair(sender, recipient):
             row.status, row.error = "failed", "Ящик выключен или убран из прогрева"
             continue
         count, _ = await _sent_today(db, sender.id, now)
@@ -294,7 +319,7 @@ async def send_due(db: AsyncSession, transport, workspace_id: int, *, now: datet
             continue  # ответ подождёт до завтра
         sent += await _deliver(db, transport, row, sender, recipient, now)
     today = now.astimezone(ZoneInfo(TZ)).date()
-    for sender in boxes:
+    for sender in senders:
         count, last = await _sent_today(db, sender.id, now)
         if not _due(count, daily_plan(sender, today), last, now, sender.id):
             continue
@@ -352,6 +377,7 @@ async def apply_found(db: AsyncSession, box: LgMailbox, rows: list[LgWarmupMail]
                       stats: dict | None = None) -> dict:
     stats = stats if stats is not None else {"inbox": 0, "spam": 0, "missing": 0, "replies": 0}
     today = now.astimezone(ZoneInfo(TZ)).date()
+    paused = await service.inactive_workspaces(db)
     for row in rows:
         hit = found.get(row.message_id or "")
         if hit is None:
@@ -363,7 +389,10 @@ async def apply_found(db: AsyncSession, box: LgMailbox, rows: list[LgWarmupMail]
         row.status, row.found_at, row.rescued, row.auth = hit["folder"], now, hit["folder"] == "spam", hit.get("auth")
         stats[hit["folder"]] += 1
         sender = await db.get(LgMailbox, row.from_mailbox_id)
-        if not was_missing and row.depth < MAX_DEPTH and _stable(row.message_id, "reply") < reply_rate(sender, today):
+        if (not was_missing and row.depth < MAX_DEPTH and sender and sender.is_active and sender.warmup_enabled
+                and box.is_active and box.warmup_enabled and sender.workspace_id not in paused
+                and box.workspace_id not in paused and _can_pair(box, sender)
+                and _stable(row.message_id, "reply") < reply_rate(sender, today)):
             subject, body = compose_reply(box, f"{row.id}:reply", row.subject)
             delay = timedelta(minutes=10 + int(110 * _stable(row.message_id, "delay")))
             db.add(LgWarmupMail(workspace_id=box.workspace_id, from_mailbox_id=box.id, to_mailbox_id=sender.id,
@@ -598,6 +627,7 @@ async def card(db: AsyncSession, mb: LgMailbox, now: datetime) -> dict:
     h = mb.health_json or {}
     from app.domains.leadgen.routes import unicode_email
     return {"id": mb.id, "email": unicode_email(mb.email), "sender_name": mb.sender_name, "role": mb.role, "is_active": mb.is_active,
+            "warmup_shared_pool": mb.warmup_shared_pool,
             "warmup_enabled": mb.warmup_enabled, "warmup_target": mb.warmup_target, "stage": stage(mb, today),
             "today": {"warm_plan": daily_plan(mb, today), "warm_sent": warm_sent,
                       "cold_plan": cold_limit(mb, today) if mb.is_active else 0, "cold_sent": cold_sent},
@@ -615,18 +645,23 @@ async def overview(db: AsyncSession, workspace_id: int, now: datetime | None = N
     now = now or service.utcnow()
     boxes = (await db.scalars(select(LgMailbox).where(LgMailbox.workspace_id == workspace_id)
                               .order_by(LgMailbox.role, LgMailbox.id))).all()
-    active = [b for b in boxes if b.is_active and b.warmup_enabled]
-    providers = {_provider(b) for b in active}
+    eligible = await pool(db, workspace_id, include_partners=True)
+    active = [b for b in eligible if b.workspace_id == workspace_id]
+    partners = [b for b in eligible if b.workspace_id != workspace_id and any(
+        _can_start(a, b) or _can_start(b, a) for a in active)]
+    running = any(_can_start(a, b) or _can_start(b, a) for a in active for b in eligible)
+    providers = {_provider(b) for b in active}  # даже SMTP-домены партнёров не раскрываем
     tips = []
-    if len(active) < 2:
-        tips.append("Для прогрева нужно минимум 2 ящика с включённым прогревом — им не с кем переписываться.")
-    elif len(active) < 4:
+    if not running:
+        tips.append("Нет пары ящиков на разных доменах. Включите общий пул или добавьте ящик на другом домене.")
+    elif len(active) + len(partners) < 4:
         tips.append("В пуле меньше 4 ящиков — прогрев работает слабо. Добавьте 2–3 ящика-помощника на Яндексе, Mail.ru или Gmail.")
-    if active and len(providers) < 2:
+    if active and not partners and len(providers) < 2:
         tips.append("Все ящики пула на одном почтовом сервисе. Помощники на других сервисах (Яндекс, Mail.ru, Gmail) дают более честную картину.")
     return {"pool": {"total": len(active), "outreach": sum(1 for b in active if b.role != "helper"),
-                     "helpers": sum(1 for b in active if b.role == "helper"), "providers": sorted(providers)},
-            "running": len(active) >= 2, "in_window": in_window(now), "window": f"{WINDOW.start_hour}:00–{WINDOW.end_hour}:00 МСК",
+                     "helpers": sum(1 for b in active if b.role == "helper"), "providers": sorted(providers),
+                     "partners": len(partners)},
+            "running": running, "in_window": in_window(now), "window": f"{WINDOW.start_hour}:00–{WINDOW.end_hour}:00 МСК",
             "tips": tips, "items": [await card(db, b, now) for b in boxes]}
 
 
@@ -647,7 +682,10 @@ async def run_tick(db: AsyncSession, transport, *, now: datetime | None = None, 
     now = now or service.utcnow()
     workspaces = (await db.scalars(select(LgMailbox.workspace_id).where(
         LgMailbox.is_active.is_(True), LgMailbox.warmup_enabled.is_(True)).distinct())).all()
+    paused = await service.inactive_workspaces(db)   # отключённый клиент: прогрев тоже стоит
     for ws in workspaces:
+        if ws in paused:
+            continue
         await send_due(db, transport, ws, now=now)
         if check:  # поиск прогревочных писем идёт внутри общего входа в ящик (sequences.poll_mailbox)
             for mb in await pool(db, ws):

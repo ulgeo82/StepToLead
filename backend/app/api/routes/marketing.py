@@ -460,6 +460,23 @@ async def create_demo_workspace(request: Request, db: AsyncSession = Depends(get
     return await demo.create_demo(db)
 
 
+class WorkspaceOutreachIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    show_outreach: bool
+
+
+@router.patch("/workspaces/{workspace_id}/outreach")
+async def update_workspace_outreach(workspace_id: int, payload: WorkspaceOutreachIn, request: Request,
+                                    db: AsyncSession = Depends(get_db)):
+    check_origin(request)
+    row = await db.get(ClientWorkspace, workspace_id)
+    if row is None or row.status == "deleted":
+        raise HTTPException(404, "Клиент не найден")
+    row.show_outreach = payload.show_outreach
+    await db.commit()
+    return {"show_outreach": row.show_outreach}
+
+
 class WorkspaceDelete(BaseModel):
     model_config = ConfigDict(extra="forbid")
     confirm_name: str = Field(min_length=1, max_length=180)

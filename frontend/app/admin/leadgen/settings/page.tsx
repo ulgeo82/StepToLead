@@ -11,11 +11,12 @@ type Settings = {
   recontact_days: number;
   outreach_pipeline_id: number | null;
   icp: string;
+  main_domains: string[];
   fit_ai_available: boolean;
   hot: Hot;
 };
 type Hot = { threshold: number; sla_minutes: number; notify: boolean; remind: boolean };
-type Patch = Partial<Pick<Settings, "weights" | "platform_domains" | "recontact_days" | "icp" | "hot">>;
+type Patch = Partial<Pick<Settings, "weights" | "platform_domains" | "recontact_days" | "icp" | "hot" | "main_domains">>;
 const HOT_DEFAULT: Hot = { threshold: 70, sla_minutes: 15, notify: true, remind: true };
 
 export default function Page() {
@@ -24,6 +25,7 @@ export default function Page() {
   const [domains, setDomains] = useState("");
   const [days, setDays] = useState("30");
   const [icp, setIcp] = useState("");
+  const [mainDomains, setMainDomains] = useState("");
   const [hot, setHot] = useState<Hot>(HOT_DEFAULT);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -38,6 +40,7 @@ export default function Page() {
     setDomains(result.platform_domains.join("\n"));
     setDays(String(result.recontact_days));
     setIcp(result.icp);
+    setMainDomains((result.main_domains || []).join("\n"));
     setHot({ ...HOT_DEFAULT, ...(result.hot || {}) });
   }
 
@@ -67,9 +70,11 @@ export default function Page() {
         .filter(Boolean),
     ),
   ];
+  const ownDomains = [...new Set(mainDomains.split(/\r?\n/).map((domain) => domain.trim().toLowerCase()).filter(Boolean))];
   const patch: Patch = {};
   if (saved) {
     if (icp !== saved.icp) patch.icp = icp;
+    if (JSON.stringify(ownDomains) !== JSON.stringify(saved.main_domains || [])) patch.main_domains = ownDomains;
     if (Number(days) !== saved.recontact_days) patch.recontact_days = Number(days);
     if (JSON.stringify(platformDomains) !== JSON.stringify(saved.platform_domains)) {
       patch.platform_domains = platformDomains;
@@ -169,11 +174,19 @@ export default function Page() {
                   value={icp}
                   minLength={20}
                   maxLength={3000}
-                  required
+                  placeholder="Кто подходит клиенту и кто нет: ниша, размер, признаки. Пока портрет пуст, ИИ компании не оценивает."
                   aria-describedby="icp-count"
                   onChange={(event) => setIcp(event.target.value)}
                 />
                 <small id="icp-count">{icp.length} / 3000 символов</small>
+              </label>
+            </section>
+            <section className={styles.card}>
+              <h2>Основные домены клиента</h2>
+              <p>С этих доменов холодные письма не шлём — для рассылки заводят отдельный домен. По умолчанию здесь домен из поля «Сайт» клиента.</p>
+              <label className={styles.field}>
+                Домены, по одному в строке
+                <textarea value={mainDomains} rows={3} onChange={(event) => setMainDomains(event.target.value)} />
               </label>
             </section>
             <section className={styles.card}>

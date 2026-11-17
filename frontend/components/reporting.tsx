@@ -6,6 +6,7 @@ import BriefDemoBanner from "@/components/brief-demo-banner";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import outreach from "./portal-outreach-nav.module.css";
 
 export type ReportingProject = { id: number; name: string; organization_name: string };
 export type ReportingPoint = { label: string };
@@ -17,13 +18,20 @@ export const dateInput = (date: Date) => `${date.getFullYear()}-${String(date.ge
 const shortDate = (s: string) => new Date(`${s}T12:00:00`).toLocaleDateString("ru-RU", { day: "numeric", month: "short" });
 
 export function ProjectSidebar({ project, projectId, active, role }: {
-  project?: ReportingProject; projectId: number | null; active: "result" | "analytics" | "reports" | "leads" | "crm" | "sales" | "ads" | "team" | "settings" | "profile"; role?: string;
+  project?: ReportingProject; projectId: number | null; active: "result" | "analytics" | "reports" | "leads" | "crm" | "sales" | "ads" | "team" | "settings" | "profile" | "outreach"; role?: string;
 }) {
   const [permissions, setPermissions] = useState<string[] | null>(null);
-  useEffect(() => { api<{ permissions: string[] }>("/portal/auth/me").then(user => setPermissions(user.permissions)).catch(() => setPermissions([])); }, []);
+  const [showOutreach, setShowOutreach] = useState(false);
+  useEffect(() => {
+    api<{ permissions: string[]; show_outreach?: boolean }>("/portal/auth/me")
+      .then(user => { setPermissions(user.permissions); setShowOutreach(user.show_outreach === true); })
+      .catch(() => { setPermissions([]); setShowOutreach(false); });
+  }, []);
   const allowed = (capability: string) => role === "admin" || permissions?.includes(capability);
   const suffix = projectId ? `?project_id=${projectId}` : "";
   return <aside className="resultSidebar"><Link className="resultBrand" href={`/result${suffix}`} aria-label="StepToLead"><BrandMark tone="light" size={36}/></Link>
+    {role !== "admin" && showOutreach && <Link className={outreach.mobile}
+      aria-current={active === "outreach" ? "page" : undefined} href="/portal/outreach">Аутрич</Link>}
     <div className="resultProject"><small>ПРОЕКТ</small><strong>{project?.organization_name || "StepToLead"}</strong><span>{project?.name || "Выберите проект"}</span></div><BriefDemoBanner projectId={projectId}/>
     <nav aria-label="Навигация"><small>АНАЛИТИКА</small>
       {allowed("view_result") && <Link className={active === "result" ? "active" : ""} href={`/result${suffix}`}><b>01</b> Результат</Link>}
@@ -32,6 +40,8 @@ export function ProjectSidebar({ project, projectId, active, role }: {
       <small>ПРОДАЖИ</small>{allowed("view_crm") && <Link className={active === "crm" || active === "leads" ? "active" : ""} href={`/crm${suffix}`}><b>04</b> CRM</Link>}
       <small>МАРКЕТИНГ</small>
       {allowed("view_ads") && <Link className={active === "ads" ? "active" : ""} href={`/ads${suffix}`}><b>05</b> Реклама</Link>}
+      {role !== "admin" && showOutreach && <Link className={active === "outreach" ? "active" : ""}
+        aria-current={active === "outreach" ? "page" : undefined} href="/portal/outreach"><b>09</b> Аутрич</Link>}
       <small>УПРАВЛЕНИЕ</small>{permissions?.includes("manage_team") && <Link className={active === "team" ? "active" : ""} href="/team" title="Команда клиентской организации"><b>06</b> Команда</Link>}{(permissions?.includes("manage_settings") || permissions?.includes("manage_sources")) && <Link className={active === "settings" ? "active" : ""} href={`/settings${suffix}`} title="Настройки клиентской организации"><b>07</b> Настройки</Link>}{role !== "admin" && <Link className={active === "profile" ? "active" : ""} href={`/profile${suffix}`} title="Личный Telegram и пуш-уведомления"><b>08</b> Мои уведомления</Link>}
     </nav>{role !== "admin" && <AiTokensMini href={permissions?.includes("manage_settings") ? `/settings${suffix}#tokens` : undefined}/>}<div className="resultSidebarFoot"><span>●</span> Данные вашего проекта · {role === "admin" ? <Link href="/admin">В админку</Link>
       : <button type="button" onClick={async () => { await api("/portal/auth/logout", { method: "POST" }).catch(() => undefined); location.assign("/login"); }}>Выйти</button>}</div>

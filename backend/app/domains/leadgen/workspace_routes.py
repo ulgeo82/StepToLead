@@ -10,10 +10,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.access import require_admin
 from app.db import get_db
 from app.domains.leadgen import routes as lg_routes
-from app.domains.leadgen import source_runner, workspace
+from app.domains.leadgen import source_runner, space, workspace
 from app.models.access import AdminUser
 
-router = APIRouter(prefix="/admin/leadgen", tags=["admin-leadgen-workspace"])
+router = APIRouter(prefix="/admin/leadgen", tags=["admin-leadgen-workspace"], dependencies=[Depends(space.bind)])
 
 
 def _err(exc: workspace.WorkspaceError):

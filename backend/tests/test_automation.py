@@ -186,6 +186,24 @@ class ExecutionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.dialog.state, "handoff")
         self.assertEqual(self.client.send_message.await_count, 2)  # reply and manager summary
 
+    async def test_manual_dialog_reads_incoming_but_never_answers_itself(self):
+        """Оператор ответил из «Входящих» (state=manual): раннер сохраняет новые входящие, но без ИИ и дожима."""
+        self.runtime.status = "running"
+        self.dialog.state = "manual"
+        self.dialog.started_at = datetime.now(timezone.utc) - timedelta(days=2)
+        self.db.add(CampaignMessage(campaign_id=self.campaign.id, dialog_id=self.dialog.id, account_id=self.account.id,
+                                   kind="first", body="Test", dedupe_key="first", status="sent", telegram_message_id=1))
+        await self.db.commit()
+        self.client.get_messages.return_value = [SimpleNamespace(id=4, out=False, message="А по цене?")]
+        settings = AutomationSettings(followup_enabled=True, followup_text="Reminder")
+        with patch("app.services.campaign_runner.request_ai", return_value="ИИ-ответ") as ai_call:
+            self.assertFalse(await process_dialog(self.db, self.client, self.runtime, settings, self.dialog))
+        ai_call.assert_not_called()
+        self.client.send_message.assert_not_awaited()
+        self.assertEqual((self.dialog.state, self.dialog.last_incoming_id), ("manual", 4))
+        saved = await self.db.scalar(select(CampaignMessage).where(CampaignMessage.status == "received"))
+        self.assertEqual(saved.body, "А по цене?")
+
     async def test_reply_cancels_followup(self):
         self.runtime.status = "running"
         self.dialog.started_at = datetime.now(timezone.utc) - timedelta(days=2)
