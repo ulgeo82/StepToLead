@@ -67,7 +67,8 @@ def proxy_config(proxy: Proxy | None) -> dict | None:
     }
 
 
-def make_client(session_value: str | None = None, proxy: Proxy | None = None, *, catch_up=False) -> TelegramClient:
+def make_client(session_value: str | None = None, proxy: Proxy | None = None, *, catch_up=False,
+                retries: int = 1, timeout: int = 10) -> TelegramClient:
     ensure_telegram_configured()
     api_id, api_hash = telegram_api_credentials()
     # Sessions run on Telegram Desktop credentials, so they introduce themselves as Telegram Desktop:
@@ -85,8 +86,9 @@ def make_client(session_value: str | None = None, proxy: Proxy | None = None, *,
         system_lang_code=desktop.system_lang_code,
         auto_reconnect=False,
         request_retries=0,
-        connection_retries=1,
-        timeout=10,
+        connection_retries=retries,
+        retry_delay=2,
+        timeout=timeout,
         flood_sleep_threshold=0,
         catch_up=catch_up,
     )
@@ -94,15 +96,42 @@ def make_client(session_value: str | None = None, proxy: Proxy | None = None, *,
     return client
 
 
+LOGIN_ATTEMPTS = 4   # вход по номеру: прокси иногда не с первого раза держит соединение — пробуем ещё
+
+
+async def _connect_login(client: TelegramClient) -> None:
+    """Подключение для входа с повторами. Код подтверждения при этом не тратится: он действует ~10 минут,
+    пока не запросили новый, — повтор соединения его не сбрасывает."""
+    import asyncio
+    last: Exception | None = None
+    for attempt in range(LOGIN_ATTEMPTS):
+        try:
+            await client.connect()
+            if client.is_connected():
+                return
+        except (ConnectionError, OSError, asyncio.TimeoutError) as exc:
+            last = exc
+        await asyncio.sleep(1.5 * (attempt + 1))
+    raise HTTPException(status_code=502, detail="Прокси аккаунта не дал соединиться с Telegram. Код ещё действует — "
+                                                "нажмите «Войти» ещё раз; если повторится, смените прокси аккаунта") from last
+
+
+def login_client(session_value: str | None, proxy: Proxy | None) -> TelegramClient:
+    return make_client(session_value, proxy, retries=2, timeout=20)
+
+
 async def request_login_code(account: TelegramAccount, proxy: Proxy | None) -> None:
-    client = make_client(proxy=proxy)
+    client = login_client(None, proxy)
     try:
-        await client.connect()
+        await _connect_login(client)
         sent = await client.send_code_request(account.phone)
         account.pending_session_encrypted = encrypt_secret(client.session.save())
         account.phone_code_hash = sent.phone_code_hash
         account.status = "code_sent"
         account.last_error = None
+    except HTTPException:
+        account.status, account.last_error = "error", "Нет соединения с Telegram через прокси"
+        raise
     except FloodWaitError as exc:
         account.status = "flood_wait"
         account.flood_wait_until = datetime.now(timezone.utc) + timedelta(seconds=exc.seconds)
@@ -120,9 +149,9 @@ async def confirm_login(account: TelegramAccount, code: str | None, password: st
     pending = decrypt_secret(account.pending_session_encrypted)
     if not pending:
         raise HTTPException(status_code=409, detail="Сначала запросите код подтверждения")
-    client = make_client(pending, proxy)
+    client = login_client(pending, proxy)
     try:
-        await client.connect()
+        await _connect_login(client)
         if account.requires_2fa:
             if not password:
                 raise HTTPException(status_code=409, detail="Введите пароль двухэтапной аутентификации")
@@ -144,7 +173,10 @@ async def confirm_login(account: TelegramAccount, code: str | None, password: st
         account.status = "online"
         account.last_error = None
         account.last_seen_at = datetime.now(timezone.utc)
-        await sync_account_from_telegram(account, client)
+        try:   # вход уже состоялся и сессия сохранена; профиль подтянется «Синхронизировать», если тут сбой
+            await sync_account_from_telegram(account, client)
+        except Exception:  # noqa: BLE001
+            pass
         return False
     except (PhoneCodeInvalidError, PhoneCodeExpiredError) as exc:
         account.last_error = "Неверный или просроченный код"
@@ -152,6 +184,13 @@ async def confirm_login(account: TelegramAccount, code: str | None, password: st
     except PasswordHashInvalidError as exc:
         account.last_error = "Неверный пароль 2FA"
         raise HTTPException(status_code=422, detail=account.last_error) from exc
+    except FloodWaitError as exc:
+        account.last_error = f"Telegram просит подождать {exc.seconds} сек. перед новой попыткой"
+        raise HTTPException(status_code=429, detail=account.last_error) from exc
+    except (ConnectionError, OSError) as exc:   # соединение оборвалось посреди входа — код ещё действует
+        account.last_error = "Соединение с Telegram оборвалось"
+        raise HTTPException(status_code=502, detail="Соединение с Telegram оборвалось. Код ещё действует — "
+                                                    "нажмите «Войти» ещё раз") from exc
     finally:
         await client.disconnect()
 
