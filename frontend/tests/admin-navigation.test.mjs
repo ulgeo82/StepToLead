@@ -30,6 +30,7 @@ test("все действующие маршруты доступны", () => {
       "/admin/campaigns",
       "/admin/leads",
       "/admin/accounts",
+      "/admin/tg-warmup",
       "/admin/parser",
       "/admin/proxies",
       "/admin/proxies",
@@ -99,7 +100,7 @@ test("поиск сохраняет родителей совпадения и �
 test("поиск по папке показывает её дочерние разделы", () => {
   assert.deepEqual(
     flatten(filterNavigation(adminNavigation, "Telegram")).map((item) => item.id),
-    ["campaigns", "queue", "accounts", "outreach-proxies", "parser", "proxies"],
+    ["campaigns", "queue", "accounts", "tg-warmup", "outreach-proxies", "parser", "proxies"],
   );
   assert.equal(filterNavigation(adminNavigation, "несуществующий раздел").length, 0);
 });

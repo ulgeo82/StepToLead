@@ -9,7 +9,7 @@ export const SPACE_PARAM = "ws";
 const KEY = "stl:space";
 
 /** Страницы Telegram-аутрича (этап B): тоже работают внутри клиента. */
-const TELEGRAM_PAGES = /^\/admin\/(campaigns|leads|accounts|parser|proxies)(\/|$)/;
+const TELEGRAM_PAGES = /^\/admin\/(campaigns|leads|accounts|parser|proxies|tg-warmup)(\/|$)/;
 
 /** Страницы, где работа идёт внутри клиента. */
 export const isSpacePage = (pathname: string) =>
@@ -18,7 +18,7 @@ export const isSpacePage = (pathname: string) =>
 /** Запросы API, которые сервер понимает «в пространстве клиента». */
 export const isSpaceApi = (path: string) =>
   /^\/admin\/(leadgen|outreach)(\/|\?|$)/.test(path)
-  || /^\/(campaigns|leads|telegram-accounts|telegram-parser|proxies)(\/|\?|$)/.test(path);
+  || /^\/(campaigns|leads|telegram-accounts|telegram-parser|telegram-warmup|proxies)(\/|\?|$)/.test(path);
 
 const parse = (value: string | null | undefined): number | null => {
   const id = Number(value);

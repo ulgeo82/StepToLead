@@ -421,6 +421,9 @@ async def tick(campaign_id):
         spam_stale = not checked or datetime.fromisoformat(checked) < now() - timedelta(hours=SPAMCHECK_HOURS)
         if account.status == "spamblock" and not spam_stale:
             return
+        from app.services import account_locks
+        if not account_locks.try_take(account.id):   # аккаунт сейчас в прогреве/ответе — следующий круг
+            return
         client = None
         account_id = binding.account_id
         phase = "подключение аккаунта"
@@ -483,6 +486,7 @@ async def tick(campaign_id):
                     await asyncio.wait_for(client.disconnect(), 5)
                 except TimeoutError:
                     log.warning("Campaign %s account %s: disconnect timeout", campaign_id, account_id)
+            account_locks.release(account_id)
 
 
 async def run_campaigns():

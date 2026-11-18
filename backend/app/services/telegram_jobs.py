@@ -289,20 +289,38 @@ def start_import(files: list[tuple[str, str]], proxy_ids: list[int | None], work
 
 # ---------------------------------------------------------------- спам-блок
 
-async def _with_account(account, fn):
-    """Подключить аккаунт ТОЛЬКО через его прокси и выполнить fn(client)."""
+async def _with_account_unlocked(account, fn):
+    """Как _with_account, но аккаунт уже занят вызывающим (account_locks.try_take)."""
     from app.core.crypto import decrypt_secret
     from app.services.telegram import make_client
     if account.proxy is None:
         raise RuntimeError("Нет прокси — аккаунт не подключаем")
     client = make_client(decrypt_secret(account.session_encrypted), account.proxy)
     try:
-        await asyncio.wait_for(client.connect(), 20)
+        await asyncio.wait_for(client.connect(), 25)
         if not await client.is_user_authorized():
             raise RuntimeError("Сессия больше не авторизована")
         return await fn(client)
     finally:
         await client.disconnect()
+
+
+async def _with_account(account, fn):
+    """Подключить аккаунт ТОЛЬКО через его прокси и выполнить fn(client)."""
+    from app.core.crypto import decrypt_secret
+    from app.services.telegram import make_client
+    from app.services import account_locks
+    if account.proxy is None:
+        raise RuntimeError("Нет прокси — аккаунт не подключаем")
+    async with account_locks.hold(account.id):
+        client = make_client(decrypt_secret(account.session_encrypted), account.proxy)
+        try:
+            await asyncio.wait_for(client.connect(), 20)
+            if not await client.is_user_authorized():
+                raise RuntimeError("Сессия больше не авторизована")
+            return await fn(client)
+        finally:
+            await client.disconnect()
 
 
 async def spamcheck(batch_id: int, ids: list[int], pause: float = 5.0) -> None:

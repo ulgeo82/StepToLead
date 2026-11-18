@@ -59,6 +59,8 @@ async def lifespan(_: FastAPI):
     leadgen_sequences = asyncio.create_task(run_leadgen_sequences())
     from app.domains.jobradar.runner import run_worker as run_jobradar
     jobradar_worker = asyncio.create_task(run_jobradar())
+    from app.services.tg_warmup import run_worker as run_tg_warmup
+    tg_warmup_worker = asyncio.create_task(run_tg_warmup())
     from app.services import monitor
     monitor.install()
     monitor.register("Telegram-профили клиентов", profiles_worker)
@@ -73,7 +75,7 @@ async def lifespan(_: FastAPI):
     for name, task in (("Рассылки Telegram", runner), ("Сбор контактов", parser_worker), ("Авито", avito_worker),
                        ("Автоматизации CRM", crm_worker), ("Переписки", messaging_worker), ("Телефония", telephony_worker),
                        ("Контроль заявок и отчёты", watchdog), ("Обновление рекламы", ad_sync), ("Лидогенерация: повтор поиска", leadgen_repeat), ("Аутрич: цепочки и почта", leadgen_sequences),
-                       ("Радар вакансий", jobradar_worker)):
+                       ("Радар вакансий", jobradar_worker), ("Прогрев Telegram", tg_warmup_worker)):
         monitor.register(name, task)
     monitor_worker = asyncio.create_task(monitor.run_worker())
     try:
@@ -97,6 +99,7 @@ async def lifespan(_: FastAPI):
         leadgen_repeat.cancel()
         leadgen_sequences.cancel()
         jobradar_worker.cancel()
+        tg_warmup_worker.cancel()
         monitor_worker.cancel()
         if tg_worker:
             tg_worker.cancel()

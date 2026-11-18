@@ -120,8 +120,34 @@ def login_client(session_value: str | None, proxy: Proxy | None) -> TelegramClie
     return make_client(session_value, proxy, retries=2, timeout=20)
 
 
+# Вход по номеру держим на ОДНОМ живом соединении: код запросили — соединение не закрываем, «Войти» идёт по нему
+# же. Без этого каждый шаг заново проходит рукопожатие с Telegram через прокси (5–20 с) и рискует обрывом.
+_LOGINS: dict[int, tuple[TelegramClient, float]] = {}
+LOGIN_TTL = 600
+
+
+async def _drop_login(account_id: int) -> None:
+    item = _LOGINS.pop(account_id, None)
+    if item:
+        try:
+            await item[0].disconnect()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+async def _expire_logins() -> None:
+    import time
+    for account_id, (_, born) in list(_LOGINS.items()):
+        if time.monotonic() - born > LOGIN_TTL:
+            await _drop_login(account_id)
+
+
 async def request_login_code(account: TelegramAccount, proxy: Proxy | None) -> None:
+    import time
+    await _expire_logins()
+    await _drop_login(account.id)
     client = login_client(None, proxy)
+    keep = False
     try:
         await _connect_login(client)
         sent = await client.send_code_request(account.phone)
@@ -129,6 +155,8 @@ async def request_login_code(account: TelegramAccount, proxy: Proxy | None) -> N
         account.phone_code_hash = sent.phone_code_hash
         account.status = "code_sent"
         account.last_error = None
+        _LOGINS[account.id] = (client, time.monotonic())
+        keep = True
     except HTTPException:
         account.status, account.last_error = "error", "Нет соединения с Telegram через прокси"
         raise
@@ -142,16 +170,20 @@ async def request_login_code(account: TelegramAccount, proxy: Proxy | None) -> N
         account.last_error = str(exc)[:500]
         raise HTTPException(status_code=502, detail=f"Telegram не принял запрос: {exc}") from exc
     finally:
-        await client.disconnect()
+        if not keep:
+            await client.disconnect()
 
 
 async def confirm_login(account: TelegramAccount, code: str | None, password: str | None, proxy: Proxy | None) -> bool:
     pending = decrypt_secret(account.pending_session_encrypted)
     if not pending:
         raise HTTPException(status_code=409, detail="Сначала запросите код подтверждения")
-    client = login_client(pending, proxy)
+    live = _LOGINS.get(account.id)
+    client = live[0] if live and live[0].is_connected() else login_client(pending, proxy)
+    done = True
     try:
-        await _connect_login(client)
+        if not client.is_connected():
+            await _connect_login(client)
         if account.requires_2fa:
             if not password:
                 raise HTTPException(status_code=409, detail="Введите пароль двухэтапной аутентификации")
@@ -165,6 +197,9 @@ async def confirm_login(account: TelegramAccount, code: str | None, password: st
                 account.requires_2fa = True
                 account.pending_session_encrypted = encrypt_secret(client.session.save())
                 account.status = "password_required"
+                done = False          # пароль введут следующим шагом — соединение оставляем
+                import time
+                _LOGINS[account.id] = (client, time.monotonic())
                 return True
         account.session_encrypted = encrypt_secret(client.session.save())
         account.pending_session_encrypted = None
@@ -174,14 +209,16 @@ async def confirm_login(account: TelegramAccount, code: str | None, password: st
         account.last_error = None
         account.last_seen_at = datetime.now(timezone.utc)
         try:   # вход уже состоялся и сессия сохранена; профиль подтянется «Синхронизировать», если тут сбой
-            await sync_account_from_telegram(account, client)
+            await sync_account_from_telegram(account, client, photo=False)   # фото — «Синхронизировать» позже
         except Exception:  # noqa: BLE001
             pass
         return False
     except (PhoneCodeInvalidError, PhoneCodeExpiredError) as exc:
+        done = isinstance(exc, PhoneCodeExpiredError)   # опечатка в коде — можно ввести ещё раз по тому же соединению
         account.last_error = "Неверный или просроченный код"
         raise HTTPException(status_code=422, detail=account.last_error) from exc
     except PasswordHashInvalidError as exc:
+        done = False
         account.last_error = "Неверный пароль 2FA"
         raise HTTPException(status_code=422, detail=account.last_error) from exc
     except FloodWaitError as exc:
@@ -192,10 +229,16 @@ async def confirm_login(account: TelegramAccount, code: str | None, password: st
         raise HTTPException(status_code=502, detail="Соединение с Telegram оборвалось. Код ещё действует — "
                                                     "нажмите «Войти» ещё раз") from exc
     finally:
-        await client.disconnect()
+        if done:
+            _LOGINS.pop(account.id, None)
+            await client.disconnect()
+        elif account.id not in _LOGINS:
+            import time
+            _LOGINS[account.id] = (client, time.monotonic())
 
 
-async def sync_account_from_telegram(account: TelegramAccount, client: TelegramClient | None = None) -> None:
+async def sync_account_from_telegram(account: TelegramAccount, client: TelegramClient | None = None, *,
+                                     photo: bool = True) -> None:
     own_client = client is None
     if own_client:
         session_value = decrypt_secret(account.session_encrypted)
@@ -215,6 +258,8 @@ async def sync_account_from_telegram(account: TelegramAccount, client: TelegramC
         account.username = me.username
         account.bio = full.full_user.about
         try:   # маленькая аватарка для списка в портале; не получилось — не мешает синхронизации
+            if not photo:
+                raise LookupError
             from app.services.avatar_variants import thumb
             photo = await client.download_profile_photo("me", file=bytes, download_big=False)
             account.avatar_thumb = thumb(photo) if photo else None
