@@ -53,6 +53,7 @@ export const adminNavigation: NavigationNode[] = [
           { kind: "item", id: "inbound", label: "Входящие", href: "/admin/outreach/inbox" },
           { kind: "item", id: "email", label: "Ящики и шаблоны писем", href: "/admin/outreach/email" },
           { kind: "item", id: "warmup", label: "Прогрев", href: "/admin/outreach/warmup" },
+          { kind: "item", id: "outreach-move", label: "Перенести к клиенту", href: "/admin/outreach/move" },
           {
             kind: "folder",
             id: "telegram",

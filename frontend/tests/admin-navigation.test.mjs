@@ -49,6 +49,7 @@ test("все действующие маршруты доступны", () => {
       "/admin/outreach/campaigns",
       "/admin/outreach/inbox",
       "/admin/outreach/warmup",
+      "/admin/outreach/move",
       "/admin/team",
     ].sort(),
   );
@@ -115,7 +116,7 @@ test("номера двузначные, сбрасываются в групп�
   assert.equal(nums.team, "01");
   assert.equal(nums.monitor, "02");
   assert.ok(Object.values(nums).every((number) => /^\d{2}$/.test(number)));
-  assert.equal(nums.accounts, "16");
+  assert.equal(nums.accounts, "17");
 });
 test("нет дублирующихся id", () => {
   const ids = [];

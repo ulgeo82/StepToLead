@@ -1659,6 +1659,41 @@ async def move_companies(payload: MoveCompaniesIn, db: AsyncSession = Depends(ge
     return {"done": done, "skipped": skipped}
 
 
+class MoveOutreachIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    workspace_id: int = Field(gt=0)
+    email_campaign_ids: list[int] = Field(default_factory=list, max_length=500)
+    mailbox_ids: list[int] = Field(default_factory=list, max_length=500)
+    telegram_campaign_ids: list[int] = Field(default_factory=list, max_length=500)
+    account_ids: list[int] = Field(default_factory=list, max_length=5000)
+    dry_run: bool = True
+
+
+@router.get("/move-outreach/options")
+async def move_outreach_options(db: AsyncSession = Depends(get_db), admin: AdminUser = Depends(require_admin)):
+    from app.domains.leadgen import space_move
+    return await space_move.options(db, workspace_id())
+
+
+@router.post("/move-outreach")
+async def move_outreach(payload: MoveOutreachIn, db: AsyncSession = Depends(get_db),
+                        admin: AdminUser = Depends(require_admin)):
+    """Перенести аутрич (кампании со всем содержимым, ящики, аккаунты) к другому клиенту. Только агентство."""
+    from app.domains.leadgen import space_move
+    if await space.active_workspace(db, payload.workspace_id) is None:
+        raise HTTPException(404, "Клиент не найден или отключён")
+    try:
+        result = await space_move.move(db, workspace_id(), payload.workspace_id,
+                                       email_campaign_ids=payload.email_campaign_ids, mailbox_ids=payload.mailbox_ids,
+                                       telegram_campaign_ids=payload.telegram_campaign_ids,
+                                       account_ids=payload.account_ids, dry_run=payload.dry_run)
+    except space_move.MoveError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    if not payload.dry_run and result["problems"]:
+        raise HTTPException(409, "; ".join(result["problems"]))
+    return result
+
+
 @router.post("/companies/delete")
 async def delete_companies(payload: DeleteIn, db: AsyncSession = Depends(get_db),
                            admin: AdminUser = Depends(require_admin)):

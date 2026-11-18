@@ -383,6 +383,46 @@ class LinksAndSpendTests(SpaceBase):
         self.client.cookies.clear()
         self.assertIn(self.post("/companies/move", {"ids": [cid], "workspace_id": HOME}, headers=AS_CLIENT).status_code, (401, 403))
 
+    def test_move_outreach_campaign_with_everything(self):
+        from app.domains.leadgen.models import LgCampaign, LgEnrollment, LgMailbox, LgSequence, LgTouch
+        from app.models import Campaign, Proxy, TelegramAccount
+        from app.models.automation import CampaignAccount
+        cid = self.company(HOME, domain="lead-one.ru")
+        other = self.company(HOME, domain="lead-two.ru")
+
+        async def seed(db):
+            mb = LgMailbox(workspace_id=HOME, email="a@box.ru", smtp_host="s", imap_host="i", login="a",
+                           password_encrypted="x", daily_limit=10)
+            seq = LgSequence(workspace_id=HOME, name="OneSpot", steps=[{"channel": "email", "body": "x"}], window={})
+            seq2 = LgSequence(workspace_id=HOME, name="Своя", steps=[{"channel": "email", "body": "x"}], window={})
+            db.add_all([mb, seq, seq2]); await db.flush()
+            camp = LgCampaign(workspace_id=HOME, sequence_id=seq.id, name="OneSpot")
+            mine = LgCampaign(workspace_id=HOME, sequence_id=seq2.id, name="Агентство")
+            db.add_all([camp, mine]); await db.flush()
+            db.add(LgEnrollment(workspace_id=HOME, sequence_id=seq.id, company_id=cid, mailbox_id=mb.id, campaign_id=camp.id))
+            db.add(LgEnrollment(workspace_id=HOME, sequence_id=seq2.id, company_id=other, campaign_id=mine.id))
+            db.add(LgTouch(company_id=cid, channel="email", direction="in", status="received", body="Интересно"))
+            db.add(Proxy(id=71, host="1.1.1.1", port=1080, pool="agency", status="working", workspace_id=HOME))
+            db.add(TelegramAccount(id=72, phone="+79990000072", session_encrypted="x", proxy_id=71, workspace_id=HOME))
+            db.add(Campaign(id=73, name="TG OneSpot", workspace_id=HOME)); await db.flush()
+            db.add(CampaignAccount(campaign_id=73, account_id=72))
+            await db.commit()
+            return camp.id, mb.id
+        camp_id, mb_id = self.run_db(seed)
+        body = {"workspace_id": CLIENT, "email_campaign_ids": [camp_id], "telegram_campaign_ids": [73]}
+        dry = self.post("/move-outreach", body).json()
+        self.assertEqual((dry["companies"], dry["mailboxes"], dry["accounts"], dry["proxies"], dry["problems"]),
+                         (1, 1, 1, 1, []))
+        r = self.post("/move-outreach", {**body, "dry_run": False})
+        self.assertEqual(r.status_code, 200, r.text)
+
+        async def check(db):
+            return ((await db.get(LgCompany, cid)).workspace_id, (await db.get(LgCompany, other)).workspace_id,
+                    (await db.get(LgMailbox, mb_id)).workspace_id, (await db.get(Campaign, 73)).workspace_id,
+                    (await db.get(TelegramAccount, 72)).workspace_id, (await db.get(Proxy, 71)).workspace_id)
+        self.assertEqual(self.run_db(check), (CLIENT, HOME, CLIENT, CLIENT, CLIENT, CLIENT))
+        self.assertEqual(self.get(f"/companies/{cid}", headers=AS_CLIENT).status_code, 200)
+
 
 if __name__ == "__main__":
     unittest.main()
