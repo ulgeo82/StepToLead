@@ -10,13 +10,13 @@
 .back { display: none; }
 .empty, .pagination { padding: 12px; }
 .pagination { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.unread { color: #9cbaff; }
+.unread { color:var(--signal-hover); }
 .lock {
   padding: 10px 12px;
-  border: 1px solid #9a622c;
-  border-radius: 8px;
-  background: #33241c;
-  color: #ffe2a8;
+  border:1px solid #9a622c;
+  border-radius:8px;
+  background:#33241c;
+  color:#ffe2a8;
 }
 @media (max-width: 900px) {
   .grid { grid-template-columns: minmax(0, 1fr); }
@@ -26,9 +26,9 @@
 }
 .menuCount {
   padding: 2px 6px;
-  border-radius: 999px;
-  background: #344f90;
-  color: white;
+  border-radius:999px;
+  background:#344f90;
+  color:white;
   font-size: 11px;
   font-weight: 700;
   white-space: nowrap;

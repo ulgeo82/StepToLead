@@ -1,0 +1,156 @@
+/* StepToLead — дизайн-система «Глубина» (docs/DESIGN.md). Подключается после globals.css и задаёт всё общее:
+   токены, шрифты, базовые элементы и примитивы (кнопки, поля, таблицы, панели, окна, уведомления).
+   Старые переменные (--ink, --panel, --line, --lime …) переназначены на новые токены, чтобы старые экраны
+   сразу встали в тёмную гамму; экраны переводятся на токены по одному. */
+
+@font-face{font-family:"Onest";font-style:normal;font-weight:100 900;font-display:swap;src:url("/fonts/onest-cyrillic-ext-wght-normal.woff2") format("woff2-variations");unicode-range:U+0460-052F,U+1C80-1C8A,U+20B4,U+2DE0-2DFF,U+A640-A69F,U+FE2E-FE2F}
+@font-face{font-family:"Onest";font-style:normal;font-weight:100 900;font-display:swap;src:url("/fonts/onest-cyrillic-wght-normal.woff2") format("woff2-variations");unicode-range:U+0301,U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116}
+@font-face{font-family:"Onest";font-style:normal;font-weight:100 900;font-display:swap;src:url("/fonts/onest-latin-ext-wght-normal.woff2") format("woff2-variations");unicode-range:U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF}
+@font-face{font-family:"Onest";font-style:normal;font-weight:100 900;font-display:swap;src:url("/fonts/onest-latin-wght-normal.woff2") format("woff2-variations");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+@font-face{font-family:"Unbounded";font-style:normal;font-weight:200 900;font-display:swap;src:url("/fonts/unbounded-cyrillic-ext-wght-normal.woff2") format("woff2-variations");unicode-range:U+0460-052F,U+1C80-1C8A,U+20B4,U+2DE0-2DFF,U+A640-A69F,U+FE2E-FE2F}
+@font-face{font-family:"Unbounded";font-style:normal;font-weight:200 900;font-display:swap;src:url("/fonts/unbounded-cyrillic-wght-normal.woff2") format("woff2-variations");unicode-range:U+0301,U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116}
+@font-face{font-family:"Unbounded";font-style:normal;font-weight:200 900;font-display:swap;src:url("/fonts/unbounded-latin-ext-wght-normal.woff2") format("woff2-variations");unicode-range:U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF}
+@font-face{font-family:"Unbounded";font-style:normal;font-weight:200 900;font-display:swap;src:url("/fonts/unbounded-latin-wght-normal.woff2") format("woff2-variations");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+
+:root{
+  /* глубина: от дна к поверхности — три слоя ночного синего, без чистого чёрного */
+  --abyss:#060B16; --deep:#0A1322; --raised:#101C31; --lift:#17253F;
+  --rule:#1B2A44; --rule-strong:#273A5C;
+  --text:#E7EDF8; --text-2:#B4C1D9; --muted:#8495B4; --faint:#5C6C8B;
+  /* синий — только действие и выбор */
+  --signal:#2F7BFF; --signal-hover:#4C8DFF; --signal-press:#1A66EE; --signal-soft:rgba(47,123,255,.14); --brand:#006BFD;
+  /* статусы — только статусы */
+  --live:#35D0A0; --live-soft:rgba(53,208,160,.13); --caution:#F2B24C; --caution-soft:rgba(242,178,76,.13);
+  --alert:#FF6B7F; --alert-soft:rgba(255,107,127,.13);
+  --r-panel:16px; --r-control:10px; --r-chip:999px;
+  --font:"Onest",system-ui,-apple-system,"Segoe UI",sans-serif; --font-display:"Unbounded","Onest",sans-serif;
+  --ease:cubic-bezier(.2,.8,.2,1); --fast:120ms; --base:180ms;
+  --focus:0 0 0 2px var(--abyss),0 0 0 4px var(--signal);
+  /* старые имена → новые токены */
+  --ink:var(--text); --surface:var(--abyss); --panel:var(--deep); --line:var(--rule); --sidebar:var(--deep);
+  --sidebar-soft:var(--lift); --lime:var(--signal); --lime-deep:var(--signal-press); --accent-light:var(--signal-hover);
+  --shadow:0 24px 60px rgba(0,0,0,.35);
+  color-scheme:dark;
+}
+
+html,body{background:var(--abyss);color:var(--text);font-family:var(--font);font-size:14px;line-height:1.5;
+  font-feature-settings:"tnum" 1,"cv11" 1;text-rendering:optimizeLegibility}
+body{background:radial-gradient(1200px 600px at 78% -10%,rgba(47,123,255,.08),transparent 60%),var(--abyss);background-attachment:fixed}
+::selection{background:rgba(47,123,255,.35);color:#fff}
+*{scrollbar-width:thin;scrollbar-color:var(--rule-strong) transparent}
+:focus-visible{outline:none;box-shadow:var(--focus);border-radius:6px}
+a{color:inherit}
+
+/* типографика: громкий только заголовок страницы и большие числа */
+h1,.pageHeader h1,.welcome h1{font-family:var(--font-display);font-weight:600;letter-spacing:-.02em;color:var(--text)}
+.pageHeader h1,.welcome h1{font-size:clamp(28px,2.6vw,40px);line-height:1.1;margin-bottom:10px}
+h2{font-size:18px;font-weight:650;letter-spacing:-.01em;color:var(--text)}
+h3{font-size:15px;font-weight:650;color:var(--text)}
+.subtitle{max-width:72ch;color:var(--muted);font-size:14px;line-height:1.6}
+.eyebrow{margin:0 0 8px;color:var(--muted);font-size:13px;font-weight:500;letter-spacing:0;text-transform:none}
+small,.mutedText{color:var(--muted)}
+.metricCard>strong,.statPill strong,.roleSummary strong,.crmKpis strong,.proxySummary strong{font-family:var(--font-display);font-weight:500;letter-spacing:-.02em;color:var(--text)}
+
+/* каркас */
+.page{max-width:1480px;padding:0 clamp(16px,3vw,40px) 72px}
+.pageHeader{min-height:0;padding-top:40px;margin-bottom:28px;align-items:flex-end}
+.pageHeaderActions{display:flex;gap:8px;flex-wrap:wrap}
+.topbar{background:rgba(6,11,22,.72);border-color:var(--rule);backdrop-filter:blur(14px)}
+.crumbs,.crumbs b{color:var(--faint)}.crumbs strong{color:var(--text-2)}
+
+/* кнопки: синяя — главное действие на экране, одна; остальные — тихие */
+.button{min-height:40px;padding:0 16px;gap:8px;border:1px solid transparent;border-radius:var(--r-control);font-size:14px;font-weight:600;
+  letter-spacing:0;white-space:nowrap;transition:background var(--fast) var(--ease),border-color var(--fast) var(--ease),transform var(--fast) var(--ease),box-shadow var(--base) var(--ease)}
+.button:active:not(:disabled){transform:scale(.98)}
+.button.primary{color:#fff;background:var(--signal);box-shadow:0 1px 0 rgba(255,255,255,.18) inset,0 8px 24px rgba(47,123,255,.28)}
+.button.primary:hover{background:var(--signal-hover);transform:none;box-shadow:0 1px 0 rgba(255,255,255,.2) inset,0 10px 30px rgba(47,123,255,.36)}
+.button.secondary{color:var(--text);background:var(--raised);border-color:var(--rule-strong);box-shadow:none}
+.button.secondary:hover{background:var(--lift);border-color:#33496F;transform:none}
+.button.soft{color:var(--text);background:var(--raised)}
+.button:disabled{opacity:.45}
+button{color:inherit}
+
+/* поля */
+input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=file]),select,textarea{
+  min-height:40px;padding:8px 12px;border:1px solid var(--rule-strong);border-radius:var(--r-control);background:var(--raised);color:var(--text);
+  font:inherit;font-size:14px;transition:border-color var(--fast) var(--ease),box-shadow var(--fast) var(--ease)}
+textarea{line-height:1.55}
+input::placeholder,textarea::placeholder{color:var(--faint)}
+input:not([type=checkbox]):not([type=radio]):hover,select:hover,textarea:hover{border-color:#33496F}
+input:not([type=checkbox]):not([type=radio]):focus,select:focus,textarea:focus{outline:none;border-color:var(--signal);box-shadow:0 0 0 3px var(--signal-soft)}
+input:disabled,select:disabled,textarea:disabled{opacity:.55}
+input[type=checkbox],input[type=radio]{accent-color:var(--signal);width:16px;height:16px}
+label{color:var(--text-2)}
+.modal label,.accessCard label{color:var(--text-2);font-size:13px;font-weight:550}
+.modal input,.modal textarea,.modal select{background:var(--raised)}
+
+/* панели и таблицы */
+.panel,.tablePanel,.metricCard,.campaignCard,.statPill,.roleSummary article,.crmKpis article,.proxySummary article,.accessCard,.accountCard{
+  background:var(--deep);border:1px solid var(--rule);border-radius:var(--r-panel);box-shadow:none;color:var(--text)}
+.tableTitle{border-bottom:1px solid var(--rule)}.tableTitle h2{font-size:16px}
+.filters{border-color:var(--rule)}
+table{border-collapse:separate;border-spacing:0}
+th{padding:11px 16px;background:transparent;color:var(--muted);font-size:12px;font-weight:550;letter-spacing:0;text-transform:none;border-bottom:1px solid var(--rule);white-space:nowrap}
+td{padding:13px 16px;border-top:1px solid var(--rule);font-size:14px;color:var(--text)}
+tbody tr:first-child td{border-top:0}
+tbody tr{transition:background var(--fast) var(--ease)}
+tbody tr:hover{background:rgba(23,37,63,.55)}
+tbody tr:has(input[type=checkbox]:checked){background:linear-gradient(90deg,var(--signal-soft),transparent 60%);box-shadow:inset 2px 0 0 var(--signal)}
+
+/* уведомления */
+.notice{margin:0 0 18px;padding:12px 14px;align-items:center;gap:12px;border:1px solid var(--rule-strong);border-left:2px solid var(--signal);border-radius:var(--r-control);background:var(--deep);color:var(--text-2);font-size:14px}
+.notice.error,.notice[role=alert]{border-left-color:var(--alert);color:var(--text)}
+.notice.success{border-left-color:var(--live)}
+.notice button{color:var(--muted);font-size:18px}
+.resultError{color:var(--alert)}
+
+/* окна: поднимаются из глубины */
+.modalBackdrop{background:rgba(3,7,15,.66);backdrop-filter:blur(6px);animation:fadeIn var(--base) var(--ease)}
+.modal{background:var(--deep);border:1px solid var(--rule-strong);border-radius:20px;box-shadow:0 40px 100px rgba(0,0,0,.55);color:var(--text);
+  animation:rise var(--base) var(--ease)}
+.modalHead h2{font-family:var(--font-display);font-weight:600;font-size:22px;letter-spacing:-.02em}
+.close{color:var(--muted);border-radius:8px}.close:hover{color:var(--text);background:var(--raised)}
+@keyframes rise{from{opacity:0;transform:translateY(8px) scale(.99)}to{opacity:1;transform:none}}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+
+/* чипы и статусы */
+.campaignTag,.protocolTag,.status,.liveStatus,.settingsBadge{border-radius:var(--r-chip);background:var(--raised);color:var(--text-2);font-size:12px;font-weight:550}
+.empty{border-color:var(--rule-strong);background:transparent}.empty>span{background:var(--raised);color:var(--signal)}
+.empty p,.empty h3{color:var(--text-2)}
+
+/* «сигнальная линия» — фирменный мотив: выбранное отмечено тонкой светящейся синей чертой слева */
+.signal{position:relative}
+.signal::before{content:"";position:absolute;left:0;top:10px;bottom:10px;width:2px;border-radius:2px;background:var(--signal);box-shadow:0 0 12px rgba(47,123,255,.8)}
+
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+/* старые мелкие подписи (8–11px) — к читаемому размеру; плотность сохраняем отступами, а не кеглем */
+.metricCard{min-height:0;padding:18px 20px}
+.metricTop>span,.tableTitle>span,.campaignMeta span,.recentRow small,.roleSummary span,.crmKpis span,.proxySummary span,
+.accountSummary small,.accessIdentity p,.permissionList span,.accountCredentials span{font-size:13px;color:var(--muted)}
+.metricCard>strong{margin-top:14px;font-size:34px}
+.filters select,.search{min-height:40px;background:var(--raised);border-color:var(--rule-strong);color:var(--text);font-size:14px}
+.filters{padding:14px 16px;gap:10px}
+.tableTitle{padding:16px 20px}
+.metricTop i,.liveDot{border-radius:var(--r-chip);background:var(--signal-soft);color:var(--signal-hover);font-size:12px;text-transform:none;letter-spacing:0}
+/* статусы-чипы по смыслу */
+.chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:var(--r-chip);background:var(--raised);color:var(--text-2);font-size:12px;font-weight:550;white-space:nowrap}
+.chip::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.9}
+.chip.live{background:var(--live-soft);color:var(--live)}.chip.caution{background:var(--caution-soft);color:var(--caution)}
+.chip.alert{background:var(--alert-soft);color:var(--alert)}.chip.signal{background:var(--signal-soft);color:var(--signal-hover)}
+
+/* меню кабинета клиента — тот же язык, что у меню агентства: без номеров и капса, выбранное — сигнальной линией */
+@media (min-width:961px){
+  .resultSidebar.resultSidebar{width:auto;padding:22px 14px 14px;background:linear-gradient(180deg,#0A1322 0%,#08101E 100%);border-right:1px solid var(--rule)}
+  .resultSidebar.resultSidebar nav{gap:2px;margin-top:18px}
+  .resultSidebar.resultSidebar nav>small{margin:16px 10px 4px;color:var(--faint);font-size:12px;font-weight:600;letter-spacing:0;text-transform:none}
+  .resultSidebar.resultSidebar nav>a,.resultSidebar.resultSidebar nav>.disabled{position:relative;min-height:38px;padding:6px 10px;border-radius:10px;color:var(--text-2);font-size:14px;font-weight:500}
+  .resultSidebar.resultSidebar nav>a:hover{background:rgba(23,37,63,.6);color:var(--text)}
+  .resultSidebar.resultSidebar nav>a.active{background:linear-gradient(90deg,rgba(47,123,255,.16),rgba(47,123,255,.04) 70%,transparent);box-shadow:none;color:#fff;font-weight:600}
+  .resultSidebar.resultSidebar nav>a.active::before{content:"";position:absolute;left:-1px;top:9px;bottom:9px;width:2px;border-radius:2px;background:var(--signal);box-shadow:0 0 12px rgba(47,123,255,.85)}
+  .resultSidebar.resultSidebar nav b{display:none}
+  .resultProject.resultProject{border-color:var(--rule);background:var(--raised);border-radius:14px}
+  .resultProject small{color:var(--faint);font-size:12px;letter-spacing:0;text-transform:none}
+  .resultProject strong{font-size:14px}.resultProject span{font-size:13px;color:var(--muted)}
+  .resultSidebarFoot{font-size:12px;color:var(--faint)}
+}

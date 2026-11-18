@@ -1,227 +1,227 @@
 /* CRM 2.0 — kanban, deal card, contacts, automation and sales analytics */
-.crmOkBar{display:flex;justify-content:space-between;gap:10px;margin:0 0 12px;padding:10px 12px;border-radius:8px;background:#e8f7ee;color:#17693d;font-size:12px}
+.crmOkBar{display:flex;justify-content:space-between;gap:10px;margin:0 0 12px;padding:10px 12px;border-radius:8px;background:var(--live-soft);color:var(--live);font-size:12px}
 .crmOkBar button,.resultError button{border:0;background:none;color:inherit;cursor:pointer;font-size:16px}
 .crmTabs b{margin-left:6px}
 .crmFiltersPro{flex-wrap:wrap}
 .crmFiltersPro select{max-width:190px}
 .crmTagInput{width:110px!important}
-.crmToggle,.crmGhost{min-height:36px;padding:0 12px;border:1px solid #dce5f2;border-radius:7px;background:#fff;color:#40556f;font-size:12px;cursor:pointer;white-space:nowrap}
-.crmToggle.on{border-color:#006bfd;background:#eaf2ff;color:#006bfd;font-weight:650}
+.crmToggle,.crmGhost{min-height:36px;padding:0 12px;border:1px solid var(--rule-strong);border-radius:7px;background:var(--deep);color:var(--text-2);font-size:12px;cursor:pointer;white-space:nowrap}
+.crmToggle.on{border-color:#006bfd;background:var(--signal-soft);color:var(--signal-hover);font-weight:650}
 .crmGhost:hover,.crmToggle:hover{border-color:#a9c9f7}
-.crmLinkButton{padding:0;border:0;background:none;color:#006bfd;font-size:11px;cursor:pointer}
+.crmLinkButton{padding:0;border:0;background:none;color:var(--signal-hover);font-size:11px;cursor:pointer}
 .crmLinkButton:disabled{opacity:.5}
-.crmDanger{color:#c43a4f!important}
+.crmDanger{color:var(--alert)!important}
 .crmCounters{grid-template-columns:repeat(5,minmax(0,1fr))}
-.crmCountSum{cursor:default;background:#f6faff}
+.crmCountSum{cursor:default;background:var(--deep)}
 .crmCountSum strong{font-size:18px!important}
 .crmColumn>header{gap:8px}
 .crmColumn>header div{display:flex;flex-direction:column;gap:3px;min-width:0}
-.crmColumn>header small{color:#6c829e;font-size:10px;font-weight:600}
+.crmColumn>header small{color:var(--muted);font-size:10px;font-weight:600}
 .crmCard{position:relative}
 .crmCard.idle{border-left:3px solid #f0a400}
 .crmCardTop{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
 .crmCardTop strong{white-space:nowrap}
 .crmCardTags{display:flex;gap:4px;flex-wrap:wrap}
-.crmCardTags i{padding:2px 6px;border-radius:9px;background:#f1edff;color:#6a45d8;font-size:9px;font-style:normal}
+.crmCardTags i{padding:2px 6px;border-radius:9px;background:var(--signal-soft);color:var(--signal-hover);font-size:9px;font-style:normal}
 .crmCardFoot{display:flex;justify-content:space-between;align-items:center;gap:6px}
-.crmCardAge{color:#8a9bb3;font-size:9px;white-space:nowrap}
-.crmEmpty{color:#8b9cb3;font-size:11px;text-align:center}
+.crmCardAge{color:var(--muted);font-size:9px;white-space:nowrap}
+.crmEmpty{color:var(--muted);font-size:11px;text-align:center}
 .crmBulk{position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:-4px -4px 10px;padding:10px;border-radius:8px;background:#0f2a4d;color:#fff;font-size:12px}
 .crmBulk select,.crmBulk input{min-height:32px;padding:0 8px;border:0;border-radius:6px;font-size:11px}
-.crmBulk button{min-height:32px;padding:0 10px;border:0;border-radius:6px;background:#fff;color:#0f2a4d;font-size:11px;cursor:pointer}
+.crmBulk button{min-height:32px;padding:0 10px;border:0;border-radius:6px;background:var(--deep);color:var(--text);font-size:11px;cursor:pointer}
 .crmBulk .crmLinkButton{background:none;color:#cfe2ff}
-.crmList table tr.selected td{background:#f0f6ff}
+.crmList table tr.selected td{background:var(--raised)}
 .crmList table tbody tr{cursor:pointer}
-.crmInlineTags{display:block;color:#6a45d8;font-size:10px}
-.crmBad{color:#cc3550!important}
-.crmGood{color:#148747}
-.crmSearch{min-height:36px;width:min(300px,100%);padding:8px 10px;border:1px solid #dce5f2;border-radius:7px}
-.crmMuted{color:#7b8ea8;font-size:11px}
+.crmInlineTags{display:block;color:var(--signal-hover);font-size:10px}
+.crmBad{color:var(--alert)!important}
+.crmGood{color:var(--live)}
+.crmSearch{min-height:36px;width:min(300px,100%);padding:8px 10px;border:1px solid var(--rule-strong);border-radius:7px}
+.crmMuted{color:var(--muted);font-size:11px}
 .crmPre{white-space:pre-wrap;overflow-wrap:anywhere}
-.crmTaskGroups .overdue h3{color:#cc3550}
-.crmTaskGroups .today h3{color:#148747}
+.crmTaskGroups .overdue h3{color:var(--alert)}
+.crmTaskGroups .today h3{color:var(--live)}
 .crmInboundPro{align-items:flex-start}
 .crmInboundPro>div:first-child{display:flex;flex-direction:column;gap:4px;min-width:0}
-.crmInboundPro p{margin:4px 0 0;color:#2c405c;font-size:12px}
+.crmInboundPro p{margin:4px 0 0;color:var(--text);font-size:12px}
 .crmInboundActions{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end;max-width:420px}
 .crmInboundActions .crmPrimary{min-height:32px;padding:0 12px;font-size:11px}
 .crmPipelines{display:grid;gap:6px;margin-bottom:22px}
-.crmPipelines>div{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid #e3eaf5;border-radius:9px}
-.crmPipelines>div.active{border-color:#8bbcff;background:#f5f9ff}
-.crmPipelines button{padding:5px 9px;border:1px solid #d6e3f5;border-radius:6px;background:#fff;color:#006bfd;font-size:10px;cursor:pointer}
-.crmPipelines .crmPipelineName{flex:1;border:0;background:none;padding:0;text-align:left;color:#14253e;font-size:13px;font-weight:700}
-.crmPipelineName small{margin-left:8px;padding:2px 6px;border-radius:6px;background:#e8f1ff;color:#006bfd;font-size:9px;font-weight:600}
-.crmPipelines span{color:#7b8ea8;font-size:11px}
+.crmPipelines>div{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--rule-strong);border-radius:9px}
+.crmPipelines>div.active{border-color:#8bbcff;background:var(--raised)}
+.crmPipelines button{padding:5px 9px;border:1px solid var(--signal);border-radius:6px;background:var(--deep);color:var(--signal-hover);font-size:10px;cursor:pointer}
+.crmPipelines .crmPipelineName{flex:1;border:0;background:none;padding:0;text-align:left;color:var(--text);font-size:13px;font-weight:700}
+.crmPipelineName small{margin-left:8px;padding:2px 6px;border-radius:6px;background:var(--signal-soft);color:var(--signal-hover);font-size:9px;font-weight:600}
+.crmPipelines span{color:var(--muted);font-size:11px}
 
 /* modals */
 .crmModal{width:min(560px,100%)}
-.crmModalLead{margin:0 0 10px;color:#61748f;font-size:12px;line-height:1.45}
+.crmModalLead{margin:0 0 10px;color:var(--muted);font-size:12px;line-height:1.45}
 .crmChips{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 10px}
-.crmChips button{padding:5px 9px;border:1px solid #d6e3f5;border-radius:14px;background:#f6f9fe;color:#33506f;font-size:11px;cursor:pointer}
-.crmChips button.active,.crmChips button:hover{border-color:#006bfd;background:#eaf2ff;color:#006bfd}
+.crmChips button{padding:5px 9px;border:1px solid var(--signal);border-radius:14px;background:var(--raised);color:var(--text-2);font-size:11px;cursor:pointer}
+.crmChips button.active,.crmChips button:hover{border-color:#006bfd;background:var(--signal-soft);color:var(--signal-hover)}
 .crmCheck{flex-direction:row!important;align-items:center;gap:8px}
-.crmCheck small{color:#8193ab}
-.crmNextTask{padding:10px 12px;border-radius:10px;background:#f6f9fe}
-.crmFormError{margin:8px 0;padding:8px 10px;border-radius:7px;background:#fff0f1;color:#b8344a;font-size:12px}
-.crmOk{margin:8px 0;padding:8px 10px;border-radius:7px;background:#e8f7ee;color:#17693d;font-size:12px}
+.crmCheck small{color:var(--muted)}
+.crmNextTask{padding:10px 12px;border-radius:10px;background:var(--raised)}
+.crmFormError{margin:8px 0;padding:8px 10px;border-radius:7px;background:var(--alert-soft);color:var(--alert);font-size:12px}
+.crmOk{margin:8px 0;padding:8px 10px;border-radius:7px;background:var(--live-soft);color:var(--live);font-size:12px}
 .crmFormActions{display:flex;gap:8px;justify-content:flex-end}
 .crmFormActions .resultPrimary{width:auto;padding:0 18px;margin:0}
 .crmPicker{position:relative}
-.crmPickerList{position:absolute;z-index:3;left:0;right:0;display:flex;flex-direction:column;max-height:220px;overflow:auto;border:1px solid #d6e3f5;border-radius:8px;background:#fff;box-shadow:0 10px 25px #12305a22}
+.crmPickerList{position:absolute;z-index:3;left:0;right:0;display:flex;flex-direction:column;max-height:220px;overflow:auto;border:1px solid var(--signal);border-radius:8px;background:var(--deep);box-shadow:0 10px 25px #12305a22}
 .crmPickerList.static{position:static;box-shadow:none;margin-top:8px}
-.crmPickerList button{display:flex;flex-direction:column;align-items:flex-start;gap:2px;padding:9px 11px;border:0;border-bottom:1px solid #eef2f8;background:#fff;color:#14253e;font-size:12px;text-align:left;cursor:pointer}
-.crmPickerList button:hover{background:#f2f7ff}
-.crmPickerList small{color:#7b8ea8;font-size:10px}
-.crmFieldset{margin:0 0 12px;padding:10px 12px;border:1px solid #e3eaf5;border-radius:10px}
-.crmFieldset legend{padding:0 6px;color:#40556f;font-size:12px;font-weight:700}
+.crmPickerList button{display:flex;flex-direction:column;align-items:flex-start;gap:2px;padding:9px 11px;border:0;border-bottom:1px solid var(--rule);background:var(--deep);color:var(--text);font-size:12px;text-align:left;cursor:pointer}
+.crmPickerList button:hover{background:var(--raised)}
+.crmPickerList small{color:var(--muted);font-size:10px}
+.crmFieldset{margin:0 0 12px;padding:10px 12px;border:1px solid var(--rule-strong);border-radius:10px}
+.crmFieldset legend{padding:0 6px;color:var(--text-2);font-size:12px;font-weight:700}
 .crmFieldset>select{width:100%;min-height:36px;margin-bottom:8px}
 .crmChecks{display:grid;grid-template-columns:1fr 1fr;gap:6px}
 .crmChecks label{flex-direction:row!important;align-items:center;gap:6px}
 
 /* deal card */
 .crmCardBackdrop{position:fixed;inset:0;z-index:49;background:#0f1d3266}
-.crmCardPanel{position:fixed;z-index:50;top:0;right:0;bottom:0;width:min(1060px,100vw);display:flex;flex-direction:column;background:#f6f9fd;box-shadow:-20px 0 60px #10284a33;color:#14243b;animation:crmSlide .18s ease-out}
+.crmCardPanel{position:fixed;z-index:50;top:0;right:0;bottom:0;width:min(1060px,100vw);display:flex;flex-direction:column;background:var(--raised);box-shadow:-20px 0 60px #10284a33;color:var(--text);animation:crmSlide .18s ease-out}
 @keyframes crmSlide{from{transform:translateX(30px);opacity:.6}to{transform:none;opacity:1}}
-.crmCardLoading{margin:auto;color:#6f839e}
-.crmCardHeader{display:flex;justify-content:space-between;gap:16px;padding:18px 22px 10px;background:#fff}
+.crmCardLoading{margin:auto;color:var(--muted)}
+.crmCardHeader{display:flex;justify-content:space-between;gap:16px;padding:18px 22px 10px;background:var(--deep)}
 .crmCardTitle{min-width:0;flex:1}
-.crmCardTitle small{color:#7b8ea8;font-size:11px}
+.crmCardTitle small{color:var(--muted);font-size:11px}
 .crmCardTitle h2{margin:4px 0;font-size:22px}
-.crmTitleInput{width:100%;margin:4px 0;padding:2px 4px;border:1px solid transparent;border-radius:6px;background:transparent;color:#0f2140;font-size:22px;font-weight:750}
-.crmTitleInput:hover,.crmTitleInput:focus{border-color:#cfe0f6;background:#fff;outline:none}
-.crmCardMeta{display:flex;flex-wrap:wrap;gap:8px;align-items:center;color:#61748f;font-size:11px}
-.crmCardMeta strong{color:#0f2140;font-size:17px}
-.crmIdle{padding:3px 7px;border-radius:6px;background:#fff3dd;color:#a26200}
-.crmArchived{padding:3px 7px;border-radius:6px;background:#eceff4;color:#5d6d82}
-.crmClose{width:36px;height:36px;border:0;border-radius:8px;background:#f0f4fa;color:#40556f;font-size:22px;cursor:pointer}
-.crmRibbon{display:flex;gap:3px;padding:0 22px 12px;background:#fff;overflow-x:auto}
-.crmRibbon button{--stage:#006bfd;flex:1;min-width:110px;position:relative;padding:9px 12px;border:0;background:#edf1f7;color:#5a6e89;font-size:11px;font-weight:600;cursor:pointer;clip-path:polygon(0 0,calc(100% - 10px) 0,100% 50%,calc(100% - 10px) 100%,0 100%,10px 50%)}
+.crmTitleInput{width:100%;margin:4px 0;padding:2px 4px;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--text);font-size:22px;font-weight:750}
+.crmTitleInput:hover,.crmTitleInput:focus{border-color:var(--signal);background:var(--deep);outline:none}
+.crmCardMeta{display:flex;flex-wrap:wrap;gap:8px;align-items:center;color:var(--muted);font-size:11px}
+.crmCardMeta strong{color:var(--text);font-size:17px}
+.crmIdle{padding:3px 7px;border-radius:6px;background:var(--raised);color:var(--caution)}
+.crmArchived{padding:3px 7px;border-radius:6px;background:var(--raised);color:var(--muted)}
+.crmClose{width:36px;height:36px;border:0;border-radius:8px;background:var(--raised);color:var(--text-2);font-size:22px;cursor:pointer}
+.crmRibbon{display:flex;gap:3px;padding:0 22px 12px;background:var(--deep);overflow-x:auto}
+.crmRibbon button{--stage:#006bfd;flex:1;min-width:110px;position:relative;padding:9px 12px;border:0;background:var(--signal-soft);color:var(--muted);font-size:11px;font-weight:600;cursor:pointer;clip-path:polygon(0 0,calc(100% - 10px) 0,100% 50%,calc(100% - 10px) 100%,0 100%,10px 50%)}
 .crmRibbon button:first-child{clip-path:polygon(0 0,calc(100% - 10px) 0,100% 50%,calc(100% - 10px) 100%,0 100%);border-radius:6px 0 0 6px}
-.crmRibbon button.passed{background:color-mix(in srgb,var(--stage) 22%,#fff);color:#1d3557}
+.crmRibbon button.passed{background:color-mix(in srgb,var(--stage) 22%,var(--deep));color:var(--text)}
 .crmRibbon button.current{background:var(--stage);color:#fff}
-.crmRibbon button.lost{flex:0 0 auto;min-width:90px;clip-path:none;border-radius:6px;margin-left:8px;background:#fff0f1;color:#c43a4f}
+.crmRibbon button.lost{flex:0 0 auto;min-width:90px;clip-path:none;border-radius:6px;margin-left:8px;background:var(--alert-soft);color:var(--alert)}
 .crmRibbon button.lost.current{background:#e5485f;color:#fff}
 .crmRibbon button:disabled{cursor:default}
 .crmRibbon button:not(:disabled):hover{filter:brightness(.96)}
-.crmQuick{display:flex;flex-wrap:wrap;gap:6px;padding:10px 22px;border-top:1px solid #edf1f7;border-bottom:1px solid #e3e9f2;background:#fff}
-.crmQuick a,.crmQuick button{display:inline-flex;align-items:center;min-height:32px;padding:0 12px;border:1px solid #d6e3f5;border-radius:8px;background:#fff;color:#1d3b63;font-size:12px;font-weight:600;text-decoration:none;cursor:pointer}
-.crmQuick a:hover,.crmQuick button:hover{border-color:#006bfd;color:#006bfd}
+.crmQuick{display:flex;flex-wrap:wrap;gap:6px;padding:10px 22px;border-top:1px solid var(--rule);border-bottom:1px solid var(--rule-strong);background:var(--deep)}
+.crmQuick a,.crmQuick button{display:inline-flex;align-items:center;min-height:32px;padding:0 12px;border:1px solid var(--signal);border-radius:8px;background:var(--deep);color:var(--text);font-size:12px;font-weight:600;text-decoration:none;cursor:pointer}
+.crmQuick a:hover,.crmQuick button:hover{border-color:#006bfd;color:var(--signal-hover)}
 .crmCardError,.crmCardNotice{margin:10px 22px 0;padding:8px 12px;border-radius:8px;font-size:12px}
-.crmCardError{background:#fff0f1;color:#b8344a}
+.crmCardError{background:var(--alert-soft);color:var(--alert)}
 .crmCardError button{border:0;background:none;color:inherit;cursor:pointer}
-.crmCardNotice{background:#e8f7ee;color:#17693d}
+.crmCardNotice{background:var(--live-soft);color:var(--live)}
 .crmCardBody{flex:1;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.15fr);gap:14px;padding:14px 22px 22px;overflow:auto}
 .crmCardMain,.crmCardFeed{display:flex;flex-direction:column;gap:12px;min-width:0}
-.crmBlock{padding:14px 16px;border:1px solid #e3e9f2;border-radius:12px;background:#fff}
-.crmBlock h3{margin:0 0 10px;color:#3c516d;font-size:11px;font-weight:750;text-transform:uppercase;letter-spacing:.4px}
+.crmBlock{padding:14px 16px;border:1px solid var(--rule-strong);border-radius:12px;background:var(--deep)}
+.crmBlock h3{margin:0 0 10px;color:var(--text-2);font-size:11px;font-weight:750;text-transform:uppercase;letter-spacing:.4px}
 .crmBlockHead{display:flex;justify-content:space-between;align-items:baseline}
 .crmBlock p{margin:4px 0;font-size:12px}
-.crmBlock a{color:#006bfd}
-.crmContactName{padding:0;border:0;background:none;color:#0f2140;font-size:16px;font-weight:750;cursor:pointer;text-align:left}
-.crmContactName:hover{color:#006bfd}
+.crmBlock a{color:var(--signal-hover)}
+.crmContactName{padding:0;border:0;background:none;color:var(--text);font-size:16px;font-weight:750;cursor:pointer;text-align:left}
+.crmContactName:hover{color:var(--signal-hover)}
 .crmFieldGrid{display:grid;grid-template-columns:1fr 1fr;gap:9px 10px}
-.crmFieldGrid label{display:flex;flex-direction:column;gap:4px;color:#6c7f99;font-size:10px}
-.crmFieldGrid input,.crmFieldGrid select{min-height:34px;padding:6px 8px;border:1px solid #dce5f2;border-radius:7px;background:#fff;color:#14253e;font-size:12px}
-.crmFieldGrid input:disabled,.crmFieldGrid select:disabled{background:#f6f8fb}
+.crmFieldGrid label{display:flex;flex-direction:column;gap:4px;color:var(--muted);font-size:10px}
+.crmFieldGrid input,.crmFieldGrid select{min-height:34px;padding:6px 8px;border:1px solid var(--rule-strong);border-radius:7px;background:var(--deep);color:var(--text);font-size:12px}
+.crmFieldGrid input:disabled,.crmFieldGrid select:disabled{background:var(--raised)}
 .crmTags{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:12px}
-.crmTags span{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:12px;background:#f1edff;color:#6a45d8;font-size:11px}
-.crmTags span button{padding:0;border:0;background:none;color:#8b74d9;cursor:pointer}
+.crmTags span{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:12px;background:var(--signal-soft);color:var(--signal-hover);font-size:11px}
+.crmTags span button{padding:0;border:0;background:none;color:var(--signal-hover);cursor:pointer}
 .crmTags input{width:90px;min-height:26px;padding:0 8px;border:1px dashed #c9bdf5;border-radius:12px;font-size:11px}
-.crmLostNote{margin-top:10px!important;padding:8px 10px;border-radius:8px;background:#fff0f1;color:#a83246}
+.crmLostNote{margin-top:10px!important;padding:8px 10px;border-radius:8px;background:var(--alert-soft);color:var(--alert)}
 .crmKV{display:grid;grid-template-columns:120px minmax(0,1fr);gap:8px}
-.crmKV>span:first-child{color:#7b8ea8}
-.crmWarnLine{margin:0 0 10px;padding:8px 10px;border-radius:8px;background:#fff6e5;color:#9a5d00;font-size:12px}
-.crmTaskItem{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:9px 10px;border:1px solid #e6edf6;border-radius:9px;margin-bottom:6px}
-.crmTaskItem.overdue{border-color:#f5c2cb;background:#fff7f8}
+.crmKV>span:first-child{color:var(--muted)}
+.crmWarnLine{margin:0 0 10px;padding:8px 10px;border-radius:8px;background:var(--raised);color:var(--caution);font-size:12px}
+.crmTaskItem{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:9px 10px;border:1px solid var(--rule-strong);border-radius:9px;margin-bottom:6px}
+.crmTaskItem.overdue{border-color:var(--rule-strong);background:var(--raised)}
 .crmTaskItem div{display:flex;flex-direction:column;gap:3px;min-width:0}
 .crmTaskItem b{font-size:12px}
-.crmTaskItem small{color:#7b8ea8;font-size:10px}
-.crmTaskItem button{flex:none;padding:6px 10px;border:1px solid #bcd6fb;border-radius:7px;background:#f3f8ff;color:#006bfd;font-size:11px;cursor:pointer}
+.crmTaskItem small{color:var(--muted);font-size:10px}
+.crmTaskItem button{flex:none;padding:6px 10px;border:1px solid var(--signal);border-radius:7px;background:var(--raised);color:var(--signal-hover);font-size:11px;cursor:pointer}
 .crmComposer{margin-bottom:12px}
 .crmComposerTabs{display:flex;gap:4px;margin-bottom:6px}
-.crmComposerTabs button{padding:5px 10px;border:0;border-radius:6px;background:#f0f4fa;color:#50647f;font-size:11px;cursor:pointer}
+.crmComposerTabs button{padding:5px 10px;border:0;border-radius:6px;background:var(--raised);color:var(--muted);font-size:11px;cursor:pointer}
 .crmComposerTabs button.active{background:#006bfd;color:#fff}
-.crmComposer textarea{width:100%;min-height:64px;padding:9px;border:1px solid #dce5f2;border-radius:8px;font:inherit;font-size:12px;resize:vertical}
+.crmComposer textarea{width:100%;min-height:64px;padding:9px;border:1px solid var(--rule-strong);border-radius:8px;font:inherit;font-size:12px;resize:vertical}
 .crmComposer .crmPrimary{margin-top:6px;min-height:32px;font-size:12px}
 .crmTimeline{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
-.crmTimeline li{display:grid;grid-template-columns:26px minmax(0,1fr);gap:8px;padding:8px 0;border-top:1px solid #f0f3f8}
-.crmTimeline i{width:24px;height:24px;display:grid;place-items:center;border-radius:50%;background:#eef3fa;font-size:11px;font-style:normal}
-.crmTimeline p{margin:0 0 2px!important;color:#1f3350}
-.crmTimeline small{color:#8b9cb3;font-size:10px}
-.crmTimeline li.comment p{padding:8px 10px;border-radius:0 10px 10px 10px;background:#fff8e1}
-.crmTimeline li.touch i{background:#e5f6ff}
-.crmTimeline li.auto i{background:#fff3dd}
-.crmTimeline li.won i{background:#e3f7ea}
-.crmTimeline li.lost i{background:#ffecef}
+.crmTimeline li{display:grid;grid-template-columns:26px minmax(0,1fr);gap:8px;padding:8px 0;border-top:1px solid var(--rule)}
+.crmTimeline i{width:24px;height:24px;display:grid;place-items:center;border-radius:50%;background:var(--signal-soft);font-size:11px;font-style:normal}
+.crmTimeline p{margin:0 0 2px!important;color:var(--text)}
+.crmTimeline small{color:var(--muted);font-size:10px}
+.crmTimeline li.comment p{padding:8px 10px;border-radius:0 10px 10px 10px;background:var(--raised)}
+.crmTimeline li.touch i{background:var(--signal-soft)}
+.crmTimeline li.auto i{background:var(--raised)}
+.crmTimeline li.won i{background:var(--live-soft)}
+.crmTimeline li.lost i{background:var(--alert-soft)}
 .crmTimeline li.stage p{font-weight:650}
 
 /* contact card */
 .crmContactModal{width:min(680px,100%)}
 .crmContactStats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
-.crmContactStats div{padding:10px;border-radius:9px;background:#f4f8fd}
-.crmContactStats span{display:block;color:#7b8ea8;font-size:10px}
+.crmContactStats div{padding:10px;border-radius:9px;background:var(--raised)}
+.crmContactStats span{display:block;color:var(--muted);font-size:10px}
 .crmContactStats b{font-size:16px}
-.crmDupes{display:flex;flex-direction:column;gap:5px;margin-bottom:12px;padding:10px;border-radius:9px;background:#fff6e5;color:#7d4c00;font-size:12px}
+.crmDupes{display:flex;flex-direction:column;gap:5px;margin-bottom:12px;padding:10px;border-radius:9px;background:var(--raised);color:var(--caution);font-size:12px}
 .crmDupes span{display:flex;justify-content:space-between;gap:8px;align-items:center}
-.crmDupes button{padding:4px 9px;border:1px solid #e6b866;border-radius:6px;background:#fff;color:#8a5600;font-size:11px;cursor:pointer}
+.crmDupes button{padding:4px 9px;border:1px solid #e6b866;border-radius:6px;background:var(--deep);color:var(--caution);font-size:11px;cursor:pointer}
 .crmContactInfo p{margin:3px 0;font-size:13px}
 .crmContactInfo .crmQuick{padding:10px 0;border:0}
-.crmNotes{padding:9px 11px;border-radius:9px;background:#fffbea;font-size:12px}
-.crmSub{margin:16px 0 8px;color:#3c516d;font-size:12px;text-transform:uppercase;letter-spacing:.4px}
+.crmNotes{padding:9px 11px;border-radius:9px;background:var(--deep);font-size:12px}
+.crmSub{margin:16px 0 8px;color:var(--text-2);font-size:12px;text-transform:uppercase;letter-spacing:.4px}
 .crmContactDeals{display:flex;flex-direction:column;gap:6px}
-.crmContactDeals button{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 12px;border:1px solid #e3eaf5;border-radius:9px;background:#fff;text-align:left;cursor:pointer}
+.crmContactDeals button{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--rule-strong);border-radius:9px;background:var(--deep);text-align:left;cursor:pointer}
 .crmContactDeals button:hover{border-color:#8bbcff}
 .crmContactDeals span{display:flex;flex-direction:column;gap:2px}
-.crmContactDeals small{color:#7b8ea8;font-size:10px}
+.crmContactDeals small{color:var(--muted);font-size:10px}
 .crmContactForm label{display:flex;flex-direction:column;gap:4px}
 
 /* automation */
 .crmHeadActions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.crmHeadActions select{min-height:36px;padding:0 8px;border:1px solid #dce5f2;border-radius:7px}
+.crmHeadActions select{min-height:36px;padding:0 8px;border:1px solid var(--rule-strong);border-radius:7px}
 .crmAutoStages{display:flex;gap:10px;overflow-x:auto;padding:4px 0 12px}
-.crmAutoColumn{--stage:#006bfd;min-width:250px;width:250px;padding:8px;border-radius:10px;background:#f3f7fc}
-.crmAutoColumn>header{padding:8px 6px 10px;border-top:3px solid var(--stage);color:#14253e;font-size:12px;font-weight:700}
-.crmAutoColumn article{display:flex;flex-direction:column;gap:4px;margin-bottom:8px;padding:10px;border:1px solid #e1e9f4;border-radius:9px;background:#fff}
+.crmAutoColumn{--stage:#006bfd;min-width:250px;width:250px;padding:8px;border-radius:10px;background:var(--raised)}
+.crmAutoColumn>header{padding:8px 6px 10px;border-top:3px solid var(--stage);color:var(--text);font-size:12px;font-weight:700}
+.crmAutoColumn article{display:flex;flex-direction:column;gap:4px;margin-bottom:8px;padding:10px;border:1px solid var(--rule-strong);border-radius:9px;background:var(--deep)}
 .crmAutoColumn article.off{opacity:.55}
-.crmAutoColumn article small{color:#7b8ea8;font-size:10px}
+.crmAutoColumn article small{color:var(--muted);font-size:10px}
 .crmAutoColumn article b{font-size:12px}
-.crmAutoColumn article span{color:#5b3fc4;font-size:11px}
+.crmAutoColumn article span{color:var(--signal-hover);font-size:11px}
 .crmAutoColumn article em{color:#97a7bc;font-size:10px;font-style:normal}
 .crmAutoColumn article div{display:flex;gap:4px;flex-wrap:wrap;margin-top:4px}
-.crmAutoColumn article div button{padding:3px 7px;border:1px solid #dbe6f5;border-radius:5px;background:#fff;color:#006bfd;font-size:10px;cursor:pointer}
-.crmAutoHint{margin-top:6px;padding:12px 14px;border-radius:10px;background:#f4f0ff;color:#4a3596;font-size:12px;line-height:1.5}
+.crmAutoColumn article div button{padding:3px 7px;border:1px solid var(--signal);border-radius:5px;background:var(--deep);color:var(--signal-hover);font-size:10px;cursor:pointer}
+.crmAutoHint{margin-top:6px;padding:12px 14px;border-radius:10px;background:var(--signal-soft);color:var(--signal-hover);font-size:12px;line-height:1.5}
 
 /* sales report */
 .crmReport{display:flex;flex-direction:column;gap:12px}
 .crmReportHead{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap}
 .crmReportHead h2{margin:0;font-size:20px}
-.crmReportHead p{margin:4px 0 0;color:#778aa4;font-size:12px}
+.crmReportHead p{margin:4px 0 0;color:var(--muted);font-size:12px}
 .crmReportFilters{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap}
-.crmReportFilters label{display:flex;flex-direction:column;gap:3px;color:#72829a;font-size:10px}
-.crmReportFilters input,.crmReportFilters select{min-height:34px;padding:0 8px;border:1px solid #dce5f2;border-radius:7px}
+.crmReportFilters label{display:flex;flex-direction:column;gap:3px;color:var(--muted);font-size:10px}
+.crmReportFilters input,.crmReportFilters select{min-height:34px;padding:0 8px;border:1px solid var(--rule-strong);border-radius:7px}
 .crmKpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
-.crmKpi{display:flex;flex-direction:column;gap:4px;padding:14px;border:1px solid #e3e9f2;border-radius:12px;background:#fff}
-.crmKpi span{color:#6f829d;font-size:11px}
-.crmKpi strong{color:#0f2140;font-size:22px;letter-spacing:-.5px}
-.crmKpi small{color:#8b9cb3;font-size:10px}
-.crmKpi.good strong{color:#138048}
-.crmKpi.warn strong{color:#b06d00}
-.crmKpi.bad strong{color:#c8344b}
+.crmKpi{display:flex;flex-direction:column;gap:4px;padding:14px;border:1px solid var(--rule-strong);border-radius:12px;background:var(--deep)}
+.crmKpi span{color:var(--muted);font-size:11px}
+.crmKpi strong{color:var(--text);font-size:22px;letter-spacing:-.5px}
+.crmKpi small{color:var(--muted);font-size:10px}
+.crmKpi.good strong{color:var(--live)}
+.crmKpi.warn strong{color:var(--caution)}
+.crmKpi.bad strong{color:var(--alert)}
 .crmReportGrid{display:grid;grid-template-columns:1.3fr 1fr;gap:12px}
-.crmReportCard{padding:16px;border:1px solid #e3e9f2;border-radius:12px;background:#fff}
+.crmReportCard{padding:16px;border:1px solid var(--rule-strong);border-radius:12px;background:var(--deep)}
 .crmReportCard h3{margin:0 0 12px;font-size:14px}
 .crmFunnelRow{display:grid;grid-template-columns:140px minmax(0,1fr) 54px 92px;gap:10px;align-items:center;margin-bottom:8px;font-size:12px}
-.crmFunnelRow>div{height:22px;border-radius:6px;background:#f0f4fa;overflow:hidden}
+.crmFunnelRow>div{height:22px;border-radius:6px;background:var(--raised);overflow:hidden}
 .crmFunnelRow i{display:block;height:100%;min-width:3px;border-radius:6px;background:#006bfd}
 .crmFunnelRow.lost i{background:#ef6b7e}
 .crmFunnelRow b{text-align:right}
-.crmFunnelRow small{color:#7b8ea8;font-size:10px}
+.crmFunnelRow small{color:var(--muted);font-size:10px}
 .crmTableScroll{overflow:auto}
 .crmTableScroll table{width:100%;border-collapse:collapse;font-size:12px}
-.crmTableScroll th{padding:8px;background:#f4f7fc;color:#667891;font-size:10px;font-weight:600;text-align:right;white-space:nowrap}
-.crmTableScroll td{padding:9px 8px;border-bottom:1px solid #edf2f8;text-align:right;white-space:nowrap}
+.crmTableScroll th{padding:8px;background:var(--raised);color:var(--muted);font-size:10px;font-weight:600;text-align:right;white-space:nowrap}
+.crmTableScroll td{padding:9px 8px;border-bottom:1px solid var(--rule);text-align:right;white-space:nowrap}
 .crmTableScroll th:first-child,.crmTableScroll td:first-child{text-align:left}
-.crmTableScroll td.bad{color:#c8344b;font-weight:650}
+.crmTableScroll td.bad{color:var(--alert);font-weight:650}
 
 @media(max-width:1100px){.crmCardBody{grid-template-columns:1fr}.crmKpis{grid-template-columns:repeat(2,minmax(0,1fr))}.crmReportGrid{grid-template-columns:1fr}.crmCounters{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:700px){.crmFieldGrid{grid-template-columns:1fr}.crmKpis{grid-template-columns:1fr 1fr}.crmFunnelRow{grid-template-columns:90px minmax(0,1fr) 40px}.crmFunnelRow small{display:none}.crmCardHeader,.crmRibbon,.crmQuick,.crmCardBody{padding-left:14px;padding-right:14px}.crmContactStats{grid-template-columns:1fr}}
@@ -231,227 +231,227 @@
 .crmFiltersPro select,.crmFiltersPro input{font-size:12px}
 
 /* inbox */
-.chatInbox{display:grid;grid-template-columns:360px minmax(0,1fr);height:calc(100vh - 290px);min-height:520px;border:1px solid #e3e9f2;border-radius:14px;background:#fff;overflow:hidden}
-.chatList{display:flex;flex-direction:column;min-height:0;border-right:1px solid #e8eef6;background:#fbfcfe}
+.chatInbox{display:grid;grid-template-columns:360px minmax(0,1fr);height:calc(100vh - 290px);min-height:520px;border:1px solid var(--rule-strong);border-radius:14px;background:var(--deep);overflow:hidden}
+.chatList{display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--rule-strong);background:var(--deep)}
 .chatListHead{display:flex;gap:6px;padding:10px}
-.chatListHead input{flex:1;min-width:0;min-height:34px;padding:0 10px;border:1px solid #dce5f2;border-radius:8px;font-size:12px}
+.chatListHead input{flex:1;min-width:0;min-height:34px;padding:0 10px;border:1px solid var(--rule-strong);border-radius:8px;font-size:12px}
 .chatFilters{display:flex;flex-wrap:wrap;gap:4px;padding:0 10px 8px}
-.chatFilters button{padding:4px 9px;border:0;border-radius:12px;background:#eef3fa;color:#50647f;font-size:11px;cursor:pointer}
+.chatFilters button{padding:4px 9px;border:0;border-radius:12px;background:var(--signal-soft);color:var(--muted);font-size:11px;cursor:pointer}
 .chatFilters button.active{background:#006bfd;color:#fff}
-.chatFilters b{margin-left:5px;padding:0 5px;border-radius:8px;background:#ffeff1;color:#cc3550;font-size:10px}
-.chatFilters button.active b{background:#fff;color:#006bfd}
+.chatFilters b{margin-left:5px;padding:0 5px;border-radius:8px;background:var(--alert-soft);color:var(--alert);font-size:10px}
+.chatFilters button.active b{background:var(--deep);color:var(--signal-hover)}
 .chatItems{flex:1;overflow:auto}
-.chatItem{width:100%;display:grid;grid-template-columns:34px minmax(0,1fr) auto;gap:9px;align-items:start;padding:11px 12px;border:0;border-bottom:1px solid #eef2f8;background:transparent;text-align:left;cursor:pointer}
-.chatItem:hover{background:#f3f8ff}.chatItem.active{background:#e8f1ff}
-.chatItem.unread b{color:#0f2140}
+.chatItem{width:100%;display:grid;grid-template-columns:34px minmax(0,1fr) auto;gap:9px;align-items:start;padding:11px 12px;border:0;border-bottom:1px solid var(--rule);background:transparent;text-align:left;cursor:pointer}
+.chatItem:hover{background:var(--raised)}.chatItem.active{background:var(--signal-soft)}
+.chatItem.unread b{color:var(--text)}
 .chatBadge{width:34px;height:34px;display:grid;place-items:center;border-radius:50%;background:#7a8ca5;color:#fff;font-size:10px;font-weight:800}
 .chatBadge.avito{background:#00a9f4}.chatBadge.telegram{background:#2aabee}.chatBadge.whatsapp{background:#25d366}.chatBadge.max{background:linear-gradient(135deg,#3d6bff,#9b4dff)}
 .chatItemBody{display:flex;flex-direction:column;gap:3px;min-width:0}
 .chatItemTop{display:flex;justify-content:space-between;gap:6px}
-.chatItemTop b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#2a3f5c;font-size:12px}
-.chatItemTop time{flex:none;color:#8b9cb3;font-size:10px}
-.chatPreview{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#6c7f99;font-size:11px}
+.chatItemTop b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text);font-size:12px}
+.chatItemTop time{flex:none;color:var(--muted);font-size:10px}
+.chatPreview{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:11px}
 .chatItemMeta{display:flex;flex-wrap:wrap;gap:4px}
-.chatItemMeta i{padding:1px 6px;border-radius:8px;background:#eef3fa;color:#5d7190;font-size:9px;font-style:normal}
-.chatItemMeta i.new{background:#e8f1ff;color:#006bfd}.chatItemMeta i.wait{background:#fff6e5;color:#9a5d00}.chatItemMeta i.late{background:#ffecef;color:#c8344b;font-weight:700}
+.chatItemMeta i{padding:1px 6px;border-radius:8px;background:var(--signal-soft);color:var(--muted);font-size:9px;font-style:normal}
+.chatItemMeta i.new{background:var(--signal-soft);color:var(--signal-hover)}.chatItemMeta i.wait{background:var(--raised);color:var(--caution)}.chatItemMeta i.late{background:var(--alert-soft);color:var(--alert);font-weight:700}
 .chatUnread{min-width:20px;height:20px;padding:0 6px;display:grid;place-items:center;border-radius:10px;background:#006bfd;color:#fff;font-size:10px}
-.chatEmptyList{padding:30px 18px;text-align:center;color:#7b8ea8;font-size:12px}
+.chatEmptyList{padding:30px 18px;text-align:center;color:var(--muted);font-size:12px}
 .chatPane{display:flex;flex-direction:column;min-width:0;min-height:0}
-.chatPaneHead{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid #e8eef6}
-.chatPaneHead h3{margin:0;font-size:15px}.chatPaneHead small{color:#7b8ea8;font-size:11px}
+.chatPaneHead{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--rule-strong)}
+.chatPaneHead h3{margin:0;font-size:15px}.chatPaneHead small{color:var(--muted);font-size:11px}
 .chatPaneActions{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end}
-.chatPaneActions select{min-height:34px;padding:0 8px;border:1px solid #dce5f2;border-radius:7px;font-size:12px}
-.chatPlaceholder{margin:auto;max-width:360px;text-align:center;color:#6c7f99;font-size:12px}
-.chatPlaceholder b{color:#14253e;font-size:15px}
+.chatPaneActions select{min-height:34px;padding:0 8px;border:1px solid var(--rule-strong);border-radius:7px;font-size:12px}
+.chatPlaceholder{margin:auto;max-width:360px;text-align:center;color:var(--muted);font-size:12px}
+.chatPlaceholder b{color:var(--text);font-size:15px}
 .chatThread{flex:1;display:flex;flex-direction:column;min-height:0}
 .chatThread.compact{max-height:460px}
-.chatMessages{flex:1;overflow:auto;padding:14px 16px;background:#f5f8fc}
+.chatMessages{flex:1;overflow:auto;padding:14px 16px;background:var(--raised)}
 .chatThread.compact .chatMessages{max-height:330px;border-radius:10px}
-.chatDay{margin:8px auto;width:max-content;padding:2px 10px;border-radius:10px;background:#e7edf6;color:#62758f;font-size:10px}
-.chatBubble{max-width:72%;margin:4px 0;padding:8px 11px;border-radius:12px 12px 12px 3px;background:#fff;box-shadow:0 1px 2px #0f2a4d14;color:#14253e}
+.chatDay{margin:8px auto;width:max-content;padding:2px 10px;border-radius:10px;background:var(--signal-soft);color:var(--muted);font-size:10px}
+.chatBubble{max-width:72%;margin:4px 0;padding:8px 11px;border-radius:12px 12px 12px 3px;background:var(--deep);box-shadow:0 1px 2px #0f2a4d14;color:var(--text)}
 .chatBubble.out{margin-left:auto;border-radius:12px 12px 3px 12px;background:#dcebff}
-.chatBubble.failed{background:#ffecef}
+.chatBubble.failed{background:var(--alert-soft)}
 .chatBubble p{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;line-height:1.4}
-.chatBubble time{display:block;margin-top:3px;color:#8193ab;font-size:9px;text-align:right}
-.chatAuthor{display:block;margin-bottom:2px;color:#4f6fa3;font-size:10px;font-weight:600}
-.chatError{display:block;color:#c8344b;font-size:10px}
-.chatComposer{position:relative;padding:10px 12px;border-top:1px solid #e8eef6;background:#fff}
-.chatComposer textarea{width:100%;min-height:64px;max-height:200px;padding:9px 10px;border:1px solid #dce5f2;border-radius:9px;font:inherit;font-size:13px;resize:vertical}
+.chatBubble time{display:block;margin-top:3px;color:var(--muted);font-size:9px;text-align:right}
+.chatAuthor{display:block;margin-bottom:2px;color:var(--muted);font-size:10px;font-weight:600}
+.chatError{display:block;color:var(--alert);font-size:10px}
+.chatComposer{position:relative;padding:10px 12px;border-top:1px solid var(--rule-strong);background:var(--deep)}
+.chatComposer textarea{width:100%;min-height:64px;max-height:200px;padding:9px 10px;border:1px solid var(--rule-strong);border-radius:9px;font:inherit;font-size:13px;resize:vertical}
 .chatComposerBar{display:flex;align-items:center;gap:10px;margin-top:6px}
 .chatComposerBar .crmPrimary{margin-left:auto;min-height:34px;padding:0 16px;font-size:12px}
-.chatTemplates{position:absolute;left:12px;right:12px;bottom:calc(100% - 4px);z-index:3;max-height:240px;overflow:auto;padding:6px;border:1px solid #d6e3f5;border-radius:10px;background:#fff;box-shadow:0 10px 30px #12305a26}
+.chatTemplates{position:absolute;left:12px;right:12px;bottom:calc(100% - 4px);z-index:3;max-height:240px;overflow:auto;padding:6px;border:1px solid var(--signal);border-radius:10px;background:var(--deep);box-shadow:0 10px 30px #12305a26}
 .chatTemplates button{width:100%;display:flex;flex-direction:column;gap:2px;padding:7px 9px;border:0;border-radius:7px;background:none;text-align:left;cursor:pointer}
-.chatTemplates button:hover{background:#f2f7ff}
-.chatTemplates span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#6c7f99;font-size:11px}
+.chatTemplates button:hover{background:var(--raised)}
+.chatTemplates span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:11px}
 .chatChannels{width:min(620px,100%)}
 .chatChannelList{display:flex;flex-direction:column;gap:6px;margin-bottom:12px}
-.chatChannelList>div{display:flex;align-items:center;gap:10px;padding:10px;border:1px solid #e3eaf5;border-radius:10px}
+.chatChannelList>div{display:flex;align-items:center;gap:10px;padding:10px;border:1px solid var(--rule-strong);border-radius:10px}
 .chatChannelList>div.off{opacity:.55}
 .chatChannelList>div>div:nth-child(2){flex:1;display:flex;flex-direction:column;gap:2px;min-width:0}
-.chatChannelList small{color:#7b8ea8;font-size:11px}
+.chatChannelList small{color:var(--muted);font-size:11px}
 .chatChannelActions{display:flex;gap:4px}
-.chatChannelActions button{padding:5px 9px;border:1px solid #d6e3f5;border-radius:6px;background:#fff;color:#006bfd;font-size:11px;cursor:pointer}
-.chatAddChannel{padding-top:4px;border-top:1px solid #eef2f8}
+.chatChannelActions button{padding:5px 9px;border:1px solid var(--signal);border-radius:6px;background:var(--deep);color:var(--signal-hover);font-size:11px;cursor:pointer}
+.chatAddChannel{padding-top:4px;border-top:1px solid var(--rule)}
 .dealChats .crmChips{margin-top:0}
-@media(max-width:900px){.chatInbox{grid-template-columns:1fr;height:auto}.chatList{max-height:360px;border-right:0;border-bottom:1px solid #e8eef6}.chatBubble{max-width:88%}}
-.chatTemplates b{color:#14253e;font-size:12px;font-weight:650}
+@media(max-width:900px){.chatInbox{grid-template-columns:1fr;height:auto}.chatList{max-height:360px;border-right:0;border-bottom:1px solid var(--rule-strong)}.chatBubble{max-width:88%}}
+.chatTemplates b{color:var(--text);font-size:12px;font-weight:650}
 .chatBadge.avito{font-size:14px}
 
 /* ---------------------------------------------------------------- telephony */
 .callDial{border:0;background:none;color:inherit;font:inherit;cursor:pointer;padding:0}
-.crmQuick .callDial{min-height:30px;padding:0 10px;border:1px solid #dce5f2;border-radius:7px;background:#fff;color:#1f3b5c;font-size:12px}
-.crmQuick .callDial:hover{border-color:#006bfd;color:#006bfd}
+.crmQuick .callDial{min-height:30px;padding:0 10px;border:1px solid var(--rule-strong);border-radius:7px;background:var(--deep);color:var(--text);font-size:12px}
+.crmQuick .callDial:hover{border-color:#006bfd;color:var(--signal-hover)}
 .callsTab .crmKpis{margin:4px 0 14px}
 .callStats{margin-bottom:14px}
 .callFilters{display:flex;gap:8px;margin:0 0 10px}
 .callFilters input{min-width:180px}
 .callTable td{text-align:left!important;vertical-align:middle}
 .callTable th{text-align:left!important}
-.callTable td small{display:block;color:#8b9cb3;font-size:11px}
-.callTable tr.missed td:first-child{color:#c8344b;font-weight:600}
-.callIcon{display:inline-grid;place-items:center;width:22px;height:22px;margin-right:6px;border-radius:50%;background:#eaf2ff;color:#006bfd;font-size:12px}
-.callIcon.missed{background:#fdecef;color:#c8344b}
-.callIcon.noanswer{background:#fff4e0;color:#b06d00}
-.callBack{display:inline-block;margin-right:8px;padding:2px 8px;border-radius:10px;background:#fff4e0;color:#9a5d00;font-size:11px}
+.callTable td small{display:block;color:var(--muted);font-size:11px}
+.callTable tr.missed td:first-child{color:var(--alert);font-weight:600}
+.callIcon{display:inline-grid;place-items:center;width:22px;height:22px;margin-right:6px;border-radius:50%;background:var(--signal-soft);color:var(--signal-hover);font-size:12px}
+.callIcon.missed{background:var(--alert-soft);color:var(--alert)}
+.callIcon.noanswer{background:var(--raised);color:var(--caution)}
+.callBack{display:inline-block;margin-right:8px;padding:2px 8px;border-radius:10px;background:var(--raised);color:var(--caution);font-size:11px}
 .callAudio{height:30px;max-width:240px}
-.callEmpty{padding:28px;text-align:center;color:#6f829d}
+.callEmpty{padding:28px;text-align:center;color:var(--muted)}
 .callList{display:flex;flex-direction:column;gap:6px}
-.callRow{display:grid;grid-template-columns:24px 1fr auto;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #f0f3f8}
-.callRow i{font-style:normal;color:#006bfd}
-.callRow.missed i,.callRow.missed b{color:#c8344b}
-.callRow.noanswer i{color:#b06d00}
-.callRow small{display:block;color:#8b9cb3;font-size:11px}
+.callRow{display:grid;grid-template-columns:24px 1fr auto;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--rule)}
+.callRow i{font-style:normal;color:var(--signal-hover)}
+.callRow.missed i,.callRow.missed b{color:var(--alert)}
+.callRow.noanswer i{color:var(--caution)}
+.callRow small{display:block;color:var(--muted);font-size:11px}
 .callRow b{font-size:12px;font-weight:600}
 .callPopups{position:fixed;right:20px;bottom:20px;z-index:80;display:flex;flex-direction:column;gap:10px}
-.callPopup{display:flex;flex-direction:column;gap:4px;width:300px;padding:14px;border:1px solid #cfe0fb;border-radius:14px;background:#fff;box-shadow:0 12px 32px rgba(15,33,64,.18)}
-.callPopup header{display:flex;align-items:center;gap:8px;color:#006bfd;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.4px}
-.callPopup header button{margin-left:auto;border:0;background:none;color:#8b9cb3;font-size:18px;cursor:pointer}
-.callPopup b{font-size:17px;color:#0f2140}
-.callPopup p{margin:4px 0;color:#40556f;font-size:12px}
-.callPopup small{color:#8b9cb3;font-size:11px}
+.callPopup{display:flex;flex-direction:column;gap:4px;width:300px;padding:14px;border:1px solid var(--signal);border-radius:14px;background:var(--deep);box-shadow:0 12px 32px rgba(15,33,64,.18)}
+.callPopup header{display:flex;align-items:center;gap:8px;color:var(--signal-hover);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.4px}
+.callPopup header button{margin-left:auto;border:0;background:none;color:var(--muted);font-size:18px;cursor:pointer}
+.callPopup b{font-size:17px;color:var(--text)}
+.callPopup p{margin:4px 0;color:var(--text-2);font-size:12px}
+.callPopup small{color:var(--muted);font-size:11px}
 .callPopup .crmPrimary,.callPopup .crmGhost{margin-top:8px}
 .callPulse{width:9px;height:9px;border-radius:50%;background:#18a058;box-shadow:0 0 0 0 rgba(24,160,88,.6);animation:callPulse 1.4s infinite}
 @keyframes callPulse{70%{box-shadow:0 0 0 10px rgba(24,160,88,0)}100%{box-shadow:0 0 0 0 rgba(24,160,88,0)}}
 .callSettings{max-width:640px}
 .callSettings form{display:flex;flex-direction:column;gap:10px}
 .callSettings details{margin-top:12px;font-size:12px}
-.callSettings details summary{cursor:pointer;color:#40556f}
-.callSteps{margin:0 0 6px;padding-left:18px;color:#40556f;font-size:12px;line-height:1.55}
-.callConnState{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid #e3e9f2;border-radius:10px;margin-bottom:12px}
-.callConnState small{display:block;color:#6f829d;font-size:11px}
+.callSettings details summary{cursor:pointer;color:var(--text-2)}
+.callSteps{margin:0 0 6px;padding-left:18px;color:var(--text-2);font-size:12px;line-height:1.55}
+.callConnState{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--rule-strong);border-radius:10px;margin-bottom:12px}
+.callConnState small{display:block;color:var(--muted);font-size:11px}
 .callConnState .crmGhost{margin-left:auto}
 .callDot{width:10px;height:10px;border-radius:50%;background:#c3cfdf}
 .callDot.connected{background:#18a058}
 .callDot.error{background:#c8344b}
 .callWebhookRow{display:flex;gap:8px;align-items:center}
-.callWebhookRow code{flex:1;overflow:auto;padding:8px 10px;border-radius:7px;background:#f4f7fc;color:#0f2140;font-size:12px;white-space:nowrap}
+.callWebhookRow code{flex:1;overflow:auto;padding:8px 10px;border-radius:7px;background:var(--raised);color:var(--text);font-size:12px;white-space:nowrap}
 .callMap{display:flex;flex-direction:column;gap:6px;margin-bottom:10px}
 .callMap label{display:grid;grid-template-columns:1fr 220px;align-items:center;gap:10px;font-size:12px}
 .callMap select{min-height:32px}
 @media(max-width:700px){.callMap label{grid-template-columns:1fr}.callPopup{width:calc(100vw - 40px)}}
 
 /* ---------------------------------------------------------------- lead quality */
-.crmQuality{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0 0 12px;padding:8px 10px;border:1px dashed #d6e3f5;border-radius:9px;background:#fbfdff}
-.crmQuality>span{margin-right:4px;color:#6f829d;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.3px}
-.crmQuality>button{min-height:28px;padding:0 10px;border:1px solid #dce5f2;border-radius:14px;background:#fff;color:#40556f;font-size:12px;cursor:pointer}
-.crmQuality>button.active.good{border-color:#18a058;background:#e8f7ee;color:#17693d;font-weight:600}
-.crmQuality>button.active.bad{border-color:#c8344b;background:#fdecef;color:#a52a3d;font-weight:600}
-.crmQuality>small{color:#8b9cb3;font-size:11px}
+.crmQuality{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0 0 12px;padding:8px 10px;border:1px dashed var(--signal);border-radius:9px;background:var(--deep)}
+.crmQuality>span{margin-right:4px;color:var(--muted);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.3px}
+.crmQuality>button{min-height:28px;padding:0 10px;border:1px solid var(--rule-strong);border-radius:14px;background:var(--deep);color:var(--text-2);font-size:12px;cursor:pointer}
+.crmQuality>button.active.good{border-color:#18a058;background:var(--live-soft);color:var(--live);font-weight:600}
+.crmQuality>button.active.bad{border-color:#c8344b;background:var(--alert-soft);color:var(--alert);font-weight:600}
+.crmQuality>small{color:var(--muted);font-size:11px}
 .crmQualityReasons{display:flex;flex-wrap:wrap;gap:6px;width:100%;padding-top:6px}
-.crmQualityReasons button{padding:4px 9px;border:1px solid #f3c6ce;border-radius:12px;background:#fff;color:#a52a3d;font-size:11px;cursor:pointer}
-.crmQualityReasons button:hover{background:#fdecef}
+.crmQualityReasons button{padding:4px 9px;border:1px solid var(--rule-strong);border-radius:12px;background:var(--deep);color:var(--alert);font-size:11px;cursor:pointer}
+.crmQualityReasons button:hover{background:var(--alert-soft)}
 
 /* ---------------------------------------------------------------- AI assistant in chats */
 .chatAiBar{display:flex;justify-content:flex-end;padding:4px 12px 0}
-.chatSummary{margin:6px 12px 0;padding:10px 12px;border:1px solid #e3d9fb;border-radius:10px;background:#f8f5ff;font-size:12px;color:#2e2350}
+.chatSummary{margin:6px 12px 0;padding:10px 12px;border:1px solid var(--signal);border-radius:10px;background:var(--raised);font-size:12px;color:var(--text)}
 .chatSummary>div{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
-.chatSummary>div button{border:0;background:none;color:#8b7fb0;font-size:16px;cursor:pointer}
+.chatSummary>div button{border:0;background:none;color:var(--muted);font-size:16px;cursor:pointer}
 .chatSummary p{margin:0 0 6px;line-height:1.5}
-.chatSummary small{color:#7c6aa8}
-.chatAiSuggest{color:#7b4ce0!important}
-.callChannel{display:block;margin-left:28px;color:#6f829d;font-size:10px}
+.chatSummary small{color:var(--muted)}
+.chatAiSuggest{color:var(--signal-hover)!important}
+.callChannel{display:block;margin-left:28px;color:var(--muted);font-size:10px}
 .callAddLine{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 14px}.callAddLine .crmPrimary{min-height:34px;padding:0 14px;font-size:12px}
-.callAddLine input{flex:1;min-width:160px;min-height:34px;padding:0 10px;border:1px solid #dce5f2;border-radius:7px}
+.callAddLine input{flex:1;min-width:160px;min-height:34px;padding:0 10px;border:1px solid var(--rule-strong);border-radius:7px}
 /* AI call analysis */
 .callRow{grid-template-columns:24px minmax(0,1fr) auto}
 .callRowActions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
-.callAiSummary{margin:4px 0 0;font-size:12px;line-height:1.4;color:#40536f}
-.callAi{display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:999px;font-size:12px;font-weight:600;border:0;background:#eef3fb;color:#40536f;white-space:nowrap}
-.callAi.pending{background:#f3efff;color:#6b4bd8}
+.callAiSummary{margin:4px 0 0;font-size:12px;line-height:1.4;color:var(--text-2)}
+.callAi{display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:999px;font-size:12px;font-weight:600;border:0;background:var(--signal-soft);color:var(--text-2);white-space:nowrap}
+.callAi.pending{background:var(--signal-soft);color:var(--signal-hover)}
 button.callAi{cursor:pointer}
-.callAi.good{background:#e6f6ec;color:#16803c}
-.callAi.warn{background:#fff4dc;color:#a05f00}
-.callAi.bad{background:#fdeaee;color:#c8344b}
-.callStats td.good{color:#16803c;font-weight:600}
-.callStats td.warn{color:#a05f00;font-weight:600}
+.callAi.good{background:var(--live-soft);color:var(--live)}
+.callAi.warn{background:var(--raised);color:var(--caution)}
+.callAi.bad{background:var(--alert-soft);color:var(--alert)}
+.callStats td.good{color:var(--live);font-weight:600}
+.callStats td.warn{color:var(--caution);font-weight:600}
 .resultModalBackdrop:has(.callAiModal){white-space:normal}
 .crmModal.callAiModal{width:min(640px,100%);white-space:normal;text-align:left}
 .callAiModal section{margin-top:12px}
-.callAiModal h3{margin:0 0 4px;font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:#7a8ca5}
-.callAiModal p{margin:0;font-size:14px;line-height:1.5;color:#0f2140}
+.callAiModal h3{margin:0 0 4px;font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
+.callAiModal p{margin:0;font-size:14px;line-height:1.5;color:var(--text)}
 .callAiModal ul{margin:0;padding-left:18px;font-size:14px;line-height:1.5}
-.callAiScore{display:flex;align-items:baseline;gap:10px;padding:12px 14px;border-radius:12px;background:#eef3fb;margin-top:6px}
+.callAiScore{display:flex;align-items:baseline;gap:10px;padding:12px 14px;border-radius:12px;background:var(--signal-soft);margin-top:6px}
 .callAiScore strong{font-size:32px;line-height:1}
-.callAiScore span{color:#5d6f8a;font-size:13px}
-.callAiScore.good strong{color:#16803c}.callAiScore.warn strong{color:#a05f00}.callAiScore.bad strong{color:#c8344b}
+.callAiScore span{color:var(--muted);font-size:13px}
+.callAiScore.good strong{color:var(--live)}.callAiScore.warn strong{color:var(--caution)}.callAiScore.bad strong{color:var(--alert)}
 .callAiModal ul.callAiChecklist{list-style:none;padding:0;display:flex;flex-direction:column;gap:6px}
 .callAiChecklist li{display:grid;grid-template-columns:22px 1fr;gap:6px;align-items:start}
 .callAiChecklist i{font-style:normal;font-weight:700;text-align:center;border-radius:6px;line-height:20px}
-.callAiChecklist li.ok i{color:#16803c;background:#e6f6ec}
-.callAiChecklist li.no i{color:#c8344b;background:#fdeaee}
+.callAiChecklist li.ok i{color:var(--live);background:var(--live-soft)}
+.callAiChecklist li.no i{color:var(--alert);background:var(--alert-soft)}
 .callAiChecklist b{display:block;font-size:13px;font-weight:600}
-.callAiChecklist small{display:block;color:#6f829d;font-size:12px}
-.callAiAdvice{padding:10px 12px;border-radius:10px;background:#fff8e6}
-.callAiTranscript{white-space:pre-wrap;max-height:280px;overflow:auto;background:#f6f8fc;border-radius:10px;padding:10px;font:12px/1.5 inherit;margin-top:6px}
+.callAiChecklist small{display:block;color:var(--muted);font-size:12px}
+.callAiAdvice{padding:10px 12px;border-radius:10px;background:var(--raised)}
+.callAiTranscript{white-space:pre-wrap;max-height:280px;overflow:auto;background:var(--raised);border-radius:10px;padding:10px;font:12px/1.5 inherit;margin-top:6px}
 .callAiModal .callAudio{width:100%;margin-top:12px}
 /* Offers and invoices */
 .docAdd{display:flex;gap:12px}
-.docRow{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:9px 0;border-top:1px solid #eef2f7}
+.docRow{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:9px 0;border-top:1px solid var(--rule)}
 .docRow:first-of-type{border-top:0}
-.docRow b{display:block;font-size:13px;color:#0f2140}.docRow small{display:block;font-size:12px;color:#6f829d}
+.docRow b{display:block;font-size:13px;color:var(--text)}.docRow small{display:block;font-size:12px;color:var(--muted)}
 .docRow.canceled b{color:#9aa8bb;text-decoration:line-through}
-.docStatus{font-weight:600}.docStatus.viewed{color:#6b4bd8}.docStatus.paid{color:#16803c}.docStatus.sent{color:#006bfd}
+.docStatus{font-weight:600}.docStatus.viewed{color:var(--signal-hover)}.docStatus.paid{color:var(--live)}.docStatus.sent{color:var(--signal-hover)}
 .docActions{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:center}
 .docActions a.crmLinkButton{text-decoration:none}
-.docActions .muted{color:#8a99ad}
+.docActions .muted{color:var(--muted)}
 .crmModal.docEditor{width:min(780px,100%);white-space:normal}
 .docItems{display:flex;flex-direction:column;gap:6px;margin:4px 0 6px}
 .docItemsHead,.docItem{display:grid;grid-template-columns:minmax(0,1fr) 64px 56px 96px 70px 96px 26px;gap:6px;align-items:center}
-.docItemsHead span{font-size:11px;color:#7a8ca5;text-transform:uppercase;letter-spacing:.03em}
-.docItem input{min-width:0;min-height:34px;padding:0 8px;border:1px solid #dce5f2;border-radius:7px;font:inherit;font-size:13px}
+.docItemsHead span{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.03em}
+.docItem input{min-width:0;min-height:34px;padding:0 8px;border:1px solid var(--rule-strong);border-radius:7px;font:inherit;font-size:13px}
 .docItem b{font-size:13px;text-align:right;white-space:nowrap}
-.docItem button{width:26px;height:26px;border:0;border-radius:6px;background:#f3f6fb;color:#7a8ca5;cursor:pointer}
+.docItem button{width:26px;height:26px;border:0;border-radius:6px;background:var(--raised);color:var(--muted);cursor:pointer}
 .docItem button:disabled{opacity:.4;cursor:default}
 .docItemsFoot{display:flex;justify-content:space-between;align-items:center;font-size:14px}
 .docItemsFoot b{font-size:16px}
 @media(max-width:640px){.docItemsHead{display:none}
-  .docItem{grid-template-columns:1fr 1fr 1fr 26px;padding:8px;border:1px solid #e3e9f2;border-radius:10px}
+  .docItem{grid-template-columns:1fr 1fr 1fr 26px;padding:8px;border:1px solid var(--rule-strong);border-radius:10px}
   .docItem input:first-child{grid-column:1/-1}.docItem b{grid-column:1/4;text-align:left}}
 /* amoCRM import */
 .crmModal.amoImport{width:min(720px,100%);white-space:normal}
 .amoImport label.crmCheck{display:flex;flex-wrap:wrap}.amoImport label.crmCheck small{flex-basis:100%;padding-left:24px}
-.amoSteps{margin:0 0 12px;padding-left:20px;font-size:13px;line-height:1.55;color:#40536f}
+.amoSteps{margin:0 0 12px;padding-left:20px;font-size:13px;line-height:1.55;color:var(--text-2)}
 .amoPick{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap}
-.amoFile{position:relative;overflow:hidden;cursor:pointer;display:inline-flex!important;flex-direction:row!important;align-items:center;min-height:40px;padding:0 16px!important;font-weight:600;color:#006bfd!important;border-style:dashed!important}
+.amoFile{position:relative;overflow:hidden;cursor:pointer;display:inline-flex!important;flex-direction:row!important;align-items:center;min-height:40px;padding:0 16px!important;font-weight:600;color:var(--signal-hover)!important;border-style:dashed!important}
 .amoFile input{position:absolute;inset:0;opacity:0;cursor:pointer}
 .amoSummary{font-size:14px;margin:12px 0 4px}.amoCols{font-size:11px;line-height:1.5}
-.amoImport h3{margin:14px 0 6px;font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:#7a8ca5}
+.amoImport h3{margin:14px 0 6px;font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
 .amoMap{display:flex;flex-direction:column;gap:6px}
 .amoMap>div{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px;align-items:center}
-.amoMap span{font-size:13px;color:#0f2140}.amoMap small{color:#8a99ad;margin-left:4px}
+.amoMap span{font-size:13px;color:var(--text)}.amoMap small{color:var(--muted);margin-left:4px}
 .amoMap select{min-height:34px}
 .amoSample{font-size:12px}.amoSample td,.amoSample th{padding:6px 8px}
-.amoResult ul{font-size:13px;color:#40536f;line-height:1.6}
+.amoResult ul{font-size:13px;color:var(--text-2);line-height:1.6}
 @media(max-width:560px){.amoMap>div{grid-template-columns:1fr;gap:4px}}
 
-.chatCorporateHint{margin:10px 0;padding:12px 13px;border:1px solid #cfe0fb;border-radius:10px;background:#f2f7ff}.chatCorporateHint strong{display:block;color:#152239;font-size:12px}.chatCorporateHint p{margin:5px 0 9px;color:#4c607d;font-size:11px;line-height:1.45}.chatCorporateHint .resultPrimary{min-height:32px;font-size:11px}
-.tgQr{display:grid;grid-template-columns:auto 1fr;gap:10px 16px;align-items:start}.tgQrCode{width:210px;height:210px;padding:6px;border:1px solid #e2eaf5;border-radius:12px;background:#fff}.tgQrCode svg{width:100%;height:100%}.tgQr ol{margin:0;padding-left:18px;color:#1f3049;font-size:12px;line-height:1.7}.tgQr p,.tgQr button{grid-column:1/-1}@media(max-width:640px){.tgQr{grid-template-columns:1fr}.tgQrCode{margin:0 auto}}
-.crmBriefLink label{display:flex;flex-direction:column;gap:4px;font-size:11px;color:#5b6d87;margin-bottom:8px}
-.crmBriefLink select,.crmBriefLinkRow input{min-height:32px;border:1px solid #d8e2f1;border-radius:8px;padding:0 8px;font-size:12px;background:#fff}
+.chatCorporateHint{margin:10px 0;padding:12px 13px;border:1px solid var(--signal);border-radius:10px;background:var(--raised)}.chatCorporateHint strong{display:block;color:var(--text);font-size:12px}.chatCorporateHint p{margin:5px 0 9px;color:var(--muted);font-size:11px;line-height:1.45}.chatCorporateHint .resultPrimary{min-height:32px;font-size:11px}
+.tgQr{display:grid;grid-template-columns:auto 1fr;gap:10px 16px;align-items:start}.tgQrCode{width:210px;height:210px;padding:6px;border:1px solid var(--rule-strong);border-radius:12px;background:var(--deep)}.tgQrCode svg{width:100%;height:100%}.tgQr ol{margin:0;padding-left:18px;color:var(--text);font-size:12px;line-height:1.7}.tgQr p,.tgQr button{grid-column:1/-1}@media(max-width:640px){.tgQr{grid-template-columns:1fr}.tgQrCode{margin:0 auto}}
+.crmBriefLink label{display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--muted);margin-bottom:8px}
+.crmBriefLink select,.crmBriefLinkRow input{min-height:32px;border:1px solid var(--rule-strong);border-radius:8px;padding:0 8px;font-size:12px;background:var(--deep)}
 .crmBriefLinkRow{display:flex;gap:6px;margin-bottom:6px}.crmBriefLinkRow input{flex:1;min-width:0}
 .crmBriefLinkRow button{border:1px solid #1a6cff;background:#1a6cff;color:#fff;border-radius:8px;padding:0 12px;font-size:12px;cursor:pointer}
-.crmBriefLink small{display:block;color:#8795a9;font-size:10px;line-height:1.45;margin-top:4px}.crmBriefLink .crmError{color:#d9434f}
+.crmBriefLink small{display:block;color:var(--muted);font-size:10px;line-height:1.45;margin-top:4px}.crmBriefLink .crmError{color:var(--alert)}
 
-.crmAnalyticsFlag{display:flex;align-items:center;gap:8px;margin:-4px 0 12px;font-size:12px;color:var(--muted,#667085);cursor:pointer}.crmAnalyticsFlag input{width:15px;height:15px;margin:0}
+.crmAnalyticsFlag{display:flex;align-items:center;gap:8px;margin:-4px 0 12px;font-size:12px;color:var(--muted,var(--muted));cursor:pointer}.crmAnalyticsFlag input{width:15px;height:15px;margin:0}
 
-.crmContactNotes{white-space:pre-line;font-size:12px;color:#5b6478;line-height:1.45}
+.crmContactNotes{white-space:pre-line;font-size:12px;color:var(--muted);line-height:1.45}

@@ -1,29 +1,29 @@
 .page, .panel, .list, .detail { min-width: 0; }
-.panel { background: white; border: 1px solid #dce5f4; border-radius: 12px; padding: 14px; }
+.panel { background:var(--deep); border:1px solid var(--rule-strong); border-radius:12px; padding: 14px; }
 .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
 .metrics strong { display: block; margin-top: 5px; font-size: 24px; }
 .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-block: 10px; }
 .actions > *, .back { max-width: 100%; min-width: 0; }
 .actions button, .actions select, .actions input, .back {
-  min-height: 40px; padding: 8px 10px; border: 1px solid #cddcf0; border-radius: 8px; background: #f6f9ff;
+  min-height: 40px; padding: 8px 10px; border:1px solid var(--rule-strong); border-radius:8px; background:var(--raised);
 }
-.actions button[aria-pressed="true"] { background: #0058ce; color: white; }
+.actions button[aria-pressed="true"] { background:#0058ce; color:white; }
 .scroll { max-width: 100%; overflow-x: auto; }
 .scroll table { min-width: 580px; }
 .scroll td, .scroll th { font-size: 12px; }
 .inbox { display: grid; grid-template-columns: minmax(225px, 33%) minmax(0, 1fr); gap: 12px; align-items: start; }
 .threads { margin: 0; padding: 0; list-style: none; }
 .threads button {
-  display: grid; gap: 4px; width: 100%; padding: 10px; border: 1px solid transparent;
-  border-bottom-color: #dce5f4; background: white; text-align: left; overflow-wrap: anywhere;
+  display: grid; gap: 4px; width: 100%; padding: 10px; border:1px solid transparent;
+  border-bottom-color:var(--rule-strong); background:var(--deep); text-align: left; overflow-wrap: anywhere;
 }
-.threads button[aria-current] { background: #edf4ff; border-color: #95b7e7; border-radius: 8px; }
+.threads button[aria-current] { background:var(--signal-soft); border-color:#95b7e7; border-radius:8px; }
 .threads span { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .detail { overflow-wrap: anywhere; }
 .back { display: none; }
 .messages { display: grid; gap: 10px; }
-.messages article { background: #f1f5fc; border-radius: 10px; padding: 10px; }
-.messages article[data-direction="out"] { background: #e8f1ff; }
+.messages article { background:var(--raised); border-radius:10px; padding: 10px; }
+.messages article[data-direction="out"] { background:var(--signal-soft); }
 .messages header { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 10px; }
 .messages p { margin: 8px 0 0; white-space: pre-wrap; }
 @media (max-width: 700px) {

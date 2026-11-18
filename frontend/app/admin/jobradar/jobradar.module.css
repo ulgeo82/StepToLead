@@ -2,43 +2,43 @@
 .platform { margin-bottom: 0; min-width: 0; }
 .head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
 .head h2 { margin-bottom: 6px; font-size: 18px; }
-.stats { display: flex; flex-wrap: wrap; gap: 12px; margin: 14px 0; font-size: 12px; color: #8391ad; }
-.stats b { color: #fff; margin-right: 4px; }
-.settings { border-top: 1px solid #26324d; padding-top: 12px; margin-top: 12px; }
-.settings summary { cursor: pointer; min-height: 36px; color: #c9d2e3; }
+.stats { display: flex; flex-wrap: wrap; gap: 12px; margin: 14px 0; font-size: 12px; color:var(--muted); }
+.stats b { color:#fff; margin-right: 4px; }
+.settings { border-top:1px solid #26324d; padding-top: 12px; margin-top: 12px; }
+.settings summary { cursor: pointer; min-height: 36px; color:#c9d2e3; }
 .settings > form > div { grid-template-columns: 1fr; }
 .channels { display: grid; gap: 10px; margin-top: 16px; }
-.channel { border: 1px solid #26324d; border-radius: 10px; padding: 10px; min-width: 0; }
+.channel { border:1px solid #26324d; border-radius:10px; padding: 10px; min-width: 0; }
 .channel b { overflow-wrap: anywhere; }
-.channel small { display: block; color: #8391ad; margin: 5px 0; }
+.channel small { display: block; color:var(--muted); margin: 5px 0; }
 .channel button { min-height: 36px; padding: 6px 9px; font-size: 12px; }
 .channelForm { display: grid; gap: 10px; padding-top: 12px; }
 .sourceOption { min-width: 0; display: grid; gap: 8px; margin-bottom: 10px; }
 .sourceOption > button { width: fit-content; }
 .disabled { opacity: .5; }
-.breakdown { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; color: #8391ad; font-size: 12px; }
+.breakdown { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; color:var(--muted); font-size: 12px; }
 .breakdown > span + span::before { content: "· "; }
 .scannerList { display: grid; gap: 14px; margin: 16px 0; }
 .scannerList > article { margin-bottom: 0; }
 .templateGrid, .actionGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
-.templateCard { display: grid; gap: 12px; padding: 20px; border: 1px solid #26324d; border-radius: 14px;
-  background: #141e33; color: #c9d2e3; text-align: left; cursor: pointer; min-width: 0; }
-.templateCard:hover { border-color: #7fa4ff; background: #162544; }
-.queryCard { min-width: 0; border: 1px solid #26324d; border-radius: 14px; padding: 18px; margin: 14px 0; }
+.templateCard { display: grid; gap: 12px; padding: 20px; border:1px solid #26324d; border-radius:14px;
+  background:#141e33; color:#c9d2e3; text-align: left; cursor: pointer; min-width: 0; }
+.templateCard:hover { border-color:#7fa4ff; background:#162544; }
+.queryCard { min-width: 0; border:1px solid #26324d; border-radius:14px; padding: 18px; margin: 14px 0; }
 .queryCard h3 { margin: 0 0 12px; }
-.queryCard small { display: block; margin: 8px 0; color: #8391ad; }
+.queryCard small { display: block; margin: 8px 0; color:var(--muted); }
 .queryFacts { display: grid; grid-template-columns: minmax(90px, 120px) minmax(0, 1fr); gap: 8px 12px; }
-.queryFacts dt { color: #8391ad; }
+.queryFacts dt { color:var(--muted); }
 .queryFacts dd { margin: 0; overflow-wrap: anywhere; }
 .scannerTabs { overflow-x: auto; margin: 20px 0; flex-wrap: nowrap; }
 .scannerTabs > button { flex-shrink: 0; min-height: 44px; }
-.scannerTabs [aria-selected="true"] { background: #162544; color: #7fa4ff; }
-.panelFieldset { min-width: 0; border: 0; padding: 0; margin: 0; }
+.scannerTabs [aria-selected="true"] { background:#162544; color:var(--signal-hover); }
+.panelFieldset { min-width: 0; border:0; padding: 0; margin: 0; }
 .preview { margin-top: 20px; }
 .actionGrid .queryCard { margin-top: 0; }
 .actionGrid .queryCard input, .actionGrid .queryCard select { max-width: 100%; }
 .templateCard:focus-visible, .scannerTabs button:focus-visible, .queryCard :focus-visible {
-  outline: 2px solid #7fa4ff; outline-offset: 3px;
+  outline:2px solid #7fa4ff; outline-offset:3px;
 }
 .wrapForm { flex-wrap: wrap; }
 @media (max-width: 720px) {
@@ -51,6 +51,6 @@
   .queryFacts { grid-template-columns: 90px minmax(0, 1fr); }
 }
 .platform input, .platform select, .platform textarea { max-width: 100%; }
-.platform :focus-visible, .sourceOption :focus-visible { outline: 2px solid #7fa4ff; outline-offset: 3px; }
+.platform :focus-visible, .sourceOption :focus-visible { outline:2px solid #7fa4ff; outline-offset:3px; }
 @media (max-width: 1450px) { .platforms { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 720px) { .platforms { grid-template-columns: 1fr; } }

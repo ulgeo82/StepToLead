@@ -32,17 +32,17 @@ export function ProjectSidebar({ project, projectId, active, role }: {
   return <aside className="resultSidebar"><Link className="resultBrand" href={`/result${suffix}`} aria-label="StepToLead"><BrandMark tone="light" size={36}/></Link>
     {role !== "admin" && showOutreach && <Link className={outreach.mobile}
       aria-current={active === "outreach" ? "page" : undefined} href="/portal/outreach">Аутрич</Link>}
-    <div className="resultProject"><small>ПРОЕКТ</small><strong>{project?.organization_name || "StepToLead"}</strong><span>{project?.name || "Выберите проект"}</span></div><BriefDemoBanner projectId={projectId}/>
-    <nav aria-label="Навигация"><small>АНАЛИТИКА</small>
+    <div className="resultProject"><small>Проект</small><strong>{project?.organization_name || "StepToLead"}</strong><span>{project?.name || "Выберите проект"}</span></div><BriefDemoBanner projectId={projectId}/>
+    <nav aria-label="Навигация"><small>Аналитика</small>
       {allowed("view_result") && <Link className={active === "result" ? "active" : ""} href={`/result${suffix}`}><b>01</b> Результат</Link>}
       {allowed("view_analytics") && <Link className={active === "analytics" ? "active" : ""} href={`/analytics${suffix}`}><b>02</b> Аналитика</Link>}
       {allowed("view_analytics") && <Link className={active === "reports" ? "active" : ""} href={`/reports${suffix}`}><b>03</b> Отчёты</Link>}
-      <small>ПРОДАЖИ</small>{allowed("view_crm") && <Link className={active === "crm" || active === "leads" ? "active" : ""} href={`/crm${suffix}`}><b>04</b> CRM</Link>}
-      <small>МАРКЕТИНГ</small>
+      <small>Продажи</small>{allowed("view_crm") && <Link className={active === "crm" || active === "leads" ? "active" : ""} href={`/crm${suffix}`}><b>04</b> CRM</Link>}
+      <small>Маркетинг</small>
       {allowed("view_ads") && <Link className={active === "ads" ? "active" : ""} href={`/ads${suffix}`}><b>05</b> Реклама</Link>}
       {role !== "admin" && showOutreach && <Link className={active === "outreach" ? "active" : ""}
         aria-current={active === "outreach" ? "page" : undefined} href="/portal/outreach"><b>09</b> Аутрич</Link>}
-      <small>УПРАВЛЕНИЕ</small>{permissions?.includes("manage_team") && <Link className={active === "team" ? "active" : ""} href="/team" title="Команда клиентской организации"><b>06</b> Команда</Link>}{(permissions?.includes("manage_settings") || permissions?.includes("manage_sources")) && <Link className={active === "settings" ? "active" : ""} href={`/settings${suffix}`} title="Настройки клиентской организации"><b>07</b> Настройки</Link>}{role !== "admin" && <Link className={active === "profile" ? "active" : ""} href={`/profile${suffix}`} title="Личный Telegram и пуш-уведомления"><b>08</b> Мои уведомления</Link>}
+      <small>Управление</small>{permissions?.includes("manage_team") && <Link className={active === "team" ? "active" : ""} href="/team" title="Команда клиентской организации"><b>06</b> Команда</Link>}{(permissions?.includes("manage_settings") || permissions?.includes("manage_sources")) && <Link className={active === "settings" ? "active" : ""} href={`/settings${suffix}`} title="Настройки клиентской организации"><b>07</b> Настройки</Link>}{role !== "admin" && <Link className={active === "profile" ? "active" : ""} href={`/profile${suffix}`} title="Личный Telegram и пуш-уведомления"><b>08</b> Мои уведомления</Link>}
     </nav>{role !== "admin" && <AiTokensMini href={permissions?.includes("manage_settings") ? `/settings${suffix}#tokens` : undefined}/>}<div className="resultSidebarFoot"><span>●</span> Данные вашего проекта · {role === "admin" ? <Link href="/admin">В админку</Link>
       : <button type="button" onClick={async () => { await api("/portal/auth/logout", { method: "POST" }).catch(() => undefined); location.assign("/login"); }}>Выйти</button>}</div>
   </aside>;

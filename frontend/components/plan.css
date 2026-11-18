@@ -1,13 +1,13 @@
 .planChoices{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-top:12px}
-.planChoices button{display:flex;flex-direction:column;align-items:flex-start;gap:4px;text-align:left;padding:14px;border:1.5px solid #dfe7f2;border-radius:12px;background:#fff;cursor:pointer;color:#101b31;font:inherit}
-.planChoices button.active{border-color:#006bfd;background:#f2f7ff;box-shadow:0 0 0 3px #006bfd1f}
+.planChoices button{display:flex;flex-direction:column;align-items:flex-start;gap:4px;text-align:left;padding:14px;border:1.5px solid var(--rule-strong);border-radius:12px;background:var(--deep);cursor:pointer;color:var(--text);font:inherit}
+.planChoices button.active{border-color:#006bfd;background:var(--raised);box-shadow:0 0 0 3px #006bfd1f}
 .planChoices button:disabled{opacity:.7;cursor:wait}
-.planChoices b{font-size:16px}.planChoices span{font-size:13px;color:#006bfd;font-weight:600}.planChoices small{font-size:12px;color:#6f829d}
+.planChoices b{font-size:16px}.planChoices span{font-size:13px;color:var(--signal-hover);font-weight:600}.planChoices small{font-size:12px;color:var(--muted)}
 .planChoices ul{list-style:none;margin:8px 0 0;padding:0;display:flex;flex-direction:column;gap:4px;font-size:12px;color:#9aa8bb}
-.planChoices li.on{color:#101b31}
-.planMessage{margin:10px 0 0;font-size:13px;color:#40536f}
+.planChoices li.on{color:var(--text)}
+.planMessage{margin:10px 0 0;font-size:13px;color:var(--text-2)}
 .planFeatures{list-style:none;margin:10px 0 0;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:6px}
-.planFeatures li{display:flex;align-items:baseline;gap:8px;font-size:13px;color:#8a99ad}
-.planFeatures li.on{color:#0f2140}.planFeatures i{font-style:normal;width:18px;text-align:center;color:#16803c}
+.planFeatures li{display:flex;align-items:baseline;gap:8px;font-size:13px;color:var(--muted)}
+.planFeatures li.on{color:var(--text)}.planFeatures i{font-style:normal;width:18px;text-align:center;color:var(--live)}
 .planFeatures small{margin-left:auto;font-size:11px;color:#9aa8bb}
-.planHint{font-size:12px;color:#6f829d;margin:14px 0 0}
+.planHint{font-size:12px;color:var(--muted);margin:14px 0 0}

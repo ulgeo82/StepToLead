@@ -67,3 +67,35 @@
  .sidebar :global(.brandMark) { flex-shrink:0; }
 }
 @media(prefers-reduced-motion:reduce) { .sidebar,.chevron { transition:none; } }
+
+/* ===== Дизайн-система «Глубина» (docs/DESIGN.md): навигация ===== */
+.shell.shell { --admin-nav-font:var(--font); grid-template-columns:272px minmax(0,1fr); }
+.sidebar { width:272px; padding:22px 14px 14px; background:linear-gradient(180deg,#0A1322 0%,#08101E 100%); border-right:1px solid var(--rule); color:var(--text-2); font-family:var(--font); }
+.workspace { border-color:var(--rule); border-radius:14px; background:var(--raised); }
+.workspace small { color:var(--muted); font-size:12px; }
+.workspace strong { color:var(--text); font-size:14px; font-weight:600; }
+.avatar { background:var(--signal-soft); color:var(--signal-hover); border-radius:10px; }
+.search input { height:40px; border-color:var(--rule); border-radius:10px; background:var(--deep); font-size:14px; }
+.search input:focus { border-color:var(--signal); box-shadow:0 0 0 3px var(--signal-soft); outline:none; }
+.search kbd { top:14px; font:11px var(--font); color:var(--faint); }
+.group { margin-top:18px!important; }
+.groupHeading { min-height:28px; margin-bottom:2px; padding:4px 10px; color:var(--faint); font-size:12px; font-weight:600; text-transform:none; letter-spacing:0; }
+.folderHeading { min-height:38px; padding:6px 10px; font-size:14px; font-weight:600; color:var(--text-2); border-radius:10px; }
+.item { position:relative; min-height:38px; padding:6px 10px; margin:1px 0; font-size:14px; font-weight:500; color:var(--text-2); border-radius:10px; transition:background var(--fast) var(--ease),color var(--fast) var(--ease); }
+.item:hover,.folderHeading:hover,.groupHeading:hover { color:var(--text); background:rgba(23,37,63,.6); }
+.number { display:none; }
+.folderIcon { flex:0 0 22px; width:22px; height:22px; border-radius:6px; background:transparent; color:var(--faint); }
+.active,.active:hover { background:linear-gradient(90deg,rgba(47,123,255,.16),rgba(47,123,255,.04) 70%,transparent); box-shadow:none; color:#fff; font-weight:600; }
+.active::before { content:""; position:absolute; left:-1px; top:9px; bottom:9px; width:2px; border-radius:2px; background:var(--signal); box-shadow:0 0 12px rgba(47,123,255,.85); }
+.children { margin-left:20px; padding-left:10px; border-left:1px solid var(--rule); }
+.children .item,.children .folderHeading { padding-left:10px; }
+.soon { border-color:var(--rule-strong); color:var(--faint); text-transform:none; font-size:11px; font-weight:600; }
+.newBadge { background:var(--signal); text-transform:none; font-size:11px; }
+.footer { border-top-color:var(--rule); }
+.logout { min-height:40px; border-color:var(--rule-strong); border-radius:10px; background:var(--raised); color:var(--text-2); font:600 14px var(--font); }
+.logout:hover { background:var(--lift); color:var(--text); }
+.status>span { background:var(--live); box-shadow:0 0 0 4px var(--live-soft); }
+.status strong { font-size:13px; color:var(--text-2); }
+.status small { font-size:12px; color:var(--faint); }
+.sidebar :is(a,button,input):focus-visible { outline:none; box-shadow:var(--focus); }
+@media(max-width:860px){ .burger { background:var(--deep); border-color:var(--rule-strong); font:600 14px var(--font); } .sidebar { width:min(288px,calc(100vw - 24px)); } }
