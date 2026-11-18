@@ -130,7 +130,9 @@ async def visible_threads(db: AsyncSession, ws: int, items: list[dict]) -> list[
         if "messages" in item:
             row["messages"] = [{
                 "id": msg["id"], "text": msg["text"], "at": msg["at"], "direction": msg["direction"],
-                "author": "Лид" if msg["direction"] == "in" else "Агентство",
+                "author": "Лид" if msg["direction"] == "in" else (
+                    (msg["author"].get("name") or "Сотрудник") if msg.get("author", {}).get("kind") == "client"
+                    else "Агентство"),
             } for msg in item["messages"]]
         visible.append(row)
     return visible

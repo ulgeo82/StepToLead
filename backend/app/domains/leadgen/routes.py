@@ -1611,6 +1611,54 @@ async def hide_companies(payload: HideIn, db: AsyncSession = Depends(get_db), ad
     return {"done": done, "skipped": skipped}
 
 
+class MoveCompaniesIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    ids: list[int] = Field(min_length=1, max_length=5000)
+    workspace_id: int = Field(gt=0)
+
+
+@router.post("/companies/move")
+async def move_companies(payload: MoveCompaniesIn, db: AsyncSession = Depends(get_db),
+                         admin: AdminUser = Depends(require_admin)):
+    """Перенести компании к другому клиенту (завели не у того). Только агентство (require_admin).
+    Не переносим компании, по которым уже шла работа: переписка, цепочка, сделка в CRM; и те, что у клиента
+    уже есть (тот же сайт/ИНН/телефон) — иначе в базе клиента появился бы дубль."""
+    from app.domains.leadgen.models import LgCompanyKey
+    from sqlalchemy import delete as sa_delete
+    ws = workspace_id()
+    if payload.workspace_id == ws:
+        raise HTTPException(422, "Компании уже у этого клиента")
+    if await space.active_workspace(db, payload.workspace_id) is None:
+        raise HTTPException(404, "Клиент не найден или отключён")
+    rows = (await db.execute(select(LgCompany).where(LgCompany.workspace_id == ws,
+                                                     LgCompany.id.in_(payload.ids)))).scalars().all()
+    done, skipped = 0, []
+    for c in rows:
+        reason = await _busy_reason(db, c)
+        if not reason and c.crm_deal_id:
+            reason = "есть сделка в CRM"
+        if not reason and await db.scalar(select(LgTouch.id).where(LgTouch.company_id == c.id).limit(1)):
+            reason = "по компании уже была переписка"
+        keys = (await db.scalars(select(LgCompanyKey).where(LgCompanyKey.company_id == c.id))).all()
+        if not reason:
+            for k in keys:
+                if k.kind != "name_city" and await db.scalar(select(LgCompanyKey.id).where(
+                        LgCompanyKey.workspace_id == payload.workspace_id, LgCompanyKey.kind == k.kind,
+                        LgCompanyKey.value_norm == k.value_norm).limit(1)):
+                    reason = "такая компания у клиента уже есть"
+                    break
+        if reason:
+            skipped.append({"company_id": c.id, "reason_text": reason})
+            continue
+        c.workspace_id = payload.workspace_id
+        for k in keys:
+            k.workspace_id = payload.workspace_id
+        await db.execute(sa_delete(LgListItem).where(LgListItem.company_id == c.id))   # списки — прежнего клиента
+        done += 1
+    await db.commit()
+    return {"done": done, "skipped": skipped}
+
+
 @router.post("/companies/delete")
 async def delete_companies(payload: DeleteIn, db: AsyncSession = Depends(get_db),
                            admin: AdminUser = Depends(require_admin)):

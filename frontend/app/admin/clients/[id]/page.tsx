@@ -51,7 +51,7 @@ export default function ClientDetailsPage() {
 
   const roleCounts = useMemo(() => roles.map(role => ({ ...role, count: users.filter(user => user.role === role.value).length })), [users]);
 
-  async function updateUser(user: PortalUser, changes: { role?: PortalRole; active?: boolean }) {
+  async function updateUser(user: PortalUser, changes: { role?: PortalRole; active?: boolean; can_reply_outreach?: boolean }) {
     setBusy(user.id); setError(""); setNotice("");
     try {
       await api(`/portal/admin/users/${user.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(changes) });
@@ -129,6 +129,9 @@ export default function ClientDetailsPage() {
         <div className="accessIdentity"><span>{user.display_name.slice(0,1).toUpperCase()}</span><div><h3>{user.display_name}</h3><p>Логин: <b>{user.username}</b></p></div><i>{user.active ? "Доступ открыт" : "Отключён"}</i></div>
         <div className="accountCredentials"><div><span>Адрес входа</span><strong><a href={portalLoginUrl} target="_blank" rel="noopener noreferrer">{portalLoginUrl}</a></strong></div><div><span>Пароль</span><strong>{user.must_change_password ? "Выдан временный пароль" : "Установлен пользователем"}</strong></div></div>
         <label>Роль<select value={user.role} disabled={busy === user.id} onChange={event => updateUser(user, { role: event.target.value as PortalRole })}>{roles.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
+        {workspace.show_outreach && <label className="checkLine"><input type="checkbox"
+          checked={Boolean((user as PortalUser & { can_reply_outreach?: boolean }).can_reply_outreach)} disabled={busy === user.id}
+          onChange={event => void updateUser(user, { can_reply_outreach: event.target.checked })}/>Может отвечать лидам в «Аутриче»</label>}
         <div className="permissionList"><strong>Что доступно</strong>{role.permissions.map(permission => <span key={permission}>✓ {permission}</span>)}</div>
         <button className="credentialButton" disabled={busy === user.id} onClick={() => resetPassword(user)}>{busy === user.id ? "Создаём данные…" : "Получить логин и новый пароль"}</button>
         <button className={user.active ? "accessToggle danger" : "accessToggle"} disabled={busy === user.id} onClick={() => updateUser(user, { active: !user.active })}>{busy === user.id ? "Сохраняем…" : user.active ? "Отключить доступ" : "Включить доступ"}</button>
@@ -144,7 +147,7 @@ export default function ClientDetailsPage() {
           Показывать аутрич клиенту
         </label>
       </div>
-      <div className="tableTitle">Сотрудники увидят сводку и переписки. Отвечать и менять метки они не смогут.</div>
+      <div className="tableTitle">Сотрудники увидят сводку и переписки. Отвечать лидам — только тем, у кого в карточке сотрудника отмечено «Может отвечать лидам».</div>
     </section>
     <AdminTokensClient workspaceId={workspaceId}/>
     <LaunchEditor workspaceId={workspaceId}/>

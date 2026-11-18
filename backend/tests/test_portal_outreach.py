@@ -139,7 +139,8 @@ class PortalOutreachTests(unittest.TestCase):
         for key, sender in (("email:11", "sales1@example.org"), ("tg:1", None)):
             detail = self.get(f"{BASE}/inbox/{key}")
             self.assertEqual(set(detail), {"key", "channel", "campaign", "contact", "sender",
-                                           "last", "label", "hot", "messages"})
+                                           "last", "label", "hot", "messages", "can_reply", "reply_blocker",
+                                           "locked_by"})
             self.assertEqual(detail["sender"], sender)
             self.assertEqual([msg["author"] for msg in detail["messages"]], ["Агентство", "Лид"])
             self.assertEqual(len(detail["messages"]), 2)
@@ -148,7 +149,7 @@ class PortalOutreachTests(unittest.TestCase):
                 self.assertNotIn(forbidden, str(detail))
             path = f"{BASE}/inbox/{key}"
             self.assertEqual(self.client.patch(path, headers=ORIGIN, json={"label": "interested"}).status_code, 405)
-            for action in ("reply", "claim", "assign", "lock", "suggest", "to-crm"):
+            for action in ("claim", "assign", "suggest", "to-crm"):   # отвечать — можно (право), остальное — агентству
                 self.assertIn(self.client.post(f"{path}/{action}", headers=ORIGIN, json={}).status_code, (404, 405))
         self.assertEqual(self.client.get(f"{BASE}/inbox/email:12").status_code, 404)
         self.client.cookies.clear()
@@ -167,3 +168,41 @@ class PortalOutreachTests(unittest.TestCase):
         self.assertEqual([row["sender"] for row in result["items"]], [None, None])
         for key in ("email:11", "tg:1"):
             self.assertIsNone(self.get(f"{BASE}/inbox/{key}")["sender"])
+
+    def test_client_employee_can_reply_only_with_permission(self):
+        from app.domains.leadgen import routes as leadgen_routes
+        sent = []
+
+        class Transport:
+            async def send(self, mb, pw, mail):
+                sent.append(mail)
+        old = leadgen_routes.mail_transport_factory
+        leadgen_routes.mail_transport_factory = lambda: Transport()
+        self.addCleanup(setattr, leadgen_routes, "mail_transport_factory", old)
+        self.enable()
+        self.as_user(2)
+        url = f"{BASE}/inbox/email:11/reply"
+        self.assertEqual(self.client.post(url, headers=ORIGIN, json={"text": "Цены во вложении"}).status_code, 403)
+        self.assertFalse(self.get(f"{BASE}/inbox/email:11")["can_reply"])
+
+        async def allow(db):
+            (await db.get(PortalUser, 2)).can_reply_outreach = True
+            await db.commit()
+        self.run_db(allow)
+        self.assertTrue(self.get(f"{BASE}/inbox/email:11")["can_reply"])
+        self.assertEqual(self.client.post(f"{BASE}/inbox/email:11/lock", headers=ORIGIN).status_code, 200)
+        # агентство видит, что пишет сотрудник клиента, и не может отправить параллельно
+        self.client.cookies.clear(); self.client.cookies.set(COOKIE, self.admin_session)
+        r = self.client.post("/api/admin/outreach/inbox/email:11/reply", headers={**ORIGIN, "X-Workspace-Id": "1"},
+                             json={"text": "Параллельно"})
+        self.assertEqual(r.status_code, 409, r.text)
+        self.as_user(2)
+        r = self.client.post(url, headers=ORIGIN, json={"text": "Цены во вложении"})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(sent[-1].body, "Цены во вложении")
+        names = [m["author"] for m in self.get(f"{BASE}/inbox/email:11")["messages"] if m["direction"] == "out"]
+        self.assertIn("User 2", names)
+        # Telegram без сессии/прокси — понятный отказ, не 500
+        self.assertEqual(self.client.post(f"{BASE}/inbox/tg:1/reply", headers=ORIGIN, json={"text": "Привет"}).status_code, 422)
+        # чужой клиент — 404
+        self.assertEqual(self.client.post(f"{BASE}/inbox/email:21/reply", headers=ORIGIN, json={"text": "x"}).status_code, 404)

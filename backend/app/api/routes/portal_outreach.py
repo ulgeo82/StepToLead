@@ -2,6 +2,7 @@
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.access import require_portal_user
@@ -42,7 +43,63 @@ async def listing(channel: Channel | None = None, q: str | None = Query(None, ma
 
 
 @router.get("/inbox/{key}")
-async def detail(key: str, ws: int = Depends(workspace), db: AsyncSession = Depends(get_db)):
+async def detail(key: str, ws: int = Depends(workspace), db: AsyncSession = Depends(get_db),
+                 user: PortalUser = Depends(require_portal_user)):
     conv = await inbox.find(db, key, [ws])
     data = await inbox.detail(db, conv, client_view=True)
-    return (await read.visible_threads(db, ws, [data]))[0]
+    out = (await read.visible_threads(db, ws, [data]))[0]
+    allowed = bool(user.can_reply_outreach)
+    out["can_reply"] = allowed and data["can_reply"]
+    out["reply_blocker"] = None if not allowed else data["reply_blocker"]
+    lock = data.get("locked_by")
+    out["locked_by"] = {"name": lock["name"], "until": lock["until"], "me": lock["id"] == -user.id} if lock else None
+    return out
+
+
+def replier(user: PortalUser = Depends(require_portal_user)) -> PortalUser:
+    if not user.can_reply_outreach:
+        raise HTTPException(403, "Отвечать лидам вам не разрешено — попросите агентство")
+    return user
+
+
+@router.post("/inbox/{key}/lock")
+async def lock(key: str, ws: int = Depends(workspace), user: PortalUser = Depends(replier),
+               db: AsyncSession = Depends(get_db)):
+    conv = await inbox.find(db, key, [ws])
+    until = await inbox.lock(db, await inbox.state(db, conv.thread, conv.ws), inbox.portal_actor(user))
+    await db.commit()
+    return {"until": inbox._iso(until)}
+
+
+@router.delete("/inbox/{key}/lock", status_code=204)
+async def unlock(key: str, ws: int = Depends(workspace), user: PortalUser = Depends(replier),
+                 db: AsyncSession = Depends(get_db)):
+    from fastapi import Response
+    conv = await inbox.find(db, key, [ws])
+    st = await inbox.state(db, conv.thread, conv.ws, create=False)
+    if st is not None:
+        inbox.unlock(st, -user.id)
+        await db.commit()
+    return Response(status_code=204)
+
+
+class ReplyIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    text: str = Field(min_length=1, max_length=4096)
+
+
+@router.post("/inbox/{key}/reply")
+async def reply(key: str, payload: ReplyIn, ws: int = Depends(workspace), user: PortalUser = Depends(replier),
+                db: AsyncSession = Depends(get_db)):
+    conv = await inbox.find(db, key, [ws])
+    transport = None
+    if conv.channel == "email":
+        from app.domains.leadgen import routes as leadgen_routes
+        transport = leadgen_routes.mail_transport_factory()
+    try:
+        message = await inbox.reply(db, conv, inbox.portal_actor(user), payload.text.strip(), transport=transport)
+    except inbox.ReplyError as exc:
+        await db.rollback()
+        raise HTTPException(exc.status, str(exc)) from exc
+    return {"id": message["id"], "text": message["text"], "at": message["at"], "direction": "out",
+            "author": user.display_name or user.username}

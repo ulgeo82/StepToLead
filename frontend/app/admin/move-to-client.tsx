@@ -11,7 +11,7 @@ import { json } from "./telegram-infra";
 type Space = { id: number; name: string; is_home: boolean };
 
 export function MoveToClient({ path, ids, disabled, onDone }: {
-  path: "/telegram-accounts/move" | "/proxies/move"; ids: number[]; disabled?: boolean;
+  path: "/telegram-accounts/move" | "/proxies/move" | "/admin/leadgen/companies/move"; ids: number[]; disabled?: boolean;
   onDone: (message: string) => void;
 }) {
   const [spaces, setSpaces] = useState<Space[]>([]);
@@ -30,7 +30,13 @@ export function MoveToClient({ path, ids, disabled, onDone }: {
     if (!window.confirm(`Перенести отмеченные (${ids.length}) к клиенту «${space.name}»?`)) return;
     setBusy(true);
     try {
-      const r = await json<{ accounts?: number; proxies: number; without_proxy?: number }>(path, { ids, workspace_id: space.id });
+      const r = await json<{ accounts?: number; proxies?: number; without_proxy?: number; done?: number;
+        skipped?: { reason_text: string }[] }>(path, { ids, workspace_id: space.id });
+      if (r.done != null) {
+        onDone(`Перенесено к «${space.name}»: ${r.done}` + (r.skipped?.length
+          ? `. Не перенесли ${r.skipped.length}: ${r.skipped[0].reason_text}` : ""));
+        setTarget(""); return;
+      }
       onDone(r.accounts != null
         ? `Перенесено к «${space.name}»: аккаунтов ${r.accounts}, прокси вместе с ними ${r.proxies}` +
           (r.without_proxy ? `, без прокси ${r.without_proxy} — раздайте им прокси у клиента` : "")

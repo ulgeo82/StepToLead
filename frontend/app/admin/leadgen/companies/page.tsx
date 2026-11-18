@@ -31,6 +31,7 @@ import styles from "../leadgen.module.css";
 import EnrollDialog from "../../outreach/email/EnrollDialog";
 import AddToCampaignDialog from "../../outreach/campaigns/AddToCampaignDialog";
 import ExportDialog from "../ExportDialog";
+import { MoveToClient } from "../../move-to-client";
 import ImportDialog from "../ImportDialog";
 import { CompanyCard, AddToListDialog, useDialog } from "../company-dialogs";
 import type { CompanySource } from "../sources/source-types";
@@ -758,6 +759,8 @@ function CompaniesPage() {
           >
             Удалить
           </button>
+          <MoveToClient path="/admin/leadgen/companies/move" ids={selected} disabled={busy || loading}
+            onDone={message => { setNotice(message); setSelected([]); setRevision((n) => n + 1); }}/>
         </div>
         {deleteIds && (
           <div className={styles.notice} role="dialog" aria-label="Удаление компаний">

@@ -369,6 +369,20 @@ class LinksAndSpendTests(SpaceBase):
                                            {"kind": "find_site", "units": 50, "rub": 1.25, "unpriced_runs": 0}])
         self.assertEqual((ours["units"], ours["rub"]), (7, 0.18))
 
+    def test_move_company_to_other_client_agency_only(self):
+        cid = self.company(HOME, domain="moved-one.ru")
+        self.company(CLIENT, domain="already-there.ru")
+        dup = self.company(HOME, domain="already-there.ru")
+        r = self.post("/companies/move", {"ids": [cid, dup], "workspace_id": CLIENT})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["done"], 1)
+        self.assertEqual(r.json()["skipped"][0]["reason_text"], "такая компания у клиента уже есть")
+        self.assertEqual(self.get(f"/companies/{cid}", headers=AS_CLIENT).status_code, 200)
+        self.assertEqual(self.get(f"/companies/{cid}").status_code, 404)
+        self.assertEqual(self.post("/companies/move", {"ids": [cid], "workspace_id": GONE}, headers=AS_CLIENT).status_code, 404)
+        self.client.cookies.clear()
+        self.assertIn(self.post("/companies/move", {"ids": [cid], "workspace_id": HOME}, headers=AS_CLIENT).status_code, (401, 403))
+
 
 if __name__ == "__main__":
     unittest.main()

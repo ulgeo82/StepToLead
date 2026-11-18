@@ -184,6 +184,7 @@ class LgTouch(Base):
     body: Mapped[str | None] = mapped_column(Text)
     external_id: Mapped[str | None] = mapped_column(String(300))
     user_id: Mapped[int | None] = mapped_column(ForeignKey("admin_users.id", ondelete="SET NULL"))
+    portal_user_id: Mapped[int | None] = mapped_column(Integer)   # ответил сотрудник клиента из своего портала
     mailbox_id: Mapped[int | None] = mapped_column(ForeignKey("lg_mailboxes.id", ondelete="SET NULL"), index=True)
     address: Mapped[str | None] = mapped_column(String(254))      # адрес собеседника (кому / от кого)
     # Входящие: метка ответа (interested / question / later / not_interested / unsubscribe / auto / other),

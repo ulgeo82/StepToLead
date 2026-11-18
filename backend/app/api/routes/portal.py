@@ -85,6 +85,7 @@ class UserUpdate(BaseModel):
     active: bool | None = None
     manage_sources: bool | None = None
     manage_integrations: bool | None = None
+    can_reply_outreach: bool | None = None
 
     @field_validator("role")
     @classmethod
@@ -212,6 +213,7 @@ def user_payload(user: PortalUser, workspace_name: str | None = None):
             "role_name": ROLES["agency"] if user.is_agency else ROLES.get(user.role, user.role), "active": user.active,
             "is_agency": bool(user.is_agency),
             "must_change_password": user.must_change_password, "manage_sources": user.manage_sources,
+            "can_reply_outreach": bool(getattr(user, "can_reply_outreach", False)),
             "manage_integrations": user.manage_integrations,
             "phone": user.phone, "permissions": sorted(effective_permissions(user)),
             "status": "blocked" if not user.active else "invited" if user.must_change_password else "active",
@@ -400,6 +402,8 @@ async def update_user(user_id: int, payload: UserUpdate, request: Request, db: A
         user.role = "client_owner" if payload.role == "agency" else payload.role
         user.is_agency = payload.role == "agency"
         user.permissions = None
+    if payload.can_reply_outreach is not None:   # отвечать лидам из «Аутрича» своего портала
+        user.can_reply_outreach = payload.can_reply_outreach
     if payload.manage_sources is not None:
         user.manage_sources = payload.manage_sources
         access_rows = (await db.scalars(select(PortalProjectAccess).where(PortalProjectAccess.user_id == user.id))).all()

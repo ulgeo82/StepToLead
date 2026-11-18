@@ -95,7 +95,18 @@ async def _names(db: AsyncSession, wss) -> dict[int, str]:
 
 
 async def _people(db: AsyncSession) -> dict[int, str]:
-    return {u.id: u.display_name or u.username for u in (await db.scalars(select(AdminUser))).all()}
+    """Люди, которые могут вести переписку: операторы агентства (id > 0) и сотрудники клиента (id < 0 —
+    portal_users.id со знаком минус, чтобы не путаться с admin_users в lock/назначении/авторстве)."""
+    from app.models.marketing import PortalUser
+    people = {u.id: u.display_name or u.username for u in (await db.scalars(select(AdminUser))).all()}
+    people.update({-u.id: u.display_name or u.username for u in (await db.scalars(select(PortalUser))).all()})
+    return people
+
+
+def portal_actor(user):
+    """Сотрудник клиента в роли «оператора»: тот же интерфейс, что у AdminUser (id, display_name, username)."""
+    from types import SimpleNamespace
+    return SimpleNamespace(id=-user.id, display_name=user.display_name, username=user.username, client=True)
 
 
 async def operators(db: AsyncSession) -> list[dict]:
@@ -427,7 +438,8 @@ async def messages(db: AsyncSession, conv: Conv, people: dict[int, str], *, clie
             if t.direction == "in":
                 author = {"kind": "lead", "name": t.address}
             elif t.campaign_kind == "manual_reply":
-                author = {"kind": "agency", "name": people.get(t.user_id) if t.user_id else None}
+                author = ({"kind": "client", "name": people.get(-t.portal_user_id)} if t.portal_user_id
+                          else {"kind": "agency", "name": people.get(t.user_id) if t.user_id else None})
             else:
                 author = {"kind": "auto", "name": None}
             out.append({"id": f"email:{t.id}", "direction": t.direction, "text": email_inbox.clean_body(t.body),
@@ -446,7 +458,8 @@ def tg_message(m: CampaignMessage, dialog: CampaignDialog, people: dict[int, str
     if m.status == "received":
         author = {"kind": "lead", "name": f"@{dialog.username}" if dialog.username else None}
     elif m.kind == "manual":
-        author = {"kind": "agency", "name": people.get(m.author_id) if m.author_id else None}
+        author = {"kind": "client" if (m.author_id or 0) < 0 else "agency",
+                  "name": people.get(m.author_id) if m.author_id else None}
     else:
         author = {"kind": "auto", "name": None}
     status = {"received": "received", "sent": "sent"}.get(m.status, "failed")
@@ -472,10 +485,17 @@ async def tg_blocker(db: AsyncSession, dialog: CampaignDialog) -> str | None:
 
 
 async def detail(db: AsyncSession, conv: Conv, *, client_view: bool = False) -> dict:
-    people = {} if client_view else await _people(db)
+    people = await _people(db)
+    if client_view:   # клиенту — только имена его сотрудников; агентство подписывается «Агентство»
+        people = {k: v for k, v in people.items() if k < 0}
     out = await conversation(db, conv, client_view=client_view)
     out["messages"] = await messages(db, conv, people, client_view=client_view)
     if client_view:
+        blocker = (await email_inbox.reply_blocker(db, conv.touch, conv.company) if conv.channel == "email"
+                   else await tg_blocker(db, conv.dialog))
+        out["can_reply"], out["reply_blocker"] = blocker is None, blocker
+        st = await state(db, conv.thread, conv.ws, create=False)
+        out["locked_by"] = _lock_view(st, people | await _people(db), utcnow())
         return out
     if conv.channel == "email":
         out["subject"] = conv.touch.subject
@@ -541,13 +561,16 @@ async def reply(db: AsyncSession, conv: Conv, user: AdminUser, text: str, *, tra
             raise ReplyError(blocker, 422)
         body = render(text, conv, box.sender_name if box else None, await _contact_name(db, conv))
         try:
-            out = await email_inbox.send_reply(db, transport, conv.touch, conv.company, body, user_id=user.id)
+            out = await email_inbox.send_reply(db, transport, conv.touch, conv.company, body,
+                                               user_id=user.id if user.id > 0 else None)
+            if user.id < 0:
+                out.portal_user_id = -user.id
         except email_inbox.ReplyError as exc:
             raise ReplyError(str(exc), exc.status) from exc
         await email_inbox.merge_earlier(db, conv.touch, now)
         message = {"id": f"email:{out.id}", "direction": "out", "text": out.body, "subject": out.subject,
                    "at": _iso(out.happened_at), "status": "sent",
-                   "author": {"kind": "agency", "name": user.display_name or user.username}}
+                   "author": {"kind": "client" if user.id < 0 else "agency", "name": user.display_name or user.username}}
     else:
         blocker = await tg_blocker(db, conv.dialog)
         if blocker:

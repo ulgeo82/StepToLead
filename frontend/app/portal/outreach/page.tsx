@@ -6,6 +6,7 @@ import { api } from "@/lib/api";
 import type { Channel, Contacted, Conversation, Listing, Summary, Thread } from "./types";
 import "../../result/result.css";
 import css from "./outreach.module.css";
+import { ReplyBox } from "./reply-box";
 
 const base = "/portal/outreach";
 const limit = 50;
@@ -139,6 +140,8 @@ export default function OutreachPage() {
                     <header><strong>{message.author}</strong><small>{date(message.at)}</small></header>
                     <p>{message.text}</p>
                   </article>)}</div>
+                <ReplyBox conv={detail} onSent={message =>
+                  setDetail(current => current ? { ...current, messages: [...current.messages, message] } : current)}/>
               </>}
             </> : <p>Выберите переписку, чтобы прочитать сообщения.</p>}
           </section>}

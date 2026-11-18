@@ -19,6 +19,7 @@ export type Thread = {
   hot: boolean;
 };
 export type Conversation = Thread & { messages: {
-  id: string; text: string; at: string | null; direction: "in" | "out"; author: "Лид" | "Агентство";
-}[] };
+  id: string; text: string; at: string | null; direction: "in" | "out"; author: string;
+}[]; can_reply?: boolean; reply_blocker?: string | null;
+  locked_by?: { name: string | null; until: string; me: boolean } | null };
 export type Listing<T> = { total: number; items: T[] };
