@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from app.db import Base
-from app.models import Campaign, Lead, TelegramAccount
+from app.models import LeadStatus, Campaign, Lead, TelegramAccount
 from app.models.automation import CampaignRuntime, CampaignAccount, CampaignDialog, CampaignMessage, CampaignEvent, GlobalBlock
 from app.core.crypto import encrypt_secret
 from app.schemas.automation import AutomationSettings, AutomationUpdate
@@ -72,6 +72,28 @@ class ExecutionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(row.status, "unknown")
         self.assertEqual(self.dialog.state, "review")
         self.client.send_message.assert_awaited_once()
+
+    async def test_recipient_privacy_skips_lead_and_keeps_account(self):
+        from telethon.errors import UserPrivacyRestrictedError
+        self.runtime.status = "running"; await self.db.commit()
+        self.client.send_message.side_effect = UserPrivacyRestrictedError(request=None)
+        self.assertFalse(await send(self.db, self.client, self.runtime, self.dialog, "first", "Test", "first"))
+        row = await self.db.scalar(select(CampaignMessage))
+        lead = await self.db.get(Lead, self.lead.id)
+        self.assertEqual((row.status, self.dialog.state, lead.status), ("failed", "stopped", LeadStatus.FAILED))
+        self.assertIn("запретил", row.error)
+
+    async def test_dead_session_returns_lead_to_queue(self):
+        from telethon.errors import AuthKeyUnregisteredError
+        from app.services.tg_errors import AccountProblem
+        self.runtime.status = "running"; await self.db.commit()
+        self.client.send_message.side_effect = AuthKeyUnregisteredError(request=None)
+        with self.assertRaises(AccountProblem) as ctx:
+            await send(self.db, self.client, self.runtime, self.dialog, "first", "Test", "first")
+        self.assertEqual(ctx.exception.kind, "dead")
+        lead = await self.db.get(Lead, self.lead.id)
+        self.assertEqual(lead.status, LeadStatus.NEW)
+        self.assertIsNone(await self.db.scalar(select(CampaignDialog)))
 
     async def test_global_block_prevents_send(self):
         self.runtime.status = "running"

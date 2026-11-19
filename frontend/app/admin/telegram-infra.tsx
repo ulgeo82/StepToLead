@@ -16,6 +16,7 @@ export const accountStatuses: Record<string, string> = {
   online: "В сети", offline: "Не в сети", checking: "Проверяем", connecting: "Подключаем",
   disconnected: "Отключён", flood_wait: "Пауза Telegram", error: "Ошибка", waiting_proxy: "Ждёт прокси",
   spamblock: "Спам-блок", code_sent: "Ожидает код", password_required: "Нужен пароль 2FA",
+  unauthorized: "Сессия слетела — войдите заново", banned: "Заблокирован Telegram",
 };
 
 export function isFreeProxy(proxy: InfraProxy) {

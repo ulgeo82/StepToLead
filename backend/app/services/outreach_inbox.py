@@ -589,12 +589,22 @@ async def reply(db: AsyncSession, conv: Conv, user: AdminUser, text: str, *, tra
         try:
             row.telegram_message_id = await sender(account, dialog, body)
         except Exception as exc:  # noqa: BLE001
+            from app.services import tg_errors
+            kind, text = tg_errors.classify(exc)
             row.status = "failed"
-            limited = type(exc).__name__ in ("FloodWaitError", "PeerFloodError")
-            row.error = "Telegram ограничил отправку" if limited else f"{type(exc).__name__}: отправка не подтверждена"
+            if type(exc).__name__ == "FloodWaitError":
+                kind, text = "limited", f"Telegram просит подождать {getattr(exc, 'seconds', 0)} сек."
+            row.error = text if kind else f"{type(exc).__name__}: отправка не подтверждена"
+            if kind == "dead":
+                account.status = "unauthorized" if "Сессия" in text else "banned"
+                account.last_error = text
             await db.commit()
-            raise ReplyError("Telegram временно ограничил отправку с аккаунта — попробуйте позже" if limited
-                             else "Не удалось отправить в Telegram — проверьте аккаунт и прокси", 502) from exc
+            if kind in ("recipient", "content"):
+                raise ReplyError(text, 422) from exc
+            if kind in ("limited", "dead"):
+                raise ReplyError(text, 409) from exc
+            raise ReplyError("Не удалось отправить в Telegram: связь оборвалась, ушло ли сообщение — неизвестно. "
+                             "Проверьте диалог в Telegram перед повтором", 502) from exc
         row.status = "sent"
         # Человек взял переписку: ИИ-автоответ и дожим для диалога выключены, входящие раннер читает дальше.
         if dialog.state not in ("stopped",):

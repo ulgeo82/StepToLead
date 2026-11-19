@@ -14,6 +14,7 @@ from types import SimpleNamespace
 from sqlalchemy import func, select, text, update
 from sqlalchemy.orm import selectinload
 from telethon.errors import FloodWaitError, PeerFloodError, UsernameInvalidError, UsernameNotOccupiedError
+from app.services import tg_errors
 from telethon.tl.types import InputPeerUser, User
 
 from app.core.crypto import decrypt_secret
@@ -140,7 +141,8 @@ async def connect_account(db, account, campaign_id):
             await asyncio.wait_for(client.connect(), 30)
             last_stage = "проверка авторизации сессии"
             if not await asyncio.wait_for(client.is_user_authorized(), 20):
-                raise ValueError("Сессия аккаунта больше не авторизована")
+                from app.services.tg_errors import AccountProblem
+                raise AccountProblem("dead", "Сессия аккаунта больше не действует — переподключите аккаунт")
             return client
         except TimeoutError as exc:
             await client.disconnect()
@@ -192,13 +194,40 @@ async def send(db, client, runtime, dialog, kind, body, dedupe, target=None):
         await db.commit()
         await add_campaign_event(db, dialog.campaign_id, "success", "message_sent", "Telegram подтвердил отправку сообщения.", account_id=dialog.account_id, username=dialog.username, details={"kind": kind, "telegram_message_id": result.id})
         return True
-    except (FloodWaitError, PeerFloodError):
+    except FloodWaitError:
         row.status = "pending"
         row.error = "Telegram ограничил отправку"
         await db.commit()
         await add_campaign_event(db, dialog.campaign_id, "warning", "telegram_limit", "Telegram ограничил отправку с аккаунта; он временно приостановлен.", account_id=dialog.account_id, username=dialog.username, details={"kind": kind})
         raise
     except Exception as exc:
+        from app.services import tg_errors
+        kind, text = tg_errors.classify(exc)
+        if kind in ("recipient", "content"):
+            # Сообщение точно не ушло: получателю этим путём не написать — лид «не удалось», аккаунт работает дальше.
+            row.status, row.error = "failed", text
+            dialog.state = "stopped"
+            lead = await db.get(Lead, dialog.lead_id)
+            if lead is not None and kind == "recipient":
+                lead.status = LeadStatus.FAILED
+            elif lead is not None and kind == "content":
+                lead.status = LeadStatus.FAILED
+            await db.commit()
+            await add_campaign_event(db, dialog.campaign_id, "warning", "recipient_unavailable", f"{text}. Получатель пропущен.", account_id=dialog.account_id, username=dialog.username, details={"kind": kind, "error_type": type(exc).__name__})
+            return False
+        if kind in ("limited", "dead"):
+            # Не отправлено из-за аккаунта. Первое сообщение отдаём другому аккаунту (диалог убираем, лид — в очередь).
+            row.status, row.error = "cancelled", text
+            if kind == "dead" or row.kind == "first":
+                lead = await db.get(Lead, dialog.lead_id)
+                if row.kind == "first" and lead is not None:
+                    lead.status = LeadStatus.NEW
+                    await db.delete(dialog)
+                else:
+                    dialog.state = "review"
+            await db.commit()
+            await add_campaign_event(db, runtime.campaign_id, "error" if kind == "dead" else "warning", "account_unavailable", text, account_id=row.account_id, username=dialog.username if kind != "dead" else None, details={"kind": kind, "error_type": type(exc).__name__})
+            raise tg_errors.AccountProblem(kind, text) from exc
         row.status = "unknown"
         row.error = f"{type(exc).__name__}: результат отправки не подтверждён; автоматический повтор отключён"
         dialog.state = "review"
@@ -421,6 +450,8 @@ async def tick(campaign_id):
         spam_stale = not checked or datetime.fromisoformat(checked) < now() - timedelta(hours=SPAMCHECK_HOURS)
         if account.status == "spamblock" and not spam_stale:
             return
+        if account.status in ("unauthorized", "banned"):   # мёртвую сессию не дёргаем каждые 45 секунд
+            return
         from app.services import account_locks
         if not account_locks.try_take(account.id):   # аккаунт сейчас в прогреве/ответе — следующий круг
             return
@@ -460,6 +491,19 @@ async def tick(campaign_id):
             runtime.last_error = None
             await db.commit()
             await add_campaign_event(db, campaign_id, "info", "cycle_completed", f"Цикл аккаунта завершён: активных диалогов — {len(dialogs)}, действие выполнено — {'да' if acted else 'нет'}.", account_id=account.id, details={"active_dialogs": len(dialogs), "acted": acted, "next_check_at": runtime.next_action_at.isoformat() if runtime.next_action_at else None})
+        except tg_errors.AccountProblem as exc:
+            await db.rollback()
+            account = await db.get(TelegramAccount, account_id)
+            if exc.kind == "dead":
+                account.status = "unauthorized" if "Сессия" in exc.text else "banned"
+            else:
+                account.status = "spamblock"
+                account.flood_wait_until = now() + timedelta(hours=settings.restriction_hours)
+            account.last_error = exc.text
+            runtime = await db.get(CampaignRuntime, campaign_id)
+            runtime.last_error = f"Аккаунт {account.phone}: {exc.text}"
+            await db.commit()
+            await add_campaign_event(db, campaign_id, "error" if exc.kind == "dead" else "warning", "account_" + exc.kind, runtime.last_error, account_id=account_id)
         except (FloodWaitError, PeerFloodError) as exc:
             account.flood_wait_until = now() + timedelta(seconds=max(getattr(exc, "seconds", 0), settings.restriction_hours * 3600))
             account.status = "flood_wait"

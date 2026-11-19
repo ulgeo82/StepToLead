@@ -422,7 +422,15 @@ async def run_session(account_id: int, rnd: random.Random | None = None, now: da
                 st["last"] = "Telegram попросил паузу — прогрев ждёт"
                 await event(db, account.id, "flood", f"Пауза Telegram {seconds} с")
             except Exception as exc:  # noqa: BLE001
-                st["last"] = f"ошибка: {type(exc).__name__}"
+                from app.services import tg_errors
+                kind, text = tg_errors.classify(exc)
+                if kind == "dead":       # мёртвую сессию прогревом не дёргаем — ставим на паузу до переподключения
+                    st["paused"] = True
+                    account.status = "unauthorized" if "Сессия" in text else "banned"
+                    account.last_error = text
+                elif kind == "limited":
+                    st["paused_until"] = _iso(now + timedelta(hours=24))
+                st["last"] = text if kind else f"ошибка: {type(exc).__name__}"
                 await event(db, account.id, "error", f"{type(exc).__name__}: {str(exc)[:200]}")
                 log.warning("warmup account %s: %s", account_id, type(exc).__name__)
             stage = stage_of(st, now) or stage
