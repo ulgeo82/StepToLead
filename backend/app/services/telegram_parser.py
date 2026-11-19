@@ -172,10 +172,27 @@ async def run_parse_task(task_id: int) -> None:
                     entity = await client.get_entity(source)
                     source_name = getattr(entity, "title", None) or getattr(entity, "username", None) or source
                     await add_log(db, task.id, f"Источник «{source_name}»: начинаю сбор.")
+                    # Канал: подписчиков видит только админ, авторы постов — сам канал. Живые люди — в привязанном
+                    # чате обсуждений (там комментарии): его участники и авторы сообщений обычно доступны.
+                    people = entity
+                    is_channel = bool(getattr(entity, "broadcast", False))
+                    if is_channel:
+                        discussion = None
+                        try:
+                            full = await client(functions.channels.GetFullChannelRequest(entity))
+                            linked = getattr(full.full_chat, "linked_chat_id", None)
+                            discussion = next((c for c in full.chats if c.id == linked), None) if linked else None
+                        except RPCError:
+                            discussion = None
+                        if discussion is not None:
+                            people = discussion
+                            await add_log(db, task.id, f"Источник «{source_name}» — канал: участников и авторов беру из чата обсуждений «{getattr(discussion, 'title', '')}».")
+                        else:
+                            await add_log(db, task.id, f"Источник «{source_name}» — канал без чата обсуждений: подписчиков Telegram показывает только админу, собираю только комментарии.")
 
                     if task.collect_messages:
                         count = 0
-                        async for message in client.iter_messages(entity, limit=task.per_source_limit):
+                        async for message in client.iter_messages(people, limit=task.per_source_limit):
                             sender = message.sender
                             if sender is None and message.sender_id:
                                 try:
@@ -188,18 +205,29 @@ async def run_parse_task(task_id: int) -> None:
                                 break
                         await add_log(db, task.id, f"Источник «{source_name}»: просмотрены авторы последних сообщений ({count}).")
 
-                    if task.collect_members and not stop:
+                    if task.collect_members and not stop and not (is_channel and people is entity):
                         count = 0
                         try:
-                            async for user in client.iter_participants(entity, limit=task.per_source_limit):
+                            async for user in client.iter_participants(people, limit=task.per_source_limit):
                                 count += 1
                                 if await save_user(user, raw_source, str(source_name), "member"):
                                     stop = True
                                     break
                             await add_log(db, task.id, f"Источник «{source_name}»: просмотрены участники ({count}).")
                         except RPCError as exc:
-                            warnings += 1
-                            await add_log(db, task.id, f"Источник «{source_name}»: Telegram не разрешил получить список участников ({type(exc).__name__}).", "warning")
+                            # Скрытый список участников — настройка группы, не сбой: остальное (сообщения, комментарии)
+                            # собираем как обычно, задача не считается «с ошибками».
+                            if type(exc).__name__ not in ("ChatAdminRequiredError",):
+                                warnings += 1
+                            await add_log(db, task.id, f"Источник «{source_name}»: список участников скрыт админами — беру людей из сообщений и комментариев.", "info")
+                            if not task.collect_messages and not stop:
+                                async for message in client.iter_messages(people, limit=task.per_source_limit):
+                                    sender = message.sender or (await message.get_sender() if message.sender_id else None)
+                                    count += int(isinstance(sender, User))
+                                    if await save_user(sender, raw_source, str(source_name), "message", message.message):
+                                        stop = True
+                                        break
+                                await add_log(db, task.id, f"Источник «{source_name}»: просмотрены авторы сообщений ({count}).")
 
                     if task.collect_comments and not stop:
                         replies_seen = 0
