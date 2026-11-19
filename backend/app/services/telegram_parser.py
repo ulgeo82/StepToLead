@@ -16,6 +16,9 @@ from app.models.telegram_parser import TelegramParsedContact, TelegramParseLog, 
 from app.services.telegram import make_client
 
 
+MAX_SCAN = 20000   # сообщений на источник максимум: ~200 запросов к Telegram
+
+
 def normalize_source(value: str) -> str:
     value = value.strip()
     value = re.sub(r"^https?://", "", value, flags=re.I)
@@ -99,6 +102,8 @@ async def run_parse_task(task_id: int) -> None:
             return
 
         client = make_client(decrypt_secret(account.session_encrypted), account.proxy)
+        # Короткие паузы Telegram (до 2 мин) ждём сами и продолжаем, а не обрываем всю задачу.
+        client.flood_sleep_threshold = 120
         seen: dict[int, TelegramParsedContact] = {}
         warnings = 0
 
@@ -192,7 +197,14 @@ async def run_parse_task(task_id: int) -> None:
 
                     if task.collect_messages:
                         count = 0
-                        async for message in client.iter_messages(people, limit=task.per_source_limit):
+                        before = len(seen)
+                        scanned = 0
+                        # Лимит источника — это люди, а не сообщения: листаем историю, пока не наберём
+                        # per_source_limit новых людей (в чате одни и те же пишут много раз), но не больше MAX_SCAN.
+                        async for message in client.iter_messages(people, limit=MAX_SCAN):
+                            scanned += 1
+                            if len(seen) - before >= task.per_source_limit:
+                                break
                             sender = message.sender
                             if sender is None and message.sender_id:
                                 try:
@@ -203,7 +215,7 @@ async def run_parse_task(task_id: int) -> None:
                             if await save_user(sender, raw_source, str(source_name), "message", message.message):
                                 stop = True
                                 break
-                        await add_log(db, task.id, f"Источник «{source_name}»: просмотрены авторы последних сообщений ({count}).")
+                        await add_log(db, task.id, f"Источник «{source_name}»: просмотрено сообщений {scanned}, новых людей {len(seen) - before}.")
 
                     if task.collect_members and not stop and not (is_channel and people is entity):
                         count = 0
@@ -229,7 +241,9 @@ async def run_parse_task(task_id: int) -> None:
                                         break
                                 await add_log(db, task.id, f"Источник «{source_name}»: просмотрены авторы сообщений ({count}).")
 
-                    if task.collect_comments and not stop:
+                    if task.collect_comments and not stop and is_channel and people is not entity and task.collect_messages:
+                        await add_log(db, task.id, f"Источник «{source_name}»: комментарии уже учтены — они и есть сообщения чата обсуждений.")
+                    elif task.collect_comments and not stop:
                         replies_seen = 0
                         try:
                             async for post in client.iter_messages(entity, limit=min(task.per_source_limit, 100)):
