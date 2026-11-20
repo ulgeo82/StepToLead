@@ -70,14 +70,27 @@ async def import_leads(campaign_id: int, file: UploadFile, db: AsyncSession = De
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     existing = set((await db.scalars(select(Lead.username).where(Lead.campaign_id == campaign_id))).all())
+    # Одному человеку компания пишет один раз: дубли из других гипотез этой же компании — пропускаем.
+    from app.models.automation import GlobalBlock
+    company = set((await db.scalars(select(Lead.username).join(Campaign, Campaign.id == Lead.campaign_id).where(
+        Lead.campaign_id != campaign_id,
+        tg_space.belongs(Campaign.workspace_id, campaign.workspace_id or tg_space.home())))).all())
+    blocked_names = {(u or "").lower().lstrip("@") for u in (await db.scalars(select(GlobalBlock.username))).all()}
     imported = 0
     skipped = len(errors)
+    in_company = blocked = 0
     for item in parsed:
         if item.username in existing:
             skipped += 1
+            continue
+        if item.username in company:
+            in_company += 1
+            continue
+        if item.username in blocked_names:
+            blocked += 1
             continue
         db.add(Lead(campaign_id=campaign_id, username=item.username, first_message=item.first_message))
         existing.add(item.username)
         imported += 1
     await db.commit()
-    return ImportResult(imported=imported, skipped=skipped, errors=errors[:20])
+    return ImportResult(imported=imported, skipped=skipped, errors=errors[:20], already_in_company=in_company, blocked=blocked)

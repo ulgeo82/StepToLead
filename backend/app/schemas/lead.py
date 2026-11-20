@@ -28,3 +28,5 @@ class ImportResult(BaseModel):
     imported: int
     skipped: int
     errors: list[str]
+    already_in_company: int = 0   # уже есть в другой гипотезе компании — второй раз не пишем
+    blocked: int = 0              # в общем стоп-листе Telegram

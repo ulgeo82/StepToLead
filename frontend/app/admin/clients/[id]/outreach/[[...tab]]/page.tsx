@@ -11,10 +11,10 @@ import { api } from "@/lib/api";
 import AccountsPage from "@/app/admin/accounts/page";
 import ProxiesPage from "@/app/admin/proxies/page";
 import TgWarmupPage from "@/app/admin/tg-warmup/page";
-import CampaignsPage from "@/app/admin/campaigns/page";
 import ParserPage from "@/app/admin/parser/page";
 import MailWarmupPage from "@/app/admin/outreach/warmup/page";
 import css from "./company.module.css";
+import Sending from "./sending";
 
 type Tab = { id: string; label: string; href?: string };
 const TABS: Tab[] = [
@@ -22,7 +22,7 @@ const TABS: Tab[] = [
   { id: "accounts", label: "Аккаунты" },
   { id: "proxies", label: "Прокси" },
   { id: "warmup", label: "Прогрев" },
-  { id: "campaigns", label: "Кампании Telegram" },
+  { id: "sending", label: "Рассылка и гипотезы" },
   { id: "parser", label: "Сбор контактов" },
   { id: "inbox", label: "Входящие", href: "/admin/outreach/inbox" },
   { id: "email", label: "Почта", href: "/admin/outreach/campaigns" },
@@ -30,7 +30,7 @@ const TABS: Tab[] = [
 ];
 const SCREENS: Record<string, () => React.ReactNode> = {
   accounts: () => <AccountsPage/>, proxies: () => <ProxiesPage/>, warmup: () => <TgWarmupPage/>,
-  campaigns: () => <CampaignsPage/>, parser: () => <ParserPage/>, "mail-warmup": () => <MailWarmupPage/>,
+  parser: () => <ParserPage/>, "mail-warmup": () => <MailWarmupPage/>,
 };
 
 type Workspace = { id: number; name: string; status: string };
@@ -50,7 +50,7 @@ export default function CompanyOutreach() {
     <header className={css.head}>
       <Link href={`/admin/clients/${id}`} className={css.back}>← Карточка компании</Link>
       <h1>{workspace?.name ?? "Компания"}</h1>
-      <p>Аутрич компании: всё, что нужно для запуска, — здесь. Аккаунты, прокси, лимиты и кампании этой компании
+      <p>Аутрич компании: всё, что нужно для запуска, — здесь. Аккаунты, прокси, лимиты и гипотезы этой компании
         не смешиваются с другими.</p>
       <nav className={css.tabs} aria-label="Разделы аутрича компании">
         {TABS.map(t => t.href
@@ -59,7 +59,7 @@ export default function CompanyOutreach() {
               aria-current={tab === t.id ? "page" : undefined}>{t.label}</Link>)}
       </nav>
     </header>
-    <div className={css.body}>{screen ? screen() : <Launch id={id} base={base}/>}</div>
+    <div className={css.body}>{tab === "sending" ? <Sending base={base}/> : screen ? screen() : <Launch id={id} base={base}/>}</div>
   </div>;
 }
 
@@ -91,8 +91,8 @@ function Launch({ id, base }: { id: number; base: string }) {
       text: warming.length ? `в прогреве ${warming.length}, старшему аккаунту ${maxDay} дн.` : "прогрев не запущен", href: `${base}/warmup`, action: "Прогрев" },
     { done: limit != null, title: "Лимит первых касаний", text: limit != null ? `${limit} на аккаунт в день · с 4–5-го дня прогрева начинайте с 2` : "—",
       href: `${base}/accounts`, action: "Изменить" },
-    { done: leads > 0, title: "Кампания с получателями", text: campaigns.length ? `${campaigns.length} кампаний, ${leads} получателей` : "кампаний нет",
-      href: `${base}/campaigns`, action: "Кампании" },
+    { done: leads > 0, title: "Гипотеза с базой получателей", text: campaigns.length ? `${campaigns.length} гипотез, ${leads} получателей` : "гипотез нет",
+      href: `${base}/sending`, action: "Гипотезы" },
   ];
   const ready = steps.every(s => s.done) && maxDay >= 4;
   return <section className={css.launch}>

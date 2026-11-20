@@ -433,6 +433,8 @@ async def tick(campaign_id):
         normal_delay = random.randint(settings.round_min if wrapped else settings.account_min, settings.round_max if wrapped else settings.account_max)
         runtime.next_action_at = now() + timedelta(seconds=min(normal_delay, 45) if has_active_dialogs else normal_delay)
         await db.commit()
+        if settings.daily_limit == 0 and not has_active_dialogs:
+            return   # гипотеза не активна и ответов ждать не от кого — аккаунты не трогаем
         if not account or not account.session_encrypted or not due(account.flood_wait_until):
             return
         # Без рабочего прокси аккаунт не подключаем никогда (иначе Telegram увидит IP сервера).

@@ -85,3 +85,5 @@ from app.api.routes import portal_outreach  # noqa: E402
 api_router.include_router(portal_outreach.router)
 from app.api.routes import telegram_warmup as telegram_warmup_routes  # noqa: E402
 api_router.include_router(telegram_warmup_routes.router)
+from app.api.routes import telegram_company as telegram_company_routes  # noqa: E402
+api_router.include_router(telegram_company_routes.router)

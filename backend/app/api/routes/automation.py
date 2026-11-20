@@ -156,6 +156,9 @@ async def start_campaign(campaign_id: int, db: AsyncSession = Depends(get_db)):
             CampaignAccount.account_id.in_(ids),
             CampaignRuntime.status == "running",
             CampaignAccount.campaign_id != campaign_id,
+            # гипотезы одной компании делят её аккаунты (docs/TELEGRAM_COMPANY.md); чужие — нет
+            CampaignAccount.campaign_id.not_in(select(Campaign.id).where(
+                tg_space.belongs(Campaign.workspace_id, (await campaign_or_404(db, campaign_id)).workspace_id or tg_space.home()))),
         )
     )
     if conflict:

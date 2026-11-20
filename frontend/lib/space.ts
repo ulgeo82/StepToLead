@@ -25,7 +25,7 @@ export const isSpacePage = (pathname: string) =>
 /** Запросы API, которые сервер понимает «в пространстве клиента». */
 export const isSpaceApi = (path: string) =>
   /^\/admin\/(leadgen|outreach)(\/|\?|$)/.test(path)
-  || /^\/(campaigns|leads|telegram-accounts|telegram-parser|telegram-warmup|proxies)(\/|\?|$)/.test(path);
+  || /^\/(campaigns|leads|telegram-accounts|telegram-parser|telegram-warmup|telegram-company|proxies)(\/|\?|$)/.test(path);
 
 const parse = (value: string | null | undefined): number | null => {
   const id = Number(value);
