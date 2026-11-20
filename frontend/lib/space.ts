@@ -11,9 +11,16 @@ const KEY = "stl:space";
 /** Страницы Telegram-аутрича (этап B): тоже работают внутри клиента. */
 const TELEGRAM_PAGES = /^\/admin\/(campaigns|leads|accounts|parser|proxies|tg-warmup)(\/|$)/;
 
+/** Аутрич внутри карточки компании: /admin/clients/12/outreach/… — клиент задан адресом, переключатель не нужен. */
+const COMPANY_PAGES = /^\/admin\/clients\/(\d+)\/outreach(\/|$)/;
+export const companyFromPath = (pathname: string): number | null => {
+  const m = COMPANY_PAGES.exec(pathname);
+  return m ? Number(m[1]) : null;
+};
+
 /** Страницы, где работа идёт внутри клиента. */
 export const isSpacePage = (pathname: string) =>
-  /^\/admin\/(leadgen|outreach)(\/|$)/.test(pathname) || TELEGRAM_PAGES.test(pathname);
+  /^\/admin\/(leadgen|outreach)(\/|$)/.test(pathname) || TELEGRAM_PAGES.test(pathname) || COMPANY_PAGES.test(pathname);
 
 /** Запросы API, которые сервер понимает «в пространстве клиента». */
 export const isSpaceApi = (path: string) =>
@@ -51,6 +58,11 @@ function storage(kind: "sessionStorage" | "localStorage"): Storage | null {
 /** Выбранный клиент этой вкладки (null — агентство). Клиента из ссылки запоминает. */
 export function currentSpace(): number | null {
   if (typeof window === "undefined") return null;
+  const company = companyFromPath(window.location.pathname);
+  if (company) {   // внутри компании клиент — из адреса; запоминаем, чтобы ссылки на общие экраны открывались у неё же
+    chooseSpace(company);
+    return company;
+  }
   const session = storage("sessionStorage"), local = storage("localStorage");
   let fromSession: string | null = null, fromLocal: string | null = null;
   try { fromSession = session?.getItem(KEY) ?? null; fromLocal = local?.getItem(KEY) ?? null; } catch { /* приватный режим */ }

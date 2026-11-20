@@ -7,7 +7,7 @@
 import { usePathname, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
-import { chooseSpace, currentSpace, isSpacePage, sectionRoot } from "@/lib/space";
+import { chooseSpace, companyFromPath, currentSpace, isSpacePage, sectionRoot } from "@/lib/space";
 import css from "./space-switcher.module.css";
 
 type Space = { id: number; name: string; is_home: boolean; companies: number; mailboxes: number; active_campaigns: number };
@@ -35,7 +35,7 @@ export default function SpaceSwitcher() {
       .catch(reason => setError(reason instanceof Error ? reason.message : "Не удалось загрузить клиентов"));
   }, [shown, items]);
 
-  if (!shown) return null;
+  if (!shown || companyFromPath(pathname)) return null;   // внутри компании клиент уже выбран адресом
   if (error) return <p className={`${css.bar} ${css.error}`} role="alert">Клиенты не загрузились: {error}</p>;
   if (!items) return null;
   if (items.length < 2) return <p className={css.bar}>

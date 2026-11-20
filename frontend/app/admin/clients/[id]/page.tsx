@@ -121,7 +121,7 @@ export default function ClientDetailsPage() {
 
   return <div className="page clientDetailPage">
     <header className="topbar"><div className="crumbs"><Link href="/admin/clients">Клиенты</Link><b>/</b><strong>{workspace.name}</strong></div><span className="userAvatar">ЕД</span></header>
-    <section className="pageHeader"><div><Link href="/admin/clients" className="backLink">← Все компании</Link><p className="eyebrow">Карточка компании</p><h1>{workspace.name}</h1><p className="subtitle">Команда, роли и выданные доступы собраны в одном месте.</p></div><button className="button primary" onClick={() => setModal("user")}>＋ Добавить сотрудника</button></section>
+    <section className="pageHeader"><div><Link href="/admin/clients" className="backLink">← Все компании</Link><p className="eyebrow">Карточка компании</p><h1>{workspace.name}</h1><p className="subtitle">Команда, роли и выданные доступы собраны в одном месте.</p></div><div className="pageHeaderActions"><Link className="button primary" href={`/admin/clients/${workspaceId}/outreach`}>Аутрич компании</Link><button className="button secondary" onClick={() => setModal("user")}>＋ Добавить сотрудника</button></div></section>
     {error && <p className="notice error">{error}</p>}{notice && <p className="notice success">{notice}</p>}
     <section className="roleSummary">{roleCounts.map(role => <article key={role.value}><span>{role.label}</span><strong>{role.count}</strong></article>)}</section>
     <section className="panel accessPanel"><div className="panelHead"><div><p className="eyebrow">Пользователи</p><h2>Роли и доступы</h2></div><span className="secureHint">Сотрудников можно добавлять без ограничения</span></div>
