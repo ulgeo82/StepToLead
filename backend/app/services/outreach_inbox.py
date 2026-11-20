@@ -462,7 +462,9 @@ def tg_message(m: CampaignMessage, dialog: CampaignDialog, people: dict[int, str
                   "name": people.get(m.author_id) if m.author_id else None}
     else:
         author = {"kind": "auto", "name": None}
-    status = {"received": "received", "sent": "sent"}.get(m.status, "failed")
+    status = {"received": "received", "sent": "sent", "unknown": "unknown", "sending": "unknown"}.get(m.status, "failed")
+    if status == "failed" and "не подтвержден" in (m.error or ""):   # старые записи «не подтверждена» — тоже «неизвестно»
+        status = "unknown"
     return {"id": f"tg:{m.id}", "direction": "in" if m.status == "received" else "out", "text": m.body,
             "at": _iso(m.created_at), "status": status, "author": author}
 
@@ -537,15 +539,58 @@ async def _contact_name(db: AsyncSession, conv: Conv) -> str:
     return ""
 
 
-async def _send_telegram(account: TelegramAccount, dialog: CampaignDialog, text: str) -> int:
+async def _send_telegram(account: TelegramAccount, dialog: CampaignDialog, text: str, stage: dict | None = None) -> int:
+    """stage["sent"] = True ставится прямо перед отправкой: ошибка ДО этого значит «точно не ушло»
+    (аккаунт занят, прокси не подключился), после — «неизвестно, ушло ли»."""
     from telethon.tl.types import InputPeerUser
     from app.services import telegram_jobs
 
     async def go(client):
+        if stage is not None:
+            stage["sent"] = True
         result = await asyncio.wait_for(client.send_message(InputPeerUser(dialog.peer_id, dialog.access_hash),
                                                             text, parse_mode=None), 25)
         return result.id
     return await telegram_jobs._with_account(account, go)
+
+
+async def verify_telegram(db: AsyncSession, conv: "Conv") -> dict:
+    """«Ушло ли?» — смотрим последние сообщения диалога в самом Telegram и сверяем текст неподтверждённых
+    ответов. Нашли — «отправлено», не нашли — «не отправлено» (можно отправить ещё раз)."""
+    from sqlalchemy.orm import selectinload
+    from telethon.tl.types import InputPeerUser
+    from app.services import telegram_jobs
+    dialog = conv.dialog
+    rows = list((await db.scalars(select(CampaignMessage).where(
+        CampaignMessage.dialog_id == dialog.id,
+        CampaignMessage.status.in_(("unknown", "sending")) | ((CampaignMessage.status == "failed")
+                                                              & CampaignMessage.error.like("%не подтвержден%")),
+        CampaignMessage.kind.in_(("manual", "first", "reply", "followup"))))).all())
+    if not rows:
+        return {"checked": 0, "sent": 0, "not_sent": 0}
+    account = await db.scalar(select(TelegramAccount).options(selectinload(TelegramAccount.proxy))
+                              .where(TelegramAccount.id == dialog.account_id))
+
+    async def go(client):
+        return await asyncio.wait_for(client.get_messages(InputPeerUser(dialog.peer_id, dialog.access_hash), limit=50), 25)
+    try:
+        history = await telegram_jobs._with_account(account, go)
+    except Exception as exc:  # noqa: BLE001
+        raise ReplyError(f"Не удалось проверить в Telegram: {type(exc).__name__}. Попробуйте через минуту", 502) from exc
+    outgoing = {}
+    for m in history:
+        if m.out and (m.message or "").strip():
+            outgoing.setdefault(m.message.strip(), m.id)
+    sent = 0
+    for row in rows:
+        found = outgoing.get((row.body or "").strip())
+        if found:
+            row.status, row.telegram_message_id, row.error = "sent", found, None
+            sent += 1
+        else:
+            row.status, row.error = "failed", "Проверено в Telegram: сообщения нет — можно отправить ещё раз"
+    await db.commit()
+    return {"checked": len(rows), "sent": sent, "not_sent": len(rows) - sent}
 
 
 async def reply(db: AsyncSession, conv: Conv, user: AdminUser, text: str, *, transport=None) -> dict:
@@ -586,12 +631,24 @@ async def reply(db: AsyncSession, conv: Conv, user: AdminUser, text: str, *, tra
         db.add(row)
         await db.flush()
         sender = telegram_send or _send_telegram
+        stage: dict = {}
         try:
-            row.telegram_message_id = await sender(account, dialog, body)
+            if sender is _send_telegram:
+                row.telegram_message_id = await sender(account, dialog, body, stage)
+            else:
+                stage["sent"] = True
+                row.telegram_message_id = await sender(account, dialog, body)
         except Exception as exc:  # noqa: BLE001
             from app.services import tg_errors
             kind, text = tg_errors.classify(exc)
             row.status = "failed"
+            if kind is None and not stage.get("sent"):
+                # До отправки дело не дошло — сообщение точно не ушло, можно сразу отправить ещё раз.
+                busy = "занят" in str(exc)
+                row.error = "Не отправлено: " + ("аккаунт был занят рассылкой" if busy else "не удалось подключиться через прокси")
+                await db.commit()
+                raise ReplyError(("Аккаунт сейчас занят рассылкой" if busy else "Не удалось подключиться к Telegram через прокси")
+                                 + " — сообщение НЕ отправлено, отправьте ещё раз через минуту", 409) from exc
             if type(exc).__name__ == "FloodWaitError":
                 kind, text = "limited", f"Telegram просит подождать {getattr(exc, 'seconds', 0)} сек."
             row.error = text if kind else f"{type(exc).__name__}: отправка не подтверждена"
@@ -603,8 +660,12 @@ async def reply(db: AsyncSession, conv: Conv, user: AdminUser, text: str, *, tra
                 raise ReplyError(text, 422) from exc
             if kind in ("limited", "dead"):
                 raise ReplyError(text, 409) from exc
-            raise ReplyError("Не удалось отправить в Telegram: связь оборвалась, ушло ли сообщение — неизвестно. "
-                             "Проверьте диалог в Telegram перед повтором", 502) from exc
+            if kind is None:
+                row.status = "unknown"
+                row.error = "Связь оборвалась во время отправки — нажмите «Проверить, ушло ли»"
+                await db.commit()
+            raise ReplyError("Связь оборвалась во время отправки, ушло ли сообщение — неизвестно. "
+                             "Нажмите «Проверить, ушло ли» у сообщения: портал посмотрит диалог в Telegram", 502) from exc
         row.status = "sent"
         # Человек взял переписку: ИИ-автоответ и дожим для диалога выключены, входящие раннер читает дальше.
         if dialog.state not in ("stopped",):

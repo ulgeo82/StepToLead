@@ -27,7 +27,7 @@ export type InboxMessage = {
   direction: "in" | "out";
   text: string;
   at: string;
-  status: "sent" | "delivered" | "failed" | "received";
+  status: "sent" | "delivered" | "failed" | "received" | "unknown";
   author: { kind: "lead" | "agency" | "client" | "auto" | "system"; name: string | null };
 };
 export type InboxConversation = Conversation & {

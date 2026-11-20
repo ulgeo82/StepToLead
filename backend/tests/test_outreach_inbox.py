@@ -239,6 +239,37 @@ class OutreachInboxTests(unittest.TestCase):
         self.assertEqual(self.client.post(f"{BASE}/inbox/tg:51/to-crm", headers=AS_CLIENT).json()["deal_id"], deal)
         self.assertEqual(self.client.get(f"{BASE}/inbox/tg:51", headers=AS_CLIENT).json()["crm"]["deal_id"], deal)
 
+    def test_failed_before_send_is_definite_and_uncertain_can_be_verified(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from app.services import telegram_jobs
+        outreach_inbox.telegram_send = None
+
+        async def busy(account, fn):
+            raise RuntimeError("Аккаунт сейчас занят другой задачей")
+        with patch.object(telegram_jobs, "_with_account", busy):
+            r = self.client.post(f"{BASE}/inbox/tg:51/reply", headers=AS_CLIENT, json={"text": "Цена 9 900"})
+        self.assertEqual(r.status_code, 409)
+        self.assertIn("НЕ отправлено", r.json()["detail"])
+
+        class Client:
+            async def send_message(self, *a, **k):
+                raise ConnectionError("reset")
+
+            async def get_messages(self, *a, **k):
+                return [SimpleNamespace(out=True, message="Цена 9 900", id=77), SimpleNamespace(out=False, message="?", id=7)]
+
+        async def connected(account, fn):
+            return await fn(Client())
+        with patch.object(telegram_jobs, "_with_account", connected):
+            r = self.client.post(f"{BASE}/inbox/tg:51/reply", headers=AS_CLIENT, json={"text": "Цена 9 900"})
+            self.assertEqual(r.status_code, 502)
+            full = self.client.get(f"{BASE}/inbox/tg:51", headers=AS_CLIENT).json()
+            self.assertIn("unknown", [m["status"] for m in full["messages"]])
+            r = self.client.post(f"{BASE}/inbox/tg:51/verify", headers=AS_CLIENT)
+        self.assertEqual((r.json()["sent"], r.json()["not_sent"]), (1, 0))
+        self.assertIn("sent", [m["status"] for m in r.json()["conversation"]["messages"] if m["author"]["kind"] == "agency"])
+
 
 if __name__ == "__main__":
     unittest.main()

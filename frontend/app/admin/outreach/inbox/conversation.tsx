@@ -17,7 +17,7 @@ import css from "./inbox.module.css";
 const authors = {
   lead: "Контакт", agency: "Оператор агентства", client: "Сотрудник клиента", auto: "Автоматически", system: "Система",
 };
-const delivery = { sent: "Отправлено", delivered: "Доставлено", failed: "Ошибка отправки", received: "Получено" };
+const delivery = { sent: "Отправлено", delivered: "Доставлено", failed: "Не отправлено", received: "Получено", unknown: "Неизвестно, ушло ли" };
 
 export function ConversationPanel({ path, workspace, onChanged, onNext }: {
   path: string;
@@ -199,7 +199,12 @@ export function ConversationPanel({ path, workspace, onChanged, onNext }: {
     <div className={styles.thread}>{full.messages.map(item =>
       <article key={item.id} className={item.direction === "in" ? styles.msgIn : styles.msgOut}>
         <header><b>{item.author.name || (item.author.kind === "lead" ? contact : authors[item.author.kind])}</b>
-          <small>{date(item.at)} · {delivery[item.status]}</small></header>
+          <small>{date(item.at)} · {delivery[item.status]}</small>
+          {item.status === "unknown" && full.channel === "telegram" && <button type="button" className={styles.secondary} disabled={busy}
+            onClick={() => void action(async () => {
+              const r = await inboxMutation<{ sent: number; not_sent: number }>(`${path}/verify`, fromClient);
+              setNotice(r.sent ? "Проверено в Telegram: сообщение ушло" : "Проверено в Telegram: сообщения нет — отправьте ещё раз");
+            })}>Проверить, ушло ли</button>}</header>
         {item.direction === "out" && full.channel === "email" && hasMarkup(item.text)
           ? <Formatted text={item.text}/> : <p>{item.text}</p>}
       </article>)}

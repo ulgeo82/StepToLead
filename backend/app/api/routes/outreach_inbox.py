@@ -126,6 +126,19 @@ async def inbox_update(key: str, payload: PatchIn, db: AsyncSession = Depends(ge
     return await svc.update(db, await _conv(db, key), label=payload.label, handled=payload.handled)
 
 
+@router.post("/inbox/{key}/verify")
+async def inbox_verify(key: str, db: AsyncSession = Depends(get_db), admin: AdminUser = Depends(require_admin)):
+    """Проверить в Telegram, ушли ли неподтверждённые сообщения переписки."""
+    conv = await _conv(db, key)
+    if conv.channel != "telegram":
+        raise HTTPException(422, "Проверка доступна для Telegram")
+    try:
+        result = await svc.verify_telegram(db, conv)
+    except svc.ReplyError as exc:
+        raise HTTPException(exc.status, str(exc)) from exc
+    return {**result, "conversation": await svc.detail(db, conv)}
+
+
 @router.post("/inbox/{key}/suggest")
 async def inbox_suggest(key: str, db: AsyncSession = Depends(get_db), admin: AdminUser = Depends(require_admin)):
     return {"text": await svc.suggest(db, await _conv(db, key))}
