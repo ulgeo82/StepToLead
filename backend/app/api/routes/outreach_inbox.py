@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -109,6 +109,42 @@ async def inbox_reply(key: str, payload: ReplyIn, db: AsyncSession = Depends(get
         transport = leadgen_routes.mail_transport_factory()
     try:
         return await svc.reply(db, conv, admin, payload.text.strip(), transport=transport)
+    except svc.ReplyError as exc:
+        await db.rollback()
+        raise HTTPException(exc.status, str(exc)) from exc
+
+
+MAX_FILE = 20 * 1024 * 1024
+
+
+async def read_upload(file: UploadFile | None) -> tuple[str, bytes] | None:
+    """Вложение к ответу в Telegram: имя без пути, не больше 20 МБ."""
+    if file is None or not file.filename:
+        return None
+    data = await file.read(MAX_FILE + 1)
+    if len(data) > MAX_FILE:
+        raise HTTPException(413, "Файл больше 20 МБ")
+    name = file.filename.replace("\\", "/").rsplit("/", 1)[-1][:120] or "file"
+    return name, data
+
+
+@router.post("/inbox/{key}/reply-rich")
+async def inbox_reply_rich(key: str, text: str = Form(default="", max_length=10000), reply_to: str | None = Form(default=None),
+                           file: UploadFile | None = File(default=None), db: AsyncSession = Depends(get_db),
+                           admin: AdminUser = Depends(require_admin)):
+    """Ответ с разметкой (**ж**, __к__, ++ч++, ~~з~~, ||спойлер||, `код`, ```блок```, > цитата, [текст](url)) и файлом."""
+    conv = await _conv(db, key)
+    attached = await read_upload(file)
+    if conv.channel != "telegram" and attached:
+        raise HTTPException(422, "Файлы пока можно отправлять только в Telegram")
+    if not text.strip() and not attached:
+        raise HTTPException(422, "Напишите текст или прикрепите файл")
+    transport = None
+    if conv.channel == "email":
+        from app.domains.leadgen import routes as leadgen_routes
+        transport = leadgen_routes.mail_transport_factory()
+    try:
+        return await svc.reply(db, conv, admin, text.strip(), transport=transport, file=attached, reply_to=reply_to)
     except svc.ReplyError as exc:
         await db.rollback()
         raise HTTPException(exc.status, str(exc)) from exc

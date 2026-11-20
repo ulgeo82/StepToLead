@@ -467,14 +467,17 @@ async def thread_quote(db: AsyncSession, touch: LgTouch, company: LgCompany) -> 
 
 
 async def send_reply(db: AsyncSession, transport, touch: LgTouch, company: LgCompany, body: str, *,
-                     user_id: int | None = None, now: datetime | None = None, cc: str | None = None) -> LgTouch:
+                     user_id: int | None = None, now: datetime | None = None, cc: str | None = None,
+                     allow_opted_out: bool = False) -> LgTouch:
     """Ответ лиду из «Входящих». cc — передать переписку на другой адрес (например, основную рабочую почту):
     лид видит его в копии, дальше общение идёт там; цепочка по компании уже остановлена ответом лида."""
     from email.utils import make_msgid
     from app.domains.leadgen.sequences import OutgoingMail, RecipientRefused
     now = now or service.utcnow()
     blocker = await reply_blocker(db, touch, company)
-    if blocker:
+    # Единые входящие: метка/стоп-лист — сортировка, человек может ответить вручную (мешает только отсутствие ящика/адреса).
+    if blocker and not (allow_opted_out and touch.mailbox_id and touch.address
+                        and await db.get(LgMailbox, touch.mailbox_id) is not None):
         raise ReplyError(blocker)
     mailbox = await db.get(LgMailbox, touch.mailbox_id)
     subject = touch.subject or ""

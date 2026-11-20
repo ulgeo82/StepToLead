@@ -6,11 +6,13 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import type { Conversation } from "./types";
+import { RichComposer } from "@/components/rich-composer";
 
 const base = "/portal/outreach";
 
 export function ReplyBox({ conv, onSent }: { conv: Conversation; onSent: (message: Conversation["messages"][number]) => void }) {
   const [text, setText] = useState("");
+  const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const held = useRef(false);
@@ -31,25 +33,23 @@ export function ReplyBox({ conv, onSent }: { conv: Conversation; onSent: (messag
   if (otherWriting) return <p role="status">Сейчас отвечает {otherWriting}</p>;
 
   async function send() {
-    if (!text.trim() || busy) return;
+    if ((!text.trim() && !file) || busy) return;
     setBusy(true); setError("");
     try {
-      const message = await api<Conversation["messages"][number]>(`${path}/reply`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: text.trim() }),
-      });
-      held.current = false; setText(""); onSent(message);
+      const form = new FormData();
+      form.set("text", text.trim());
+      if (file) form.set("file", file);
+      const message = await api<Conversation["messages"][number]>(`${path}/reply-rich`, { method: "POST", body: form });
+      held.current = false; setText(""); setFile(null); onSent(message);
     } catch (e) { setError(e instanceof Error ? e.message : "Не удалось отправить"); }
     finally { setBusy(false); }
   }
 
+  const tg = conv.channel === "telegram";
   return <div>
-    <textarea rows={4} maxLength={4096} value={text} placeholder={`Ответ с «${conv.sender ?? "того же отправителя"}»`}
-      onChange={e => setText(e.target.value)}
-      onKeyDown={e => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") void send(); }}
-      style={{ width: "100%", boxSizing: "border-box" }}/>
+    <RichComposer value={text} onChange={setText} onSubmit={() => void send()} maxLength={4096}
+      placeholder={`Ответ с «${conv.sender ?? "того же отправителя"}»`} formatting={tg}
+      file={file} onFile={tg ? setFile : undefined} busy={busy} canSubmit={!!text.trim() || !!file} submitLabel="Отправить"/>
     {error && <p className="resultError" role="alert">{error}</p>}
-    <button className="button primary" disabled={busy || !text.trim()} onClick={() => void send()}>
-      {busy ? "Отправляем…" : "Отправить"}
-    </button>
   </div>;
 }

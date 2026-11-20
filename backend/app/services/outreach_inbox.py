@@ -36,6 +36,10 @@ complete = None                 # подмена ai.complete в тестах
 telegram_send = None            # подмена отправки в Telegram в тестах: async (account, dialog, text) -> message_id
 
 
+def u16len(text: str) -> int:
+    return len(text.encode("utf-16-le")) // 2
+
+
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -469,9 +473,18 @@ def tg_message(m: CampaignMessage, dialog: CampaignDialog, people: dict[int, str
             "at": _iso(m.created_at), "status": status, "author": author}
 
 
+async def email_blocker(db: AsyncSession, touch, company) -> str | None:
+    """Как reply_blocker лидогена, но без запрета по метке/стоп-листу — ручной ответ разрешён всегда."""
+    if not touch.mailbox_id or await db.get(LgMailbox, touch.mailbox_id) is None:
+        return "Ящик, на который пришёл ответ, удалён"
+    if not touch.address:
+        return "Не знаем адрес отправителя"
+    return None
+
+
 async def tg_blocker(db: AsyncSession, dialog: CampaignDialog) -> str | None:
-    if dialog.state == "stopped" or await db.get(GlobalBlock, dialog.peer_id):
-        return "Получатель просил не писать — ответ отправить нельзя"
+    # Метки («не интересно», «отписка») и стоп-лист — это сортировка и запрет АВТОМАТИКЕ (ИИ, рассылке).
+    # Человек ответить может всегда: мешает только то, что физически не даст отправить.
     account = await db.get(TelegramAccount, dialog.account_id)
     if account is None or not account.session_encrypted:
         return "Аккаунт, с которого шла переписка, отключён"
@@ -493,7 +506,7 @@ async def detail(db: AsyncSession, conv: Conv, *, client_view: bool = False) -> 
     out = await conversation(db, conv, client_view=client_view)
     out["messages"] = await messages(db, conv, people, client_view=client_view)
     if client_view:
-        blocker = (await email_inbox.reply_blocker(db, conv.touch, conv.company) if conv.channel == "email"
+        blocker = (await email_blocker(db, conv.touch, conv.company) if conv.channel == "email"
                    else await tg_blocker(db, conv.dialog))
         out["can_reply"], out["reply_blocker"] = blocker is None, blocker
         st = await state(db, conv.thread, conv.ws, create=False)
@@ -501,7 +514,7 @@ async def detail(db: AsyncSession, conv: Conv, *, client_view: bool = False) -> 
         return out
     if conv.channel == "email":
         out["subject"] = conv.touch.subject
-        blocker = await email_inbox.reply_blocker(db, conv.touch, conv.company)
+        blocker = await email_blocker(db, conv.touch, conv.company)
         deal_id = conv.company.crm_deal_id
     else:
         blocker = await tg_blocker(db, conv.dialog)
@@ -539,17 +552,37 @@ async def _contact_name(db: AsyncSession, conv: Conv) -> str:
     return ""
 
 
-async def _send_telegram(account: TelegramAccount, dialog: CampaignDialog, text: str, stage: dict | None = None) -> int:
+async def _send_telegram(account: TelegramAccount, dialog: CampaignDialog, text: str, stage: dict | None = None,
+                         *, file: tuple[str, bytes] | None = None, reply_to: int | None = None) -> int:
     """stage["sent"] = True ставится прямо перед отправкой: ошибка ДО этого значит «точно не ушло»
     (аккаунт занят, прокси не подключился), после — «неизвестно, ушло ли»."""
     from telethon.tl.types import InputPeerUser
     from app.services import telegram_jobs
 
+    from app.services import tg_format
+    plain, entities = tg_format.parse(text)
+    peer = InputPeerUser(dialog.peer_id, dialog.access_hash)
+
     async def go(client):
         if stage is not None:
             stage["sent"] = True
-        result = await asyncio.wait_for(client.send_message(InputPeerUser(dialog.peer_id, dialog.access_hash),
-                                                            text, parse_mode=None), 25)
+        if file:
+            import io
+            stream = io.BytesIO(file[1])
+            stream.name = file[0]
+            # Подпись к файлу — до 1024 символов; длинный текст уходит отдельным сообщением после файла.
+            caption = plain if u16len(plain) <= 1024 else ""
+            sent = await asyncio.wait_for(client.send_file(peer, stream, caption=caption or None,
+                                                           formatting_entities=entities if caption else None,
+                                                           reply_to=reply_to, force_document=not file[0].lower().endswith(
+                                                               (".jpg", ".jpeg", ".png", ".webp"))), 120)
+            if caption or not plain.strip():
+                return sent.id
+            reply_to_next = None
+        else:
+            reply_to_next = reply_to
+        result = await asyncio.wait_for(client.send_message(peer, plain, formatting_entities=entities or None,
+                                                            reply_to=reply_to_next, link_preview=False), 25)
         return result.id
     return await telegram_jobs._with_account(account, go)
 
@@ -583,7 +616,7 @@ async def verify_telegram(db: AsyncSession, conv: "Conv") -> dict:
             outgoing.setdefault(m.message.strip(), m.id)
     sent = 0
     for row in rows:
-        found = outgoing.get((row.body or "").strip())
+        found = outgoing.get((row.body or "").split("\n📎 ")[0].strip())
         if found:
             row.status, row.telegram_message_id, row.error = "sent", found, None
             sent += 1
@@ -593,7 +626,8 @@ async def verify_telegram(db: AsyncSession, conv: "Conv") -> dict:
     return {"checked": len(rows), "sent": sent, "not_sent": len(rows) - sent}
 
 
-async def reply(db: AsyncSession, conv: Conv, user: AdminUser, text: str, *, transport=None) -> dict:
+async def reply(db: AsyncSession, conv: Conv, user: AdminUser, text: str, *, transport=None,
+                file: tuple[str, bytes] | None = None, reply_to: str | None = None) -> dict:
     now = utcnow()
     st = await state(db, conv.thread, conv.ws)
     if locked_by_other(st, user.id, now):
@@ -601,13 +635,15 @@ async def reply(db: AsyncSession, conv: Conv, user: AdminUser, text: str, *, tra
         raise ReplyError(f"Сейчас отвечает {people.get(st.locked_by_id) or 'другой оператор'}", 409)
     if conv.channel == "email":
         box = await db.get(LgMailbox, conv.touch.mailbox_id) if conv.touch.mailbox_id else None
-        blocker = await email_inbox.reply_blocker(db, conv.touch, conv.company)
+        blocker = await email_blocker(db, conv.touch, conv.company)
         if blocker:
             raise ReplyError(blocker, 422)
         body = render(text, conv, box.sender_name if box else None, await _contact_name(db, conv))
+        from app.services import tg_format
+        body = tg_format.parse(body)[0]  # в письме разметку Telegram не показываем — уходит чистый текст
         try:
             out = await email_inbox.send_reply(db, transport, conv.touch, conv.company, body,
-                                               user_id=user.id if user.id > 0 else None)
+                                               user_id=user.id if user.id > 0 else None, allow_opted_out=True)
             if user.id < 0:
                 out.portal_user_id = -user.id
         except email_inbox.ReplyError as exc:
@@ -625,8 +661,16 @@ async def reply(db: AsyncSession, conv: Conv, user: AdminUser, text: str, *, tra
         account = await db.scalar(select(TelegramAccount).options(selectinload(TelegramAccount.proxy))
                                   .where(TelegramAccount.id == dialog.account_id))
         body = render(text, conv, " ".join(filter(None, [account.first_name, account.last_name])) or None)
+        reply_to_id = None
+        if reply_to and reply_to.startswith("tg:") and reply_to[3:].isdigit():
+            quoted = await db.get(CampaignMessage, int(reply_to[3:]))
+            if quoted is not None and quoted.dialog_id == dialog.id:
+                reply_to_id = quoted.telegram_message_id
+        from app.services import tg_format
+        plain, _ = tg_format.parse(body)
+        shown = plain + (f"\n📎 {file[0]}" if file else "")
         row = CampaignMessage(campaign_id=dialog.campaign_id, dialog_id=dialog.id, account_id=dialog.account_id,
-                              kind="manual", body=body, dedupe_key=f"manual:{user.id}:{int(now.timestamp() * 1000)}",
+                              kind="manual", body=shown.strip(), dedupe_key=f"manual:{user.id}:{int(now.timestamp() * 1000)}",
                               status="sending", author_id=user.id)
         db.add(row)
         await db.flush()
@@ -634,7 +678,7 @@ async def reply(db: AsyncSession, conv: Conv, user: AdminUser, text: str, *, tra
         stage: dict = {}
         try:
             if sender is _send_telegram:
-                row.telegram_message_id = await sender(account, dialog, body, stage)
+                row.telegram_message_id = await sender(account, dialog, body, stage, file=file, reply_to=reply_to_id)
             else:
                 stage["sent"] = True
                 row.telegram_message_id = await sender(account, dialog, body)
@@ -668,8 +712,8 @@ async def reply(db: AsyncSession, conv: Conv, user: AdminUser, text: str, *, tra
                              "Нажмите «Проверить, ушло ли» у сообщения: портал посмотрит диалог в Telegram", 502) from exc
         row.status = "sent"
         # Человек взял переписку: ИИ-автоответ и дожим для диалога выключены, входящие раннер читает дальше.
-        if dialog.state not in ("stopped",):
-            dialog.state = "manual"
+        # Метка «отписка/не интересно» остаётся папкой; диалог теперь ведёт человек.
+        dialog.state = "manual"
         dialog.last_reply_id = max(dialog.last_reply_id or 0, dialog.last_incoming_id or 0)
         last_in = await db.scalar(select(func.max(CampaignMessage.id)).where(
             CampaignMessage.dialog_id == dialog.id, CampaignMessage.status == "received")) or 0

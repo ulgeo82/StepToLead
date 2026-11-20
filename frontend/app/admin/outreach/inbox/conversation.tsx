@@ -11,6 +11,8 @@ import type {
 } from "./inbox-types";
 import { activeLock, channelNames, inboxLabels, labelKeys, renderReplyTemplate } from "./inbox-utils";
 import { useReplyLock } from "./reply-lock";
+import { RichComposer } from "@/components/rich-composer";
+import { inboxRequest as rawRequest } from "./inbox-api";
 import { useVisiblePoll } from "./visible-poll";
 import css from "./inbox.module.css";
 
@@ -40,6 +42,7 @@ export function ConversationPanel({ path, workspace, onChanged, onNext }: {
   const [loadError, setLoadError] = useState("");
   const [notice, setNotice] = useState("");
   const replyRef = useRef<HTMLTextAreaElement>(null);
+  const [file, setFile] = useState<File | null>(null);
   const busyRef = useRef(false);
   const fromClient = full?.client.id ?? workspace;
   const lock = useReplyLock(path, fromClient, !!(editor && draft.trim() && full?.can_reply));
@@ -104,11 +107,17 @@ export function ConversationPanel({ path, workspace, onChanged, onNext }: {
     });
   }
   function send() {
-    if (!full?.can_reply || other || !editor || !draft.trim()) return;
+    if (!full?.can_reply || other || !editor || (!draft.trim() && !file)) return;
     void action(async () => {
-      const sent = await lock.withLock(() => inboxMutation<InboxMessage>(`${path}/reply`, fromClient, "POST", {
-        text: draft.trim(), ...(templateId === undefined ? {} : { template_id: templateId }),
-      }));
+      const sent = await lock.withLock(() => {
+        if (!file) return inboxMutation<InboxMessage>(`${path}/reply`, fromClient, "POST", {
+          text: draft.trim(), ...(templateId === undefined ? {} : { template_id: templateId }),
+        });
+        const form = new FormData();
+        form.set("text", draft.trim()); form.set("file", file);
+        return rawRequest<InboxMessage>(`${path}/reply-rich`, fromClient, { method: "POST", body: form });
+      });
+      setFile(null);
       setFull(current => current && !current.messages.some(item => item.id === sent.id)
         ? { ...current, messages: [...current.messages, sent] } : current);
       setDraft(""); setTemplateId(undefined); setNotice("Ответ отправлен");
@@ -236,14 +245,11 @@ export function ConversationPanel({ path, workspace, onChanged, onNext }: {
         <button type="button" className={styles.secondary} disabled={busy}
           onClick={() => setEditor(false)}>Закрыть редактор</button>
       </div>
-      <textarea ref={replyRef} aria-label="Ответ" rows={5} value={draft} readOnly={!canCompose}
-        placeholder={`Ответ с «${full.sender.label}»`}
-        onChange={e => setDraft(e.target.value)} onKeyDown={e => {
-          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); send(); }
-        }}/>
-      <button type="submit" className={styles.primary} disabled={!canCompose || !draft.trim()}>
-        Отправить · ⌘/Ctrl+Enter
-      </button>
+      <RichComposer inputRef={replyRef} value={draft} onChange={setDraft} onSubmit={send} readOnly={!canCompose}
+        placeholder={`Ответ с «${full.sender.label}»`} formatting={full.channel === "telegram"}
+        maxLength={full.channel === "telegram" ? 4096 : undefined}
+        file={file} onFile={full.channel === "telegram" ? setFile : undefined} busy={busy}
+        canSubmit={canCompose && (!!draft.trim() || !!file)} submitLabel="Отправить · ⌘/Ctrl+Enter"/>
     </form> : <button type="button" className={styles.primary} onClick={() => {
       setEditor(true); setFocusRequested(true);
     }}>Открыть редактор</button>}

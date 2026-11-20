@@ -258,7 +258,10 @@ async def process_dialog(db, client, runtime, settings, dialog):
         dialog.state = "stopped" if negative else "handoff"
         await db.commit()
         return True
-    if dialog.state not in ("active", "manual") or blacklisted(settings, dialog.username) or await db.get(GlobalBlock, dialog.peer_id):
+    if dialog.state not in ("active", "manual"):
+        return False
+    # Стоп-лист запрещает писать АВТОМАТИЧЕСКИ; в диалоге, который ведёт человек, ответы лида читаем всегда.
+    if dialog.state == "active" and (blacklisted(settings, dialog.username) or await db.get(GlobalBlock, dialog.peer_id)):
         return False
     manual = dialog.state == "manual"
     peer = InputPeerUser(dialog.peer_id, dialog.access_hash)

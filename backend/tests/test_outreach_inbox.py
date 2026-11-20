@@ -214,8 +214,10 @@ class OutreachInboxTests(unittest.TestCase):
         async def check(db):
             return (await db.get(CampaignDialog, 51)).state, await db.get(GlobalBlock, 9001) is not None
         self.assertEqual(self.run_db(check), ("stopped", True))
+        # Метка — папка: рассылка остановлена, но человек ответить может; диалог переходит в ручной.
         self.assertEqual(self.client.post(f"{BASE}/inbox/tg:51/reply", headers=AS_CLIENT,
-                                          json={"text": "Ещё раз"}).status_code, 422)
+                                          json={"text": "Ещё раз"}).status_code, 200)
+        self.assertEqual(self.run_db(check), ("manual", True))
         r = self.client.patch(f"{BASE}/inbox/email:301", headers=ORIGIN, json={"label": "interested"})
         self.assertEqual((r.status_code, r.json()["label"]), (200, "interested"))
         self.assertEqual(self.client.patch(f"{BASE}/inbox/tg:52", headers=AS_CLIENT,
@@ -269,6 +271,34 @@ class OutreachInboxTests(unittest.TestCase):
             r = self.client.post(f"{BASE}/inbox/tg:51/verify", headers=AS_CLIENT)
         self.assertEqual((r.json()["sent"], r.json()["not_sent"]), (1, 0))
         self.assertIn("sent", [m["status"] for m in r.json()["conversation"]["messages"] if m["author"]["kind"] == "agency"])
+
+    def test_rich_reply_formats_and_attaches_file(self):
+        from unittest.mock import patch
+        from app.services import telegram_jobs
+        outreach_inbox.telegram_send = None
+        calls = []
+
+        class Client:
+            async def send_file(self, peer, stream, **k):
+                calls.append(("file", stream.name, stream.read(), k))
+                return type("M", (), {"id": 88})()
+
+            async def send_message(self, peer, text, **k):
+                calls.append(("text", text, k))
+                return type("M", (), {"id": 89})()
+
+        async def connected(account, fn):
+            return await fn(Client())
+        with patch.object(telegram_jobs, "_with_account", connected):
+            r = self.client.post(f"{BASE}/inbox/tg:51/reply-rich", headers=AS_CLIENT,
+                                 data={"text": "**Цена** 9 900"}, files={"file": ("../прайс.pdf", b"%PDF", "application/pdf")})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["text"], "Цена 9 900\n📎 прайс.pdf")
+        kind, name, data, k = calls[0]
+        self.assertEqual((kind, name, data, k["caption"]), ("file", "прайс.pdf", b"%PDF", "Цена 9 900"))
+        self.assertEqual(type(k["formatting_entities"][0]).__name__, "MessageEntityBold")
+        r = self.client.post(f"{BASE}/inbox/tg:51/reply-rich", headers=AS_CLIENT, data={"text": " "})
+        self.assertEqual(r.status_code, 422)
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 """Client-facing, read-only outreach. The session is the only workspace selector."""
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -98,6 +98,31 @@ async def reply(key: str, payload: ReplyIn, ws: int = Depends(workspace), user: 
         transport = leadgen_routes.mail_transport_factory()
     try:
         message = await inbox.reply(db, conv, inbox.portal_actor(user), payload.text.strip(), transport=transport)
+    except inbox.ReplyError as exc:
+        await db.rollback()
+        raise HTTPException(exc.status, str(exc)) from exc
+    return {"id": message["id"], "text": message["text"], "at": message["at"], "direction": "out",
+            "author": user.display_name or user.username}
+
+
+@router.post("/inbox/{key}/reply-rich")
+async def reply_rich(key: str, text: str = Form(default="", max_length=4096), reply_to: str | None = Form(default=None),
+                     file: UploadFile | None = File(default=None), ws: int = Depends(workspace),
+                     user: PortalUser = Depends(replier), db: AsyncSession = Depends(get_db)):
+    from app.api.routes.outreach_inbox import read_upload
+    conv = await inbox.find(db, key, [ws])
+    attached = await read_upload(file)
+    if conv.channel != "telegram" and attached:
+        raise HTTPException(422, "Файлы пока можно отправлять только в Telegram")
+    if not text.strip() and not attached:
+        raise HTTPException(422, "Напишите текст или прикрепите файл")
+    transport = None
+    if conv.channel == "email":
+        from app.domains.leadgen import routes as leadgen_routes
+        transport = leadgen_routes.mail_transport_factory()
+    try:
+        message = await inbox.reply(db, conv, inbox.portal_actor(user), text.strip(), transport=transport,
+                                    file=attached, reply_to=reply_to)
     except inbox.ReplyError as exc:
         await db.rollback()
         raise HTTPException(exc.status, str(exc)) from exc
